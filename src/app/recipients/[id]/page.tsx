@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter, useParams } from "next/navigation";
-import { getRecipients, saveRecipient, deleteRecipient, getCardsForRecipient, linkRecipients, unlinkRecipients } from "@/lib/store";
+import { getRecipients, saveRecipient, deleteRecipient, getCards, getCardsForRecipient, saveCard, getCardExpandedState, setCardExpanded, linkRecipients, unlinkRecipients } from "@/lib/store";
 import ProfileEditor from "@/components/ProfileEditor";
 import type { Recipient, ImportantDate, Card, PersonProfile } from "@/types/database";
 
@@ -29,14 +29,27 @@ export default function RecipientDetailPage() {
   const [linkTarget, setLinkTarget] = useState("");
   const [linkLabel, setLinkLabel] = useState("spouse");
   const [linkReverseLabel, setLinkReverseLabel] = useState("spouse");
+  const [expandedCards, setExpandedCards] = useState<Record<string, boolean>>({});
+  const [reuseCardId, setReuseCardId] = useState<string | null>(null);
+  const [reuseTargetRecipientId, setReuseTargetRecipientId] = useState("");
   const [mounted, setMounted] = useState(false);
+
+  const refreshCards = () => setCards(getCardsForRecipient(id));
+
+  const isCardExpanded = (cardId: string) =>
+    expandedCards[cardId] !== undefined ? expandedCards[cardId] : true;
+
+  const toggleCardExpanded = (cardId: string) => {
+    const next = !isCardExpanded(cardId);
+    setCardExpanded(id, cardId, next);
+    setExpandedCards((prev) => ({ ...prev, [cardId]: next }));
+  };
 
   useEffect(() => {
     setMounted(true);
     const all = getRecipients();
     setAllRecipients(all);
     const found = all.find((r) => r.id === id);
-    setCards(getCardsForRecipient(id));
     if (found) {
       setRecipient(found);
       setProfileData({
@@ -67,6 +80,11 @@ export default function RecipientDetailPage() {
         milestones: (found.milestones || []).join(", "),
       });
     }
+  }, [id]);
+
+  useEffect(() => {
+    setCards(getCardsForRecipient(id));
+    setExpandedCards(getCardExpandedState(id));
   }, [id]);
 
   if (!mounted) return null;
@@ -478,7 +496,7 @@ export default function RecipientDetailPage() {
 
         {/* Card History */}
         <div className="mt-8">
-          <div className="flex items-center justify-between mb-4">
+          <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
             <h2 className="text-lg font-semibold text-gray-900">Card history</h2>
             <button
               onClick={() => router.push(`/cards/create/${recipient.id}`)}
@@ -502,40 +520,150 @@ export default function RecipientDetailPage() {
               </button>
             </div>
           ) : (
-            <div className="space-y-3">
+            <div className="space-y-2">
               {cards
                 .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
-                .map((card) => (
-                <div
-                  key={card.id}
-                  className="bg-white border border-gray-200 rounded-xl p-5"
-                >
-                  <div className="flex items-start justify-between mb-3">
-                    <div>
-                      <span className="text-sm font-medium text-gray-900">
-                        {card.occasion}
-                      </span>
-                      {card.tone_used && (
-                        <>
-                          <span className="text-gray-300 mx-2">&middot;</span>
-                          <span className="text-xs text-gray-500">
-                            {card.tone_used}
-                          </span>
-                        </>
+                .map((card) => {
+                  const expanded = isCardExpanded(card.id);
+                  const msgParts = card.message_text.split("\n\n");
+                  const preview = msgParts[0] + (msgParts.length > 1 ? "…" : "");
+                  return (
+                    <div
+                      key={card.id}
+                      className="bg-white border border-gray-200 rounded-xl overflow-hidden"
+                    >
+                      <button
+                        type="button"
+                        onClick={() => toggleCardExpanded(card.id)}
+                        className="w-full flex items-center justify-between gap-2 p-4 text-left hover:bg-gray-50 transition-colors"
+                      >
+                        <span className="text-sm font-medium text-gray-900">
+                          {card.occasion}
+                          {card.tone_used && (
+                            <span className="text-gray-400 font-normal ml-1">· {card.tone_used}</span>
+                          )}
+                        </span>
+                        <span className="text-xs text-gray-400">
+                          {new Date(card.created_at).toLocaleDateString()}
+                        </span>
+                        <span className="text-gray-400 text-sm flex-shrink-0">
+                          {expanded ? "▲ Show less" : "▼ Show more"}
+                        </span>
+                      </button>
+                      {expanded && (
+                        <div className="flex flex-col sm:flex-row sm:items-stretch border-t border-gray-100">
+                          {card.image_url && (
+                            <div className="sm:w-36 flex-shrink-0 bg-gray-100">
+                              <img
+                                src={card.image_url}
+                                alt=""
+                                className="w-full h-32 sm:h-full object-cover"
+                              />
+                            </div>
+                          )}
+                          <div className="flex-1 p-4">
+                            <p className="text-sm text-gray-700 line-clamp-2 mb-3">
+                              {preview}
+                            </p>
+                            <div className="flex flex-wrap gap-2">
+                              <button
+                                onClick={(e) => { e.stopPropagation(); router.push(`/cards/view/${card.id}`); }}
+                                className="text-xs font-medium text-indigo-600 hover:text-indigo-800"
+                              >
+                                View
+                              </button>
+                              <button
+                                onClick={(e) => { e.stopPropagation(); router.push(`/cards/print/${card.id}`); }}
+                                className="text-xs font-medium text-indigo-600 hover:text-indigo-800"
+                              >
+                                Reprint
+                              </button>
+                              <button
+                                onClick={(e) => { e.stopPropagation(); router.push(`/cards/edit/${card.id}`); }}
+                                className="text-xs font-medium text-indigo-600 hover:text-indigo-800"
+                              >
+                                Edit
+                              </button>
+                              <button
+                                onClick={(e) => { e.stopPropagation(); setReuseCardId(card.id); setReuseTargetRecipientId(""); }}
+                                className="text-xs font-medium text-indigo-600 hover:text-indigo-800"
+                              >
+                                Reuse for someone else
+                              </button>
+                            </div>
+                          </div>
+                        </div>
                       )}
                     </div>
-                    <span className="text-xs text-gray-400">
-                      {new Date(card.created_at).toLocaleDateString()}
-                    </span>
-                  </div>
-                  <p className="text-sm text-gray-700 whitespace-pre-wrap leading-relaxed">
-                    {card.message_text}
-                  </p>
-                </div>
-              ))}
+                  );
+                })}
             </div>
           )}
         </div>
+
+        {/* Reuse card modal */}
+        {reuseCardId && (
+          <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-xl shadow-xl max-w-md w-full p-6">
+              <h3 className="text-lg font-semibold text-gray-900 mb-2">Reuse this card</h3>
+              <p className="text-sm text-gray-500 mb-4">
+                Save a copy for another recipient. Same design and message.
+              </p>
+              <select
+                value={reuseTargetRecipientId}
+                onChange={(e) => setReuseTargetRecipientId(e.target.value)}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mb-4"
+              >
+                <option value="">Choose recipient…</option>
+                {allRecipients
+                  .filter((r) => r.id !== recipient.id)
+                  .map((r) => (
+                    <option key={r.id} value={r.id}>{r.name} ({r.relationship_type})</option>
+                  ))}
+              </select>
+              <div className="flex gap-2 justify-end">
+                <button
+                  onClick={() => { setReuseCardId(null); setReuseTargetRecipientId(""); }}
+                  className="px-4 py-2 text-sm text-gray-600 hover:text-gray-800"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => {
+                    const card = getCards().find((c) => c.id === reuseCardId);
+                    if (card && reuseTargetRecipientId) {
+                      saveCard({
+                        user_id: card.user_id,
+                        recipient_id: reuseTargetRecipientId,
+                        recipient_ids: [reuseTargetRecipientId],
+                        occasion: card.occasion,
+                        message_text: card.message_text,
+                        image_url: card.image_url,
+                        image_prompt: card.image_prompt,
+                        inside_image_url: card.inside_image_url,
+                        inside_image_prompt: card.inside_image_prompt,
+                        front_text: card.front_text,
+                        front_text_position: card.front_text_position,
+                        tone_used: card.tone_used,
+                        style: card.style,
+                        delivery_method: card.delivery_method,
+                        sent: false,
+                        co_signed_with: card.co_signed_with,
+                      });
+                      setReuseCardId(null);
+                      setReuseTargetRecipientId("");
+                      refreshCards();
+                    }
+                  }}
+                  disabled={!reuseTargetRecipientId}
+                  className="bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-indigo-700 disabled:opacity-50"
+                >
+                  Save copy
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </main>
 
     </div>

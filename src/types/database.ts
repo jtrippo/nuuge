@@ -121,12 +121,23 @@ export interface Card {
   message_text: string;
   image_url: string | null;
   image_prompt: string | null;
+  /** Optional small inside illustration that carries the front theme (e.g. shooting star if front has stars) */
+  inside_image_url?: string | null;
+  inside_image_prompt?: string | null;
+  /** Optional text on the card front (e.g. "Happy Birthday!") — overlay, not in image */
+  front_text?: string | null;
+  /** e.g. "bottom-right", "center", "top-left" */
+  front_text_position?: string | null;
   style: string | null;
   tone_used: string | null;
   delivery_method: "digital" | "print_at_home" | "mail";
   sent: boolean;
   feedback_rating: number | null;
   co_signed_with: string | null;
+  /** When true, card is hidden from default history list (can show via "Show hidden") */
+  hidden?: boolean;
+  /** Print size: 4x6 or 5x7 inches (folded card). Used for image aspect ratio and print layout. */
+  card_size?: "4x6" | "5x7";
 }
 
 export type ConversationMessage = {

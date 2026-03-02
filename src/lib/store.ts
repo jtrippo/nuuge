@@ -9,6 +9,7 @@ const KEYS = {
   RECIPIENTS: "nuuge_recipients",
   ONBOARDING_HISTORY: "nuuge_onboarding_history",
   CARDS: "nuuge_cards",
+  CARD_EXPANDED_PREFIX: "nuuge_card_expanded_",
 } as const;
 
 function isBrowser() {
@@ -74,18 +75,60 @@ export function getCardsForRecipient(recipientId: string): Card[] {
   );
 }
 
+/** Per-recipient: which cards are expanded in the profile. Persisted so it survives navigation. */
+export function getCardExpandedState(recipientId: string): Record<string, boolean> {
+  if (!isBrowser()) return {};
+  const raw = localStorage.getItem(KEYS.CARD_EXPANDED_PREFIX + recipientId);
+  return raw ? JSON.parse(raw) : {};
+}
+
+export function setCardExpanded(
+  recipientId: string,
+  cardId: string,
+  expanded: boolean
+): void {
+  if (!isBrowser()) return;
+  const state = getCardExpandedState(recipientId);
+  state[cardId] = expanded;
+  localStorage.setItem(
+    KEYS.CARD_EXPANDED_PREFIX + recipientId,
+    JSON.stringify(state)
+  );
+}
+
 export function saveCard(card: Partial<Card>) {
   if (!isBrowser()) return;
   const existing = getCards();
+  const id = card.id || crypto.randomUUID();
   const full = {
     ...card,
-    id: card.id || crypto.randomUUID(),
+    id,
     recipient_ids: card.recipient_ids || [card.recipient_id || ""],
     created_at: card.created_at || new Date().toISOString(),
   };
-  existing.push(full as Card);
+  const idx = existing.findIndex((c) => c.id === id);
+  if (idx >= 0) {
+    existing[idx] = { ...existing[idx], ...full } as Card;
+  } else {
+    existing.push(full as Card);
+  }
   localStorage.setItem(KEYS.CARDS, JSON.stringify(existing));
-  return full;
+  return full as Card;
+}
+
+export function updateCard(cardId: string, updates: Partial<Card>) {
+  if (!isBrowser()) return null;
+  const existing = getCards();
+  const idx = existing.findIndex((c) => c.id === cardId);
+  if (idx < 0) return null;
+  const updated = { ...existing[idx], ...updates } as Card;
+  existing[idx] = updated;
+  localStorage.setItem(KEYS.CARDS, JSON.stringify(existing));
+  return updated;
+}
+
+export function getCardById(cardId: string): Card | null {
+  return getCards().find((c) => c.id === cardId) ?? null;
 }
 
 export function linkRecipients(

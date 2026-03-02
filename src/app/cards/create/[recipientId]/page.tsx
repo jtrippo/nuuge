@@ -54,6 +54,13 @@ type Step =
   | "design_pick"
   | "design_generating"
   | "design_preview"
+  | "inside_design_ask"
+  | "inside_design_loading"
+  | "inside_design_pick"
+  | "inside_design_generating"
+  | "inside_design_preview"
+  | "front_text_loading"
+  | "front_text"
   | "delivery"
   | "saved";
 
@@ -86,6 +93,15 @@ export default function CreateCardPage() {
   const [selectedDesign, setSelectedDesign] = useState<DesignConcept | null>(null);
   const [generatedImageUrl, setGeneratedImageUrl] = useState<string | null>(null);
   const [designFeedback, setDesignFeedback] = useState("");
+  const [promptHistory, setPromptHistory] = useState<{ prompt: string; refinement?: string }[]>([]);
+  const [insideConcepts, setInsideConcepts] = useState<DesignConcept[]>([]);
+  const [selectedInsideConcept, setSelectedInsideConcept] = useState<DesignConcept | null>(null);
+  const [insideImageUrl, setInsideImageUrl] = useState<string | null>(null);
+  const [skipInsideDesign, setSkipInsideDesign] = useState(false);
+  const [frontTextSuggestion, setFrontTextSuggestion] = useState<{ wording: string; position: string } | null>(null);
+  const [frontText, setFrontText] = useState("");
+  const [frontTextPosition, setFrontTextPosition] = useState("bottom-right");
+  const [cardSize, setCardSize] = useState<"4x6" | "5x7">("5x7");
   const [deliveryMethod, setDeliveryMethod] = useState<"digital" | "print_at_home" | "mail">("digital");
   const [savedCardId, setSavedCardId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -234,10 +250,21 @@ Tone preference: ${r.tone_preference || "Not specified"}`;
     }
   }
 
-  async function generateDesignImage(prompt: string, refinement?: string) {
-    setStep("design_generating");
+  async function generateDesignImage(
+    prompt: string,
+    refinement?: string,
+    options?: { isInside?: boolean; history?: { prompt: string; refinement?: string }[] }
+  ) {
+    const isInside = options?.isInside ?? false;
+    const stepToSet = isInside ? "inside_design_generating" : "design_generating";
+    setStep(stepToSet);
     setError(null);
-    setDesignFeedback("");
+    if (!isInside) setDesignFeedback("");
+
+    const nextHistory =
+      refinement && selectedDesign
+        ? [...promptHistory, { prompt: selectedDesign.image_prompt, refinement }]
+        : options?.history ?? promptHistory;
 
     try {
       const res = await fetch("/api/generate-image", {
@@ -246,7 +273,10 @@ Tone preference: ${r.tone_preference || "Not specified"}`;
         body: JSON.stringify({
           imagePrompt: prompt,
           refinement,
+          promptHistory: nextHistory.length > 0 ? nextHistory : undefined,
           userId: "local",
+          isInsideIllustration: isInside,
+          cardSize: isInside ? undefined : cardSize,
         }),
       });
 
@@ -256,17 +286,47 @@ Tone preference: ${r.tone_preference || "Not specified"}`;
       }
 
       const data = await res.json();
-      setGeneratedImageUrl(data.imageUrl);
-      setStep("design_preview");
+      if (isInside) {
+        setInsideImageUrl(data.imageUrl);
+        setStep("inside_design_preview");
+      } else {
+        if (refinement) setPromptHistory(nextHistory);
+        setGeneratedImageUrl(data.imageUrl);
+        setStep("design_preview");
+      }
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Something went wrong";
       setError(message);
-      setStep("design_pick");
+      setStep(isInside ? "inside_design_pick" : "design_pick");
     }
   }
 
-  function handleSave() {
+  async function loadFrontTextSuggestion() {
+    setStep("front_text_loading");
+    try {
+      const res = await fetch("/api/suggest-front-text", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          occasion,
+          tone,
+          recipientName: recipient?.name ?? "",
+        }),
+      });
+      const data = await res.json();
+      setFrontTextSuggestion(data);
+      setFrontText(data.wording ?? "");
+      setFrontTextPosition(data.position ?? "bottom-right");
+    } catch {
+      setFrontText("");
+      setFrontTextPosition("bottom-right");
+    }
+    setStep("front_text");
+  }
+
+  function handleSave(options?: { deliveryMethodOverride?: "digital" | "print_at_home" | "mail" }) {
     if (!editedMessage || !recipient) return;
+    const method = options?.deliveryMethodOverride ?? deliveryMethod;
     const fullText = `${editedMessage.greeting}\n\n${editedMessage.body}\n\n${editedMessage.closing}`;
     const allRecipientIds = [recipient.id, ...sharedWith];
     const saved = saveCard({
@@ -277,13 +337,25 @@ Tone preference: ${r.tone_preference || "Not specified"}`;
       message_text: fullText,
       image_url: generatedImageUrl,
       image_prompt: selectedDesign?.image_prompt || null,
+      inside_image_url: insideImageUrl,
+      inside_image_prompt: selectedInsideConcept?.image_prompt || null,
+      front_text: frontText.trim() || null,
+      front_text_position: frontText.trim() ? frontTextPosition : null,
       tone_used: tone,
       style: editedMessage.label,
-      delivery_method: deliveryMethod,
+      delivery_method: method,
       sent: false,
       co_signed_with: coSign ? profile?.partner_name || null : null,
-    });
-    if (saved) setSavedCardId(saved.id);
+      card_size: cardSize,
+    }) as { id: string } | undefined;
+    if (saved) {
+      setSavedCardId(saved.id);
+      setDeliveryMethod(method);
+      if (method === "print_at_home") {
+        router.push(`/cards/print/${saved.id}`);
+        return;
+      }
+    }
     setStep("saved");
   }
 
@@ -621,9 +693,36 @@ Tone preference: ${r.tone_preference || "Not specified"}`;
             <h2 className="text-xl font-bold text-gray-900 mb-2">
               Choose a card design direction
             </h2>
-            <p className="text-sm text-gray-500 mb-6">
+            <p className="text-sm text-gray-500 mb-4">
               Pick a concept and Nuuge will create the artwork. You can refine it after.
             </p>
+            <div className="mb-6">
+              <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">
+                Card size (for print)
+              </p>
+              <div className="flex gap-3">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="cardSize"
+                    checked={cardSize === "4x6"}
+                    onChange={() => setCardSize("4x6")}
+                    className="text-indigo-600"
+                  />
+                  <span className="text-sm text-gray-700">4&quot; × 6&quot;</span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="cardSize"
+                    checked={cardSize === "5x7"}
+                    onChange={() => setCardSize("5x7")}
+                    className="text-indigo-600"
+                  />
+                  <span className="text-sm text-gray-700">5&quot; × 7&quot;</span>
+                </label>
+              </div>
+            </div>
             <div className="space-y-3">
               {designConcepts.map((concept, i) => (
                 <button
@@ -782,6 +881,7 @@ Tone preference: ${r.tone_preference || "Not specified"}`;
               <button
                 onClick={() => {
                   setDesignFeedback("");
+                  setPromptHistory([]);
                   setStep("design_pick");
                 }}
                 className="text-sm text-gray-400 hover:text-gray-600 px-4 py-2"
@@ -789,9 +889,218 @@ Tone preference: ${r.tone_preference || "Not specified"}`;
                 &larr; Pick different design
               </button>
               <button
-                onClick={() => setStep("delivery")}
+                onClick={() => setStep("inside_design_ask")}
                 className="bg-indigo-600 text-white px-8 py-3 rounded-xl font-medium
                            hover:bg-indigo-700 transition-colors flex-1"
+              >
+                Next: Inside &amp; front text
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Step: Inside design — add theme to inside? */}
+        {step === "inside_design_ask" && (
+          <div>
+            <h2 className="text-xl font-bold text-gray-900 mb-2">
+              Add a small inside illustration?
+            </h2>
+            <p className="text-sm text-gray-500 mb-6">
+              Carry the front theme to the inside (e.g. stars on front → a shooting star inside).
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={async () => {
+                  setStep("inside_design_loading");
+                  if (!selectedDesign || !recipient) return;
+                  try {
+                    const res = await fetch("/api/suggest-inside-designs", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({
+                        frontTitle: selectedDesign.title,
+                        frontDescription: selectedDesign.description,
+                        frontImagePrompt: selectedDesign.image_prompt,
+                        occasion,
+                        tone,
+                      }),
+                    });
+                    if (!res.ok) throw new Error("Failed to load");
+                    const data = await res.json();
+                    setInsideConcepts(data.designs ?? []);
+                    setStep("inside_design_pick");
+                  } catch {
+                    loadFrontTextSuggestion();
+                  }
+                }}
+                className="bg-indigo-600 text-white px-8 py-3 rounded-xl font-medium hover:bg-indigo-700 transition-colors flex-1"
+              >
+                Yes, suggest ideas
+              </button>
+              <button
+                onClick={() => loadFrontTextSuggestion()}
+                className="bg-white border border-gray-200 text-gray-700 px-8 py-3 rounded-xl font-medium hover:bg-gray-50 flex-1"
+              >
+                No, skip
+              </button>
+            </div>
+            <button
+              onClick={() => setStep("design_preview")}
+              className="text-sm text-gray-400 hover:text-gray-600 mt-4"
+            >
+              &larr; Back to design
+            </button>
+          </div>
+        )}
+
+        {/* Step: Inside design loading */}
+        {step === "inside_design_loading" && (
+          <div className="text-center py-20">
+            <div className="flex justify-center gap-1 mb-4">
+              <span className="w-2.5 h-2.5 bg-indigo-400 rounded-full animate-bounce" />
+              <span className="w-2.5 h-2.5 bg-indigo-400 rounded-full animate-bounce [animation-delay:0.1s]" />
+              <span className="w-2.5 h-2.5 bg-indigo-400 rounded-full animate-bounce [animation-delay:0.2s]" />
+            </div>
+            <p className="text-gray-500">Suggesting inside illustrations...</p>
+          </div>
+        )}
+
+        {/* Step: Inside design pick */}
+        {step === "inside_design_pick" && insideConcepts.length > 0 && (
+          <div>
+            <h2 className="text-xl font-bold text-gray-900 mb-2">
+              Choose an inside illustration
+            </h2>
+            <p className="text-sm text-gray-500 mb-6">
+              Small decorative element that matches the front.
+            </p>
+            <div className="space-y-3">
+              {insideConcepts.map((concept, i) => (
+                <button
+                  key={i}
+                  onClick={() => {
+                    setSelectedInsideConcept(concept);
+                    generateDesignImage(concept.image_prompt, undefined, { isInside: true, history: [] });
+                  }}
+                  className="w-full bg-white border border-gray-200 rounded-xl p-5 text-left hover:border-indigo-400 transition-colors"
+                >
+                  <span className="text-sm font-semibold text-gray-900">{concept.title}</span>
+                  <p className="text-sm text-gray-600 mt-1">{concept.description}</p>
+                </button>
+              ))}
+            </div>
+            <button
+              onClick={() => {
+                setStep("front_text_loading");
+                loadFrontTextSuggestion();
+              }}
+              className="text-sm text-gray-400 hover:text-gray-600 mt-4"
+            >
+              Skip inside illustration
+            </button>
+          </div>
+        )}
+
+        {/* Step: Inside design generating */}
+        {step === "inside_design_generating" && (
+          <div className="text-center py-20">
+            <div className="flex justify-center gap-1 mb-4">
+              <span className="w-2.5 h-2.5 bg-purple-400 rounded-full animate-bounce" />
+              <span className="w-2.5 h-2.5 bg-purple-400 rounded-full animate-bounce [animation-delay:0.1s]" />
+              <span className="w-2.5 h-2.5 bg-purple-400 rounded-full animate-bounce [animation-delay:0.2s]" />
+            </div>
+            <p className="text-gray-500">Creating inside illustration...</p>
+          </div>
+        )}
+
+        {/* Step: Inside design preview */}
+        {step === "inside_design_preview" && insideImageUrl && (
+          <div>
+            <h2 className="text-xl font-bold text-gray-900 mb-2">
+              Inside illustration
+            </h2>
+            <div className="mb-6 flex justify-center">
+              <img src={insideImageUrl} alt="" className="max-h-32 w-auto rounded-lg" />
+            </div>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setStep("inside_design_pick")}
+                className="text-sm text-gray-400 hover:text-gray-600 px-4 py-2"
+              >
+                &larr; Pick different
+              </button>
+              <button
+                onClick={() => {
+                  setStep("front_text_loading");
+                  loadFrontTextSuggestion();
+                }}
+                className="bg-indigo-600 text-white px-8 py-3 rounded-xl font-medium hover:bg-indigo-700 transition-colors flex-1"
+              >
+                Next: Front text
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Step: Front text loading */}
+        {step === "front_text_loading" && (
+          <div className="text-center py-20">
+            <div className="flex justify-center gap-1 mb-4">
+              <span className="w-2.5 h-2.5 bg-indigo-400 rounded-full animate-bounce" />
+              <span className="w-2.5 h-2.5 bg-indigo-400 rounded-full animate-bounce [animation-delay:0.1s]" />
+              <span className="w-2.5 h-2.5 bg-indigo-400 rounded-full animate-bounce [animation-delay:0.2s]" />
+            </div>
+            <p className="text-gray-500">Suggesting front text...</p>
+          </div>
+        )}
+
+        {/* Step: Front text — suggestion to add wording on front */}
+        {step === "front_text" && (
+          <div>
+            <h2 className="text-xl font-bold text-gray-900 mb-2">
+              Add words on the front?
+            </h2>
+            <p className="text-sm text-gray-500 mb-6">
+              Optional. We&apos;ll overlay this on the card front (you can edit or skip).
+            </p>
+            <div className="bg-white border border-gray-200 rounded-xl p-4 mb-4">
+              <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">
+                Wording
+              </label>
+              <input
+                value={frontText}
+                onChange={(e) => setFrontText(e.target.value)}
+                placeholder="e.g. Happy Birthday!"
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none focus:border-indigo-500"
+              />
+              <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mt-3 mb-2">
+                Position
+              </label>
+              <select
+                value={frontTextPosition}
+                onChange={(e) => setFrontTextPosition(e.target.value)}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none focus:border-indigo-500"
+              >
+                <option value="bottom-right">Bottom right</option>
+                <option value="bottom-center">Bottom center</option>
+                <option value="top-center">Top center</option>
+                <option value="top-left">Top left</option>
+                <option value="bottom-left">Bottom left</option>
+              </select>
+            </div>
+            <div className="flex gap-3">
+              <button
+                onClick={() => {
+                  setFrontText("");
+                  setStep("delivery");
+                }}
+                className="text-sm text-gray-400 hover:text-gray-600 px-4 py-2"
+              >
+                Skip
+              </button>
+              <button
+                onClick={() => setStep("delivery")}
+                className="bg-indigo-600 text-white px-8 py-3 rounded-xl font-medium hover:bg-indigo-700 transition-colors flex-1"
               >
                 Next: Choose delivery
               </button>
@@ -810,7 +1119,7 @@ Tone preference: ${r.tone_preference || "Not specified"}`;
             </p>
             <div className="space-y-3">
               <button
-                onClick={() => { setDeliveryMethod("digital"); handleSave(); }}
+                onClick={() => handleSave({ deliveryMethodOverride: "digital" })}
                 className="w-full bg-white border border-gray-200 rounded-xl p-5 text-left
                            hover:border-indigo-400 transition-colors"
               >
@@ -822,7 +1131,7 @@ Tone preference: ${r.tone_preference || "Not specified"}`;
                 </p>
               </button>
               <button
-                onClick={() => { setDeliveryMethod("print_at_home"); handleSave(); }}
+                onClick={() => handleSave({ deliveryMethodOverride: "print_at_home" })}
                 className="w-full bg-white border border-gray-200 rounded-xl p-5 text-left
                            hover:border-indigo-400 transition-colors"
               >
@@ -834,7 +1143,7 @@ Tone preference: ${r.tone_preference || "Not specified"}`;
                 </p>
               </button>
               <button
-                onClick={() => { setDeliveryMethod("mail"); handleSave(); }}
+                onClick={() => handleSave({ deliveryMethodOverride: "mail" })}
                 className="w-full bg-white border border-gray-200 rounded-xl p-5 text-left
                            hover:border-indigo-400 transition-colors"
               >
@@ -847,10 +1156,10 @@ Tone preference: ${r.tone_preference || "Not specified"}`;
               </button>
             </div>
             <button
-              onClick={() => setStep("design_preview")}
+              onClick={() => setStep("front_text")}
               className="text-sm text-gray-400 hover:text-gray-600 mt-4"
             >
-              &larr; Back to design
+              &larr; Back to front text
             </button>
           </div>
         )}
@@ -923,6 +1232,14 @@ Tone preference: ${r.tone_preference || "Not specified"}`;
                   setSelectedDesign(null);
                   setGeneratedImageUrl(null);
                   setDesignFeedback("");
+                  setPromptHistory([]);
+                  setInsideConcepts([]);
+                  setSelectedInsideConcept(null);
+                  setInsideImageUrl(null);
+                  setFrontTextSuggestion(null);
+                  setFrontText("");
+                  setFrontTextPosition("bottom-right");
+                  setCardSize("5x7");
                   setSavedCardId(null);
                 }}
                 className="bg-white text-indigo-600 border border-indigo-200 px-6 py-3 rounded-xl

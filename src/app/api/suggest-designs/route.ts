@@ -39,15 +39,15 @@ YOUR TASK:
 Suggest exactly 3 different card front design concepts. Each should:
 - Be deeply personal — reference the recipient's specific interests, hobbies, or personality
 - Match the tone of the card message
-- Be visually describable so an AI image generator could produce it
+- Be LITERALLY and SPECIFICALLY describable so an image generator follows it exactly (e.g. "two people hiking on a mountain trail in the Sierra Nevada, casual American outdoor clothing, pine trees, clear sky" — not vague like "two people in nature")
+- Describe a single, clear scene — no stock-photo clichés or generic imagery. Avoid substituting unrelated cultures, settings, or styles (e.g. if the context is hiking in US mountains, do not suggest desert or traditional dress)
+- Style: original illustration, warm and hand-crafted feel — NOT photorealistic stock photo
 - Range from more traditional to more creative/unexpected
 
 For each concept, provide:
 - A short title (2-4 words)
-- A 1-2 sentence description the user will see to understand the concept
-- A detailed visual prompt that would be sent to an image generator (the user won't see this — be specific about style, composition, colors, mood)
-
-Think creatively. If the recipient loves fishing, don't just draw a fish — maybe two fishing rods crossed like a toast for an anniversary. If they love cooking, maybe a birthday cake made of their favorite ingredients. Use the context to make connections.
+- A 1-2 sentence description the user will see
+- A detailed image_prompt: be VERY specific about scene, location, clothing, colors, composition. The image generator must follow this literally. Include style cues like "watercolor illustration" or "soft colored pencil style" to avoid a generic stock look.
 
 Respond with ONLY valid JSON:
 {

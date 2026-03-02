@@ -1,16 +1,18 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useParams } from "next/navigation";
-import { getCards } from "@/lib/store";
+import { useParams, useRouter } from "next/navigation";
+import { getCards, getRecipients } from "@/lib/store";
 import type { Card } from "@/types/database";
 
 type ViewStage = "envelope" | "front" | "inside";
 
 export default function CardViewerPage() {
   const params = useParams();
+  const router = useRouter();
   const cardId = params.cardId as string;
   const [card, setCard] = useState<Card | null>(null);
+  const [recipientName, setRecipientName] = useState<string | null>(null);
   const [stage, setStage] = useState<ViewStage>("envelope");
   const [animating, setAnimating] = useState(false);
   const [mounted, setMounted] = useState(false);
@@ -19,7 +21,12 @@ export default function CardViewerPage() {
     setMounted(true);
     const all = getCards();
     const found = all.find((c) => c.id === cardId);
-    if (found) setCard(found);
+    if (found) {
+      setCard(found);
+      const recipients = getRecipients();
+      const r = recipients.find((rec) => rec.id === found.recipient_id);
+      if (r) setRecipientName(r.name);
+    }
   }, [cardId]);
 
   if (!mounted) return null;
@@ -92,13 +99,32 @@ export default function CardViewerPage() {
           className={`cursor-pointer select-none transition-all duration-500 hover:scale-[1.02]
                       ${animating ? "rotate-y-90 opacity-0" : "animate-fade-in"}`}
         >
-          <div className="w-80 bg-white rounded-xl shadow-xl overflow-hidden border border-gray-200">
+          <div className="relative w-80 bg-white rounded-xl shadow-xl overflow-hidden border border-gray-200">
             {card.image_url ? (
-              <img
-                src={card.image_url}
-                alt="Card front"
-                className="w-full aspect-square object-cover"
-              />
+              <>
+                <img
+                  src={card.image_url}
+                  alt="Card front"
+                  className="w-full aspect-square object-cover"
+                />
+                {card.front_text && (
+                  <div
+                    className={`absolute text-base font-medium text-gray-800 ${
+                      (card.front_text_position ?? "bottom-right") === "top-left"
+                        ? "left-3 top-3"
+                        : (card.front_text_position ?? "") === "top-center"
+                          ? "left-1/2 top-3 -translate-x-1/2"
+                          : (card.front_text_position ?? "") === "bottom-left"
+                            ? "bottom-3 left-3"
+                            : (card.front_text_position ?? "") === "bottom-center"
+                              ? "bottom-3 left-1/2 -translate-x-1/2"
+                              : "bottom-3 right-3"
+                    }`}
+                  >
+                    {card.front_text}
+                  </div>
+                )}
+              </>
             ) : (
               <div className="w-full aspect-square bg-gradient-to-br from-indigo-100 to-purple-100 flex items-center justify-center">
                 <p className="text-4xl text-indigo-300">&#127912;</p>
@@ -115,6 +141,15 @@ export default function CardViewerPage() {
       {stage === "inside" && (
         <div className="animate-fade-in">
           <div className="w-80 bg-white rounded-xl shadow-xl border border-gray-200 p-8">
+            {card.inside_image_url && (
+              <div className="mb-4 flex justify-center">
+                <img
+                  src={card.inside_image_url}
+                  alt=""
+                  className="max-h-20 w-auto rounded object-contain"
+                />
+              </div>
+            )}
             <p className="text-lg font-medium text-gray-800 mb-4">
               {greeting}
             </p>
@@ -130,16 +165,24 @@ export default function CardViewerPage() {
               </p>
             )}
           </div>
-          <div className="text-center mt-6">
-            <p className="text-xs text-gray-400 mb-3">
-              Made with Nuuge
+          <div className="text-center mt-6 space-y-3">
+            <p className="text-xs text-gray-400">
+              Created by Nuuge
             </p>
-            <button
-              onClick={() => setStage("envelope")}
-              className="text-xs text-gray-400 hover:text-gray-600"
-            >
-              View again
-            </button>
+            <div className="flex flex-wrap gap-3 justify-center">
+              <button
+                onClick={() => router.push(`/recipients/${card.recipient_id}`)}
+                className="bg-indigo-600 text-white px-5 py-2.5 rounded-lg text-sm font-medium hover:bg-indigo-700"
+              >
+                Done — back to {recipientName ?? "recipient"}
+              </button>
+              <button
+                onClick={() => setStage("envelope")}
+                className="text-sm text-gray-500 hover:text-gray-700"
+              >
+                View again
+              </button>
+            </div>
           </div>
         </div>
       )}
