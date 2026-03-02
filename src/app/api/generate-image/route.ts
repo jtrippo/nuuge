@@ -44,7 +44,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({
       imageUrl,
-      revisedPrompt: response.data[0]?.revised_prompt,
+      revisedPrompt: response.data?.[0]?.revised_prompt,
     });
   } catch (error: unknown) {
     console.error("Image generation error:", error);
