@@ -87,6 +87,7 @@ export default function CreateCardPage() {
   const [generatedImageUrl, setGeneratedImageUrl] = useState<string | null>(null);
   const [designFeedback, setDesignFeedback] = useState("");
   const [deliveryMethod, setDeliveryMethod] = useState<"digital" | "print_at_home" | "mail">("digital");
+  const [savedCardId, setSavedCardId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -268,7 +269,7 @@ Tone preference: ${r.tone_preference || "Not specified"}`;
     if (!editedMessage || !recipient) return;
     const fullText = `${editedMessage.greeting}\n\n${editedMessage.body}\n\n${editedMessage.closing}`;
     const allRecipientIds = [recipient.id, ...sharedWith];
-    saveCard({
+    const saved = saveCard({
       user_id: "local",
       recipient_id: recipient.id,
       recipient_ids: allRecipientIds,
@@ -282,6 +283,7 @@ Tone preference: ${r.tone_preference || "Not specified"}`;
       sent: false,
       co_signed_with: coSign ? profile?.partner_name || null : null,
     });
+    if (saved) setSavedCardId(saved.id);
     setStep("saved");
   }
 
@@ -862,21 +864,51 @@ Tone preference: ${r.tone_preference || "Not specified"}`;
             </h2>
             <p className="text-gray-500 mb-8">
               Your {occasion.toLowerCase()} card for {recipient.name} is ready
-              {deliveryMethod === "digital" && " to send"}.
+              {deliveryMethod === "digital" && " to send"}
+              {deliveryMethod === "print_at_home" && " to print"}
+              {deliveryMethod === "mail" && " — mailing coming soon"}.
             </p>
-            {deliveryMethod === "digital" && (
+
+            {/* Delivery-specific action */}
+            {deliveryMethod === "digital" && savedCardId && (
               <button
-                onClick={() => {
-                  const cards = getCardsForRecipient(recipient!.id);
-                  const latest = cards[cards.length - 1];
-                  if (latest) router.push(`/cards/view/${latest.id}`);
-                }}
+                onClick={() => router.push(`/cards/view/${savedCardId}`)}
                 className="bg-indigo-600 text-white px-8 py-3 rounded-xl font-medium
                            hover:bg-indigo-700 transition-colors mb-4 block mx-auto"
               >
                 Preview &amp; share
               </button>
             )}
+
+            {deliveryMethod === "print_at_home" && savedCardId && (
+              <button
+                onClick={() => router.push(`/cards/print/${savedCardId}`)}
+                className="bg-indigo-600 text-white px-8 py-3 rounded-xl font-medium
+                           hover:bg-indigo-700 transition-colors mb-4 block mx-auto"
+              >
+                Print your card
+              </button>
+            )}
+
+            {deliveryMethod === "mail" && (
+              <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-6 max-w-sm mx-auto text-left">
+                <p className="text-sm text-amber-800 font-medium mb-1">
+                  Physical mailing is coming soon
+                </p>
+                <p className="text-sm text-amber-700">
+                  In the meantime, you can print this card at home and mail it yourself.
+                </p>
+                {savedCardId && (
+                  <button
+                    onClick={() => router.push(`/cards/print/${savedCardId}`)}
+                    className="mt-3 text-sm text-indigo-600 font-medium hover:text-indigo-800"
+                  >
+                    Print at home instead &rarr;
+                  </button>
+                )}
+              </div>
+            )}
+
             <div className="flex gap-3 justify-center">
               <button
                 onClick={() => {
@@ -891,6 +923,7 @@ Tone preference: ${r.tone_preference || "Not specified"}`;
                   setSelectedDesign(null);
                   setGeneratedImageUrl(null);
                   setDesignFeedback("");
+                  setSavedCardId(null);
                 }}
                 className="bg-white text-indigo-600 border border-indigo-200 px-6 py-3 rounded-xl
                            font-medium hover:bg-indigo-50 transition-colors"
