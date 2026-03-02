@@ -1,36 +1,58 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Nuuge
 
-## Getting Started
+Cards that actually sound like you. AI-powered personal cards created from context about you and the people you care about.
 
-First, run the development server:
+## Setup
+
+### 1. Install dependencies
+
+```bash
+npm install
+```
+
+### 2. Get your API keys
+
+**OpenAI API Key:**
+- Go to [platform.openai.com](https://platform.openai.com)
+- Create an account (separate from ChatGPT)
+- Navigate to API Keys and create a new key
+- Add billing with ~$10-20 to start
+
+**Supabase (optional for MVP — app works with local storage initially):**
+- Go to [supabase.com](https://supabase.com)
+- Create a project
+- Copy the project URL and anon key from Settings > API
+
+### 3. Configure environment
+
+```bash
+cp .env.local.example .env.local
+```
+
+Edit `.env.local` and add your keys:
+```
+OPENAI_API_KEY=sk-your-key-here
+```
+
+### 4. Run the app
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000)
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## How It Works
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+1. **Onboarding** — Nuuge has a conversation with you to understand your personality, humor style, interests, and communication style
+2. **Add recipients** — For each person you want to send cards to, Nuuge interviews you about them (interests, relationship dynamic, tone)
+3. **Create cards** — Based on the context files built through conversation, Nuuge generates personalized messages and card designs
+4. **Send** — Digital delivery, print at home, or mail via the service
 
-## Learn More
+## Architecture
 
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- **Frontend:** Next.js + Tailwind CSS
+- **AI Text:** OpenAI GPT-4o
+- **AI Images:** OpenAI DALL-E 3 (Phase 2)
+- **Database:** Local storage for MVP, Supabase PostgreSQL for production
+- **Auth:** Supabase Auth (Phase 2)
