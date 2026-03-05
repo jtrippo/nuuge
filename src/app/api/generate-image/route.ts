@@ -22,6 +22,7 @@ export async function POST(req: NextRequest) {
       existingImageBase64,
       insideImageSize,
       frontImageBase64,
+      editInstruction,
     }: {
       imagePrompt: string;
       userId: string;
@@ -30,6 +31,7 @@ export async function POST(req: NextRequest) {
       existingImageBase64?: string;
       insideImageSize?: "1536x1024" | "1024x1536" | "1024x1024";
       frontImageBase64?: string;
+      editInstruction?: string;
     } = body;
 
     const avoidList = GLOBAL_GUARDRAILS.avoid.join("; ");
@@ -60,13 +62,14 @@ STRICT RULES — follow the scene description LITERALLY:
     if (isEditing && sourceImageBase64) {
       let editPrompt: string;
       if (isInsideIllustration && !existingImageBase64 && frontImageBase64) {
-        // First inside generation: deriving from the front cover
         editPrompt = `Using this greeting card front cover as the source, create a decorative inside-card element by extracting or re-composing elements from it.\n\n${imagePrompt}\n\nKeep the exact same art style, colors, and feel as the source image. The result should look like a detail or crop from the same artwork. No text.`;
+      } else if (isInsideIllustration && editInstruction) {
+        editPrompt = `IMPORTANT — MAKE THIS CHANGE TO THE IMAGE:\n${editInstruction}\n\nKeep everything else exactly the same. Do not change elements that weren't mentioned.\n\nFull scene for reference: ${imagePrompt}`;
       } else if (isInsideIllustration) {
-        // Refining an existing inside illustration
         editPrompt = `Edit this inside-card illustration. Keep the same style and composition. Apply this change:\n\n${imagePrompt}`;
+      } else if (editInstruction) {
+        editPrompt = `IMPORTANT — MAKE THIS SPECIFIC CHANGE TO THE IMAGE:\n${editInstruction}\n\nKeep everything else exactly the same — same subject, same composition, same style. Only change what was requested above.\n\n${literalRules}\n\nFull scene for reference: ${imagePrompt}`;
       } else {
-        // Refining the front cover
         editPrompt = `Edit this greeting card illustration. Keep the same overall composition, style, and artistic feel. Apply this change:\n\n${literalRules}\n\nUpdated scene: ${imagePrompt}`;
       }
 

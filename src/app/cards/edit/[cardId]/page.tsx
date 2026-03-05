@@ -263,7 +263,7 @@ export default function EditCardPage() {
             >
               {card.image_url ? (
                 <>
-                  <img src={card.image_url} alt="Card front" className="w-full h-full object-cover" />
+                  <img src={card.image_url} alt="Card front" className="w-full h-full object-contain" />
                   {frontText && (
                     <div
                       style={{

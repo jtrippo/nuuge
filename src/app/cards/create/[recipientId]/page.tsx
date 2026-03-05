@@ -186,6 +186,7 @@ function CreateCardPage() {
   const [savedCardId, setSavedCardId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pendingChangeType, setPendingChangeType] = useState<"refine" | "redesign">("refine");
+  const [pendingEditInstruction, setPendingEditInstruction] = useState("");
 
   useEffect(() => {
     setMounted(true);
@@ -510,7 +511,7 @@ Tone preference: ${r.tone_preference || "Not specified"}`.replace(/\n{2,}/g, "\n
 
   async function generateDesignImage(
     prompt: string,
-    options?: { isInside?: boolean; editExisting?: boolean }
+    options?: { isInside?: boolean; editExisting?: boolean; editInstruction?: string }
   ) {
     const isInside = options?.isInside ?? false;
     const editExisting = options?.editExisting ?? false;
@@ -535,6 +536,7 @@ Tone preference: ${r.tone_preference || "Not specified"}`.replace(/\n{2,}/g, "\n
           existingImageBase64: existingImage || undefined,
           insideImageSize: isInside ? insideImageSize() : undefined,
           frontImageBase64: isInside ? (generatedImageUrl || undefined) : undefined,
+          editInstruction: editExisting ? (options?.editInstruction || undefined) : undefined,
         }),
       });
 
@@ -586,6 +588,7 @@ Tone preference: ${r.tone_preference || "Not specified"}`.replace(/\n{2,}/g, "\n
       const data = await res.json();
       setPendingSceneDescription(data.mergedScene);
       setPendingChangeType(data.changeType === "redesign" ? "redesign" : "refine");
+      setPendingEditInstruction(data.editInstruction || "");
       setStep("design_confirm_refinement");
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Something went wrong";
@@ -626,6 +629,7 @@ Tone preference: ${r.tone_preference || "Not specified"}`.replace(/\n{2,}/g, "\n
       const data = await res.json();
       setPendingInsideScene(data.mergedScene);
       setPendingChangeType(data.changeType === "redesign" ? "redesign" : "refine");
+      setPendingEditInstruction(data.editInstruction || "");
       setStep("inside_confirm_refinement");
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Something went wrong";
@@ -1632,9 +1636,24 @@ Tone preference: ${r.tone_preference || "Not specified"}`.replace(/\n{2,}/g, "\n
               </div>
             )}
 
+            {pendingChangeType === "refine" && pendingEditInstruction && (
+              <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-4 mb-4">
+                <label className="text-xs text-indigo-600 uppercase tracking-wide mb-2 block font-medium">
+                  What will change
+                </label>
+                <textarea
+                  value={pendingEditInstruction}
+                  onChange={(e) => setPendingEditInstruction(e.target.value)}
+                  rows={2}
+                  className="w-full border border-indigo-300 rounded-lg px-3 py-2 text-sm
+                             outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 resize-y"
+                />
+              </div>
+            )}
+
             <div className="bg-white border border-gray-200 rounded-xl p-4 mb-6">
               <label className="text-xs text-gray-500 uppercase tracking-wide mb-2 block">
-                Scene description
+                Full scene description
               </label>
               <textarea
                 value={pendingSceneDescription}
@@ -1668,7 +1687,7 @@ Tone preference: ${r.tone_preference || "Not specified"}`.replace(/\n{2,}/g, "\n
                   if (pendingChangeType === "redesign") {
                     generateDesignImage(pendingSceneDescription, { editExisting: false });
                   } else {
-                    generateDesignImage(pendingSceneDescription, { editExisting: true });
+                    generateDesignImage(pendingSceneDescription, { editExisting: true, editInstruction: pendingEditInstruction });
                   }
                 }}
                 disabled={!pendingSceneDescription.trim()}
@@ -2085,9 +2104,24 @@ Tone preference: ${r.tone_preference || "Not specified"}`.replace(/\n{2,}/g, "\n
               </div>
             )}
 
+            {pendingChangeType === "refine" && pendingEditInstruction && (
+              <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-4 mb-4">
+                <label className="text-xs text-indigo-600 uppercase tracking-wide mb-2 block font-medium">
+                  What will change
+                </label>
+                <textarea
+                  value={pendingEditInstruction}
+                  onChange={(e) => setPendingEditInstruction(e.target.value)}
+                  rows={2}
+                  className="w-full border border-indigo-300 rounded-lg px-3 py-2 text-sm
+                             outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 resize-y"
+                />
+              </div>
+            )}
+
             <div className="bg-white border border-gray-200 rounded-xl p-4 mb-6">
               <label className="text-xs text-gray-500 uppercase tracking-wide mb-2 block">
-                Scene description
+                Full scene description
               </label>
               <textarea
                 value={pendingInsideScene}
@@ -2121,7 +2155,7 @@ Tone preference: ${r.tone_preference || "Not specified"}`.replace(/\n{2,}/g, "\n
                   if (pendingChangeType === "redesign") {
                     generateDesignImage(pendingInsideScene, { isInside: true, editExisting: false });
                   } else {
-                    generateDesignImage(pendingInsideScene, { isInside: true, editExisting: true });
+                    generateDesignImage(pendingInsideScene, { isInside: true, editExisting: true, editInstruction: pendingEditInstruction });
                   }
                 }}
                 disabled={!pendingInsideScene.trim()}

@@ -143,7 +143,7 @@ export default function CardViewerPage() {
                 <img
                   src={card.image_url}
                   alt="Card front"
-                  className="w-full h-full object-cover"
+                  className="w-full h-full object-contain"
                 />
                 {card.front_text && (
                   <div

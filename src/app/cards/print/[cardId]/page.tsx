@@ -451,7 +451,7 @@ export default function PrintCardPage() {
                   style={{
                     width: "100%",
                     height: "100%",
-                    objectFit: "cover",
+                    objectFit: "contain",
                     objectPosition: "center",
                     display: "block",
                   }}
