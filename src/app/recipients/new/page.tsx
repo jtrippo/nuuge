@@ -7,12 +7,16 @@ import { getUserProfile, saveRecipient } from "@/lib/store";
 // ─── Curated selection lists ────────────────────────────────────────
 
 const RELATIONSHIP_TYPES = [
-  "Parent", "Sibling", "Child", "Grandparent", "Grandchild",
+  "Son", "Daughter",
+  "Parent", "Sibling",
+  "Grandparent", "Grandson", "Granddaughter",
   "Aunt / Uncle", "Niece / Nephew", "Cousin",
   "Friend", "Best friend",
   "Partner / Spouse",
   "Colleague", "Boss / Mentor",
   "Neighbor", "In-law",
+  "Stepson", "Stepdaughter",
+  "Godson", "Goddaughter",
 ];
 
 const PERSONALITY_TRAITS = [
