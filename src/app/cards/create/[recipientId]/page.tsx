@@ -1844,7 +1844,18 @@ Tone preference: ${r.tone_preference || "Not specified"}`.replace(/\n{2,}/g, "\n
               Position: <strong>{INSIDE_POSITIONS.find((p) => p.id === insideImagePosition)?.label}</strong>
             </p>
             <div className="space-y-4">
-              {insideConcepts.map((concept, i) => (
+              {insideConcepts.map((concept, i) => {
+                // Each suggestion crops a different region of the front cover
+                const cropPositions = ["top left", "center", "bottom right", "top right", "bottom left"];
+                const cropPos = cropPositions[i % cropPositions.length];
+
+                // Decoration strip preview dimensions (readable size)
+                const isHorizontal = ["top", "middle", "bottom"].includes(insideImagePosition);
+                const isVertical = ["left", "right"].includes(insideImagePosition);
+                const stripWidth = isHorizontal ? 260 : isVertical ? 56 : 160;
+                const stripHeight = isHorizontal ? 52 : isVertical ? 180 : 120;
+
+                return (
                 <button
                   key={i}
                   onClick={() => {
@@ -1855,81 +1866,37 @@ Tone preference: ${r.tone_preference || "Not specified"}`.replace(/\n{2,}/g, "\n
                   className="w-full bg-white border border-gray-200 rounded-xl p-4 text-left hover:border-indigo-400 transition-colors"
                 >
                   <div className="flex gap-4 items-start">
-                    {/* Mini card mockup showing front image in chosen position */}
+                    {/* Decoration strip preview — shows a unique crop of the front image */}
                     {generatedImageUrl && (
-                      <div
-                        className="flex-shrink-0 border border-gray-200 rounded-lg bg-gray-50 overflow-hidden"
-                        style={{
-                          width: 90,
-                          height: 126,
-                          display: "flex",
-                          flexDirection: insideImagePosition === "left" || insideImagePosition === "right" ? "row" : "column",
-                          position: "relative",
-                        }}
-                      >
-                        {/* Watermark: front image fills entire mini card, faded */}
-                        {insideImagePosition === "behind" && (
-                          <img
-                            src={generatedImageUrl}
-                            alt=""
-                            style={{
-                              position: "absolute", top: 0, left: 0, width: "100%", height: "100%",
-                              objectFit: "cover", opacity: 0.12,
-                            }}
-                          />
-                        )}
-
-                        {/* Left strip */}
-                        {insideImagePosition === "left" && (
-                          <div style={{ width: "20%", height: "100%", flexShrink: 0 }}>
-                            <img src={generatedImageUrl} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-                          </div>
-                        )}
-
-                        {/* Top banner */}
-                        {insideImagePosition === "top" && (
-                          <div style={{ width: "100%", height: "18%", flexShrink: 0 }}>
-                            <img src={generatedImageUrl} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-                          </div>
-                        )}
-
-                        {/* Text placeholder lines */}
-                        <div style={{
-                          flex: 1, display: "flex", flexDirection: "column",
-                          justifyContent: "center", alignItems: "center", gap: 3,
-                          padding: 6, position: "relative", zIndex: 1,
-                        }}>
-                          {/* Middle band */}
-                          {insideImagePosition === "middle" && (
-                            <div style={{ width: "100%", height: 10, flexShrink: 0, marginBottom: 3 }}>
-                              <img src={generatedImageUrl} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: 2 }} />
-                            </div>
-                          )}
-                          {[1, 2, 3, 4].map((l) => (
-                            <div
-                              key={l}
+                      <div className="flex-shrink-0 flex flex-col items-center gap-1.5">
+                        <div
+                          className="rounded-lg overflow-hidden border border-gray-200 shadow-sm"
+                          style={{ width: stripWidth, height: stripHeight }}
+                        >
+                          {insideImagePosition === "behind" ? (
+                            <img
+                              src={generatedImageUrl}
+                              alt=""
                               style={{
-                                height: 2, borderRadius: 1,
-                                backgroundColor: "#d1d5db",
-                                width: l === 1 ? "60%" : l === 4 ? "40%" : "80%",
+                                width: "100%", height: "100%",
+                                objectFit: "cover", objectPosition: cropPos,
+                                opacity: 0.15,
                               }}
                             />
-                          ))}
+                          ) : (
+                            <img
+                              src={generatedImageUrl}
+                              alt=""
+                              style={{
+                                width: "100%", height: "100%",
+                                objectFit: "cover", objectPosition: cropPos,
+                              }}
+                            />
+                          )}
                         </div>
-
-                        {/* Bottom banner */}
-                        {insideImagePosition === "bottom" && (
-                          <div style={{ width: "100%", height: "18%", flexShrink: 0 }}>
-                            <img src={generatedImageUrl} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-                          </div>
-                        )}
-
-                        {/* Right strip */}
-                        {insideImagePosition === "right" && (
-                          <div style={{ width: "20%", height: "100%", flexShrink: 0 }}>
-                            <img src={generatedImageUrl} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-                          </div>
-                        )}
+                        <span className="text-[10px] text-gray-400">
+                          {INSIDE_POSITIONS.find((p) => p.id === insideImagePosition)?.label} preview
+                        </span>
                       </div>
                     )}
 
@@ -1940,7 +1907,8 @@ Tone preference: ${r.tone_preference || "Not specified"}`.replace(/\n{2,}/g, "\n
                     </div>
                   </div>
                 </button>
-              ))}
+                );
+              })}
             </div>
             <div className="flex gap-3 mt-4">
               <button
