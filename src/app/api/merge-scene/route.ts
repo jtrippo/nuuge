@@ -1,0 +1,49 @@
+import { NextRequest, NextResponse } from "next/server";
+import OpenAI from "openai";
+
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+
+export async function POST(req: NextRequest) {
+  if (!process.env.OPENAI_API_KEY?.trim()) {
+    return NextResponse.json(
+      { error: "OPENAI_API_KEY is not set." },
+      { status: 500 }
+    );
+  }
+
+  try {
+    const { currentScene, change }: { currentScene: string; change: string } =
+      await req.json();
+
+    const { choices } = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [
+        {
+          role: "system",
+          content: `You merge a user's change into an existing scene description.
+Rules:
+- Output ONLY the updated scene description. No preamble, no explanation.
+- Keep everything from the current scene UNLESS the user's change contradicts it (e.g. "no people" removes people).
+- Apply the change literally: add what they want added, remove what they want removed.
+- Keep it concise (2-4 sentences). Plain language, no flowery prose.
+- Do NOT invent new elements the user didn't ask for.`,
+        },
+        {
+          role: "user",
+          content: `Current scene: ${currentScene}\n\nUser's change: ${change}`,
+        },
+      ],
+      max_tokens: 300,
+    });
+
+    const merged = choices?.[0]?.message?.content?.trim();
+    if (!merged) throw new Error("No response from merge");
+
+    return NextResponse.json({ mergedScene: merged });
+  } catch (error: unknown) {
+    console.error("Merge scene error:", error);
+    const message =
+      error instanceof Error ? error.message : "Failed to merge scene";
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
+}

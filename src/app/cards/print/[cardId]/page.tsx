@@ -1,9 +1,104 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, CSSProperties } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { getCards, getRecipients } from "@/lib/store";
+import { getCards, getRecipients, hydrateCardImages, updateCard } from "@/lib/store";
 import type { Card, Recipient } from "@/types/database";
+
+type FontChoice = "sans" | "script" | "block";
+type TextStyleChoice = "dark_box" | "white_box" | "plain";
+
+const FONT_OPTIONS: { value: FontChoice; label: string }[] = [
+  { value: "sans", label: "Clean" },
+  { value: "script", label: "Elegant" },
+  { value: "block", label: "Bold" },
+];
+
+const POSITION_OPTIONS: { value: string; label: string }[] = [
+  { value: "center", label: "Center" },
+  { value: "bottom-center", label: "Bottom center" },
+  { value: "bottom-right", label: "Bottom right" },
+  { value: "bottom-left", label: "Bottom left" },
+  { value: "top-center", label: "Top center" },
+  { value: "top-left", label: "Top left" },
+  { value: "top-right", label: "Top right" },
+];
+
+const TEXT_STYLE_OPTIONS: { value: TextStyleChoice; label: string }[] = [
+  { value: "plain", label: "Plain black" },
+  { value: "white_box", label: "Black on white" },
+  { value: "dark_box", label: "White on dark" },
+];
+
+function fontCSS(font: FontChoice | undefined): CSSProperties {
+  switch (font) {
+    case "script":
+      return { fontFamily: "'Georgia', 'Palatino', 'Times New Roman', serif", fontStyle: "italic" };
+    case "block":
+      return { fontFamily: "'Impact', 'Arial Black', sans-serif", textTransform: "uppercase", letterSpacing: "0.05em" };
+    default:
+      return { fontFamily: "'Inter', 'Helvetica Neue', Arial, sans-serif" };
+  }
+}
+
+function positionCSS(pos: string): CSSProperties {
+  switch (pos) {
+    case "top-left": return { top: "5%", left: "5%" };
+    case "top-center": return { top: "5%", left: "50%", transform: "translateX(-50%)" };
+    case "top-right": return { top: "5%", right: "5%" };
+    case "center": return { top: "50%", left: "50%", transform: "translate(-50%, -50%)" };
+    case "bottom-left": return { bottom: "5%", left: "5%" };
+    case "bottom-center": return { bottom: "5%", left: "50%", transform: "translateX(-50%)" };
+    default: return { bottom: "5%", right: "5%" };
+  }
+}
+
+function textStyleCSS(style: TextStyleChoice): CSSProperties {
+  switch (style) {
+    case "dark_box":
+      return {
+        color: "#fff",
+        textShadow: "0 2px 8px rgba(0,0,0,0.6), 0 1px 3px rgba(0,0,0,0.4)",
+        backgroundColor: "rgba(0,0,0,0.35)",
+        borderRadius: "0.5rem",
+        padding: "0.6rem 1.2rem",
+      };
+    case "white_box":
+      return {
+        color: "#111",
+        backgroundColor: "rgba(255,255,255,0.75)",
+        borderRadius: "0.5rem",
+        padding: "0.6rem 1.2rem",
+      };
+    default:
+      return {
+        color: "#111",
+        textShadow: "0 1px 4px rgba(255,255,255,0.6)",
+      };
+  }
+}
+
+/**
+ * Compute font sizes for the inside message based on total character count
+ * so the text fills the space naturally — not too large, not too small.
+ */
+function messageSizing(totalChars: number): {
+  greetingSize: string;
+  bodySize: string;
+  closingSize: string;
+  gap: string;
+} {
+  if (totalChars < 80) {
+    return { greetingSize: "1.5rem", bodySize: "1.15rem", closingSize: "1.1rem", gap: "1.25rem" };
+  }
+  if (totalChars < 160) {
+    return { greetingSize: "1.3rem", bodySize: "1.05rem", closingSize: "1rem", gap: "1rem" };
+  }
+  if (totalChars < 300) {
+    return { greetingSize: "1.15rem", bodySize: "0.95rem", closingSize: "0.9rem", gap: "0.75rem" };
+  }
+  return { greetingSize: "1.05rem", bodySize: "0.85rem", closingSize: "0.85rem", gap: "0.6rem" };
+}
 
 export default function PrintCardPage() {
   const params = useParams();
@@ -13,41 +108,59 @@ export default function PrintCardPage() {
   const [recipient, setRecipient] = useState<Recipient | null>(null);
   const [mounted, setMounted] = useState(false);
   const [imagesLoaded, setImagesLoaded] = useState(false);
-  const [printSize, setPrintSize] = useState<"4x6" | "5x7">("5x7");
+  const [duplex, setDuplex] = useState(true);
+
+  const [printSize, setPrintSize] = useState<"4x6" | "5x7" | "8.5x11">("5x7");
+  const [ftFont, setFtFont] = useState<FontChoice>("sans");
+  const [ftPosition, setFtPosition] = useState("bottom-right");
+  const [ftStyle, setFtStyle] = useState<TextStyleChoice>("dark_box");
+  const [msgFont, setMsgFont] = useState<FontChoice>("sans");
+  const [showSettings, setShowSettings] = useState(false);
 
   useEffect(() => {
     setMounted(true);
     const all = getCards();
     const found = all.find((c) => c.id === cardId);
     if (found) {
-      setCard(found);
-      setPrintSize(found.card_size === "4x6" ? "4x6" : "5x7");
       const recipients = getRecipients();
       const r = recipients.find((rec) => rec.id === found.recipient_id);
       if (r) setRecipient(r);
+
+      setFtFont(found.front_text_font ?? "sans");
+      setFtPosition(found.front_text_position ?? "bottom-right");
+      setFtStyle(found.front_text_style ?? "dark_box");
+      setMsgFont(found.font ?? "sans");
+
+      hydrateCardImages(found).then((hydrated) => setCard(hydrated));
     }
   }, [cardId]);
 
   const imageUrls: string[] = card
     ? [card.image_url, card.inside_image_url].filter((u): u is string => Boolean(u))
     : [];
+
   useEffect(() => {
-    if (imageUrls.length === 0) {
-      setImagesLoaded(true);
-      return;
-    }
+    if (imageUrls.length === 0) { setImagesLoaded(true); return; }
     let done = 0;
-    const check = () => {
-      done++;
-      if (done >= imageUrls.length) setImagesLoaded(true);
-    };
+    const check = () => { done++; if (done >= imageUrls.length) setImagesLoaded(true); };
     imageUrls.forEach((src) => {
       const img = new Image();
       img.onload = check;
       img.onerror = check;
       img.src = src;
     });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [card?.id]);
+
+  function saveSettings() {
+    if (!card) return;
+    updateCard(card.id, {
+      front_text_font: ftFont,
+      front_text_position: ftPosition,
+      front_text_style: ftStyle,
+      font: msgFont,
+    });
+  }
 
   if (!mounted) return null;
 
@@ -55,10 +168,7 @@ export default function PrintCardPage() {
     return (
       <div className="flex flex-col items-center justify-center h-screen bg-white">
         <p className="text-gray-500 mb-4">Card not found.</p>
-        <button
-          onClick={() => router.push("/")}
-          className="text-indigo-600 font-medium"
-        >
+        <button onClick={() => router.push("/")} className="text-indigo-600 font-medium">
           Back to dashboard
         </button>
       </div>
@@ -67,82 +177,110 @@ export default function PrintCardPage() {
 
   const messageParts = card.message_text.split("\n\n");
   const greeting = messageParts[0] || "";
-  const body = messageParts.slice(1, -1).join("\n\n") || messageParts[1] || "";
-  const closing = messageParts[messageParts.length - 1] || "";
+  const body = messageParts.length > 2 ? messageParts.slice(1, -1).join("\n\n") : "";
+  const closing = messageParts.length > 1 ? messageParts[messageParts.length - 1] : "";
+  const totalChars = card.message_text.length;
+  const sizing = messageSizing(totalChars);
 
-  const pos = card.front_text_position ?? "bottom-right";
-  const frontTextClass =
-    pos === "top-left"
-      ? "left-2 top-2"
-      : pos === "top-center"
-        ? "left-1/2 top-2 -translate-x-1/2"
-        : pos === "bottom-left"
-          ? "bottom-2 left-2"
-          : pos === "bottom-center"
-            ? "bottom-2 left-1/2 -translate-x-1/2"
-            : "bottom-2 right-2";
+  const insidePos = card.inside_image_position ?? "top";
+  const frontFontStyle = fontCSS(ftFont);
+  const messageFontStyle = fontCSS(msgFont);
+  const ftPosCSS = positionCSS(ftPosition);
+  const ftStyleCSS = textStyleCSS(ftStyle);
+
+  // On-screen preview aspect ratios (landscape sheet with 2 portrait panels)
+  const sheetAspect = printSize === "4x6" ? "8 / 6"
+    : printSize === "5x7" ? "10 / 7"
+      : "11 / 8.5";
+
+  // Always use standard landscape paper so the printer can duplex reliably.
+  // Use @page margins to create the correct content area for each card size.
+  // On landscape letter (11" × 8.5"):
+  //   8.5×11 → margin: 0           → content = 11" × 8.5"
+  //   5×7    → margin: 0.75in 0.5in → content = 10" × 7"
+  //   4×6    → margin: 1.25in 1.5in → content = 8"  × 6"
+  const pageMargins = printSize === "4x6" ? "1.25in 1.5in"
+    : printSize === "5x7" ? "0.75in 0.5in"
+      : "0";
 
   return (
     <>
       <style>{`
-        .print-sheet {
+        @page {
+          size: landscape;
+          margin: ${pageMargins};
+        }
+
+        .card-sheet {
           display: flex;
           flex-direction: row;
           width: 100%;
-          min-height: 320px;
+          aspect-ratio: ${sheetAspect};
+          max-height: 60vh;
           border: 1px solid #e5e7eb;
-          margin-bottom: 1rem;
           border-radius: 0.5rem;
           overflow: hidden;
+          margin-bottom: 1rem;
+          background: #fff;
         }
-        .print-half {
+        .card-panel {
           width: 50%;
-          box-sizing: border-box;
-          padding: 1rem;
-          border-right: 1px solid #e5e7eb;
-          overflow: hidden;
-        }
-        .print-half:last-child { border-right: none; }
-        .print-half img { display: block; }
-        .print-front-half { aspect-ratio: 4 / 6; }
-        .print-front-half.size-5x7 { aspect-ratio: 5 / 7; }
-        .print-front-half img {
-          width: 100%;
           height: 100%;
-          object-fit: cover;
-          object-position: center;
+          position: relative;
+          overflow: hidden;
+          box-sizing: border-box;
         }
-        .print-half:not(.print-front-half) img {
-          max-width: 100%;
-          max-height: 100%;
-          object-fit: contain;
+        .card-panel + .card-panel {
+          border-left: 1px dashed #d1d5db;
         }
-        @page { size: landscape; margin: 0.4in; }
+
+        .front-text-overlay {
+          font-size: clamp(1.4rem, 4vw, 2.5rem);
+          line-height: 1.2;
+          text-align: center;
+        }
+
         @media print {
           .no-print { display: none !important; }
-          body { margin: 0; padding: 0; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-          .print-sheet {
-            page-break-after: always;
+          html, body {
+            margin: 0; padding: 0; height: auto;
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
+          }
+          .print-wrapper {
+            max-width: none !important;
+            padding: 0 !important;
+            margin: 0 !important;
+          }
+          .card-sheet {
             width: 100%;
             height: 100vh;
-            min-height: 7in;
+            max-height: none;
+            aspect-ratio: auto;
             border: none;
-            margin: 0;
             border-radius: 0;
+            margin: 0;
+            page-break-inside: avoid;
+            break-inside: avoid;
           }
-          .print-sheet:last-of-type { page-break-after: auto; }
-          .print-half {
-            height: 100%;
-            padding: 0.25in;
-            border-right: 1px solid #ccc;
+          .card-sheet-1 {
+            page-break-after: always;
+            break-after: page;
           }
-          .print-front-half img { width: 100%; height: 100%; object-fit: cover; object-position: center; }
+          .card-sheet-2 {
+            page-break-after: avoid;
+            break-after: avoid;
+          }
+          .card-panel + .card-panel { border-left: none; }
+          .front-text-overlay {
+            font-size: clamp(1.6rem, 5vw, 3rem) !important;
+          }
         }
       `}</style>
 
-      {/* On-screen controls */}
-      <div className="no-print bg-gray-50 border-b border-gray-200 px-6 py-4">
-        <div className="max-w-3xl mx-auto flex items-center justify-between">
+      {/* ── Top Bar ── */}
+      <div className="no-print bg-gray-50 border-b border-gray-200 px-6 py-3">
+        <div className="max-w-4xl mx-auto flex items-center justify-between flex-wrap gap-3">
           <div className="flex items-center gap-3">
             <button
               onClick={() => router.push("/")}
@@ -150,47 +288,60 @@ export default function PrintCardPage() {
             >
               &larr; Dashboard
             </button>
+            <button
+              onClick={() => router.push(`/cards/edit/${cardId}`)}
+              className="text-sm font-medium text-indigo-600 hover:text-indigo-800"
+            >
+              &larr; Edit card
+            </button>
             {recipient && (
               <button
                 onClick={() => router.push(`/recipients/${recipient.id}`)}
-                className="text-sm font-medium text-indigo-600 hover:text-indigo-800"
+                className="text-sm text-gray-500 hover:text-gray-700"
               >
-                Done — back to {recipient.name}
+                {recipient.name}&apos;s profile
               </button>
             )}
           </div>
-          <div className="flex items-center gap-4">
-            <div className="flex items-center gap-2">
-              <span className="text-sm text-gray-500">Size:</span>
-              <label className="flex items-center gap-1.5 text-sm">
-                <input
-                  type="radio"
-                  name="printSize"
-                  checked={printSize === "4x6"}
-                  onChange={() => setPrintSize("4x6")}
-                  className="text-indigo-600"
-                />
-                4×6
-              </label>
-              <label className="flex items-center gap-1.5 text-sm">
-                <input
-                  type="radio"
-                  name="printSize"
-                  checked={printSize === "5x7"}
-                  onChange={() => setPrintSize("5x7")}
-                  className="text-indigo-600"
-                />
-                5×7
-              </label>
+
+          <div className="flex items-center gap-3 flex-wrap">
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs text-gray-500">Size:</span>
+              {(["4x6", "5x7", "8.5x11"] as const).map((s) => (
+                <label key={s} className="flex items-center gap-1 text-sm cursor-pointer">
+                  <input
+                    type="radio"
+                    name="printSize"
+                    checked={printSize === s}
+                    onChange={() => setPrintSize(s)}
+                    className="text-indigo-600"
+                  />
+                  <span className="text-gray-700">
+                    {s === "4x6" ? "4×6" : s === "5x7" ? "5×7" : "8.5×11"}
+                  </span>
+                </label>
+              ))}
             </div>
-            <p className="text-sm text-gray-500">
-              {recipient ? `Card for ${recipient.name}` : "Print preview"}
-            </p>
-            {!imagesLoaded && imageUrls.length > 0 && (
-              <span className="text-amber-600 text-sm">Loading images…</span>
-            )}
+
+            <label className="flex items-center gap-1.5 text-sm cursor-pointer">
+              <input
+                type="checkbox"
+                checked={duplex}
+                onChange={(e) => setDuplex(e.target.checked)}
+                className="text-indigo-600 rounded"
+              />
+              <span className="text-gray-600">Duplex</span>
+            </label>
+
             <button
-              onClick={() => window.print()}
+              onClick={() => setShowSettings((v) => !v)}
+              className="text-sm text-indigo-600 hover:text-indigo-800 font-medium"
+            >
+              {showSettings ? "Hide settings" : "Card settings"}
+            </button>
+
+            <button
+              onClick={() => { saveSettings(); setTimeout(() => window.print(), 100); }}
               disabled={!imagesLoaded && imageUrls.length > 0}
               className="bg-indigo-600 text-white px-5 py-2 rounded-lg text-sm font-medium
                          hover:bg-indigo-700 transition-colors disabled:opacity-50"
@@ -201,64 +352,303 @@ export default function PrintCardPage() {
         </div>
       </div>
 
+      {/* ── Editable Settings Panel ── */}
+      {showSettings && (
+        <div className="no-print bg-white border-b border-gray-200 px-6 py-4">
+          <div className="max-w-4xl mx-auto">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+              <div>
+                <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">
+                  Front text position
+                </label>
+                <select
+                  value={ftPosition}
+                  onChange={(e) => setFtPosition(e.target.value)}
+                  className="w-full text-sm border border-gray-300 rounded-lg px-2 py-1.5"
+                >
+                  {POSITION_OPTIONS.map((o) => (
+                    <option key={o.value} value={o.value}>{o.label}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">
+                  Front text style
+                </label>
+                <select
+                  value={ftStyle}
+                  onChange={(e) => setFtStyle(e.target.value as TextStyleChoice)}
+                  className="w-full text-sm border border-gray-300 rounded-lg px-2 py-1.5"
+                >
+                  {TEXT_STYLE_OPTIONS.map((o) => (
+                    <option key={o.value} value={o.value}>{o.label}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">
+                  Front font
+                </label>
+                <select
+                  value={ftFont}
+                  onChange={(e) => setFtFont(e.target.value as FontChoice)}
+                  className="w-full text-sm border border-gray-300 rounded-lg px-2 py-1.5"
+                >
+                  {FONT_OPTIONS.map((o) => (
+                    <option key={o.value} value={o.value}>{o.label}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">
+                  Message font
+                </label>
+                <select
+                  value={msgFont}
+                  onChange={(e) => setMsgFont(e.target.value as FontChoice)}
+                  className="w-full text-sm border border-gray-300 rounded-lg px-2 py-1.5"
+                >
+                  {FONT_OPTIONS.map((o) => (
+                    <option key={o.value} value={o.value}>{o.label}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            <div className="mt-3 flex justify-end">
+              <button
+                onClick={() => { saveSettings(); setShowSettings(false); }}
+                className="text-sm bg-indigo-600 text-white px-4 py-1.5 rounded-lg hover:bg-indigo-700"
+              >
+                Save changes
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Print Instructions ── */}
       <div className="no-print px-6 py-4">
-        <div className="max-w-3xl mx-auto">
+        <div className="max-w-4xl mx-auto">
           <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 text-sm text-amber-800">
-            <p className="font-medium mb-1">How to print (landscape, two-sided)</p>
+            <p className="font-medium mb-1">
+              How to print {duplex ? "(automatic two-sided)" : "(manual two-sided)"}
+            </p>
             <ul className="list-disc list-inside space-y-1 text-amber-700">
-              <li>Card size: <strong>{printSize === "4x6" ? "4×6" : "5×7"}</strong> (use matching paper if you have it).</li>
-              <li><strong>Page 1:</strong> Left = back of card · Right = front cover (image fills panel)</li>
-              <li><strong>Page 2:</strong> Left = inside left (blank/art) · Right = message</li>
-              <li>Set printer to <strong>landscape</strong>. Print both pages. Two-sided: print page 1, then feed and print page 2 on the back.</li>
-              <li>Fold right over left so the front is on the outside.</li>
+              <li>
+                Card size:{" "}
+                <strong>
+                  {printSize === "4x6" ? "4\" × 6\""
+                    : printSize === "5x7" ? "5\" × 7\""
+                      : "5.5\" × 8.5\" (half letter)"}
+                </strong>
+                {" "} — folded card with two portrait panels.
+              </li>
+              <li>
+                Load <strong>letter paper (8.5×11)</strong>
+                {printSize !== "8.5x11" && " — card stock or regular paper for test prints"}.
+              </li>
+              <li>
+                In the print dialog: <strong>Landscape</strong> orientation, <strong>Scale 100%</strong> (not &quot;Fit to page&quot;).
+              </li>
+              <li>
+                <strong>Page 1 (outside):</strong> Left = back · Right = front cover
+              </li>
+              <li>
+                <strong>Page 2 (inside):</strong> Left = blank · Right = message
+              </li>
+              {duplex ? (
+                <>
+                  <li>
+                    Enable <strong>Two-sided / Duplex</strong> and set flip to <strong>&quot;Flip on short edge&quot;</strong>.
+                  </li>
+                  <li>
+                    Hit print — both sides print on <strong>one sheet</strong> automatically.
+                  </li>
+                </>
+              ) : (
+                <>
+                  <li>
+                    Make sure <strong>Two-sided / Duplex is OFF</strong>.
+                    Print <strong>page 1 only</strong>.
+                  </li>
+                  <li>
+                    Re-insert the printed sheet <strong>face-down, rotated 180°</strong>,
+                    then print <strong>page 2 only</strong>.
+                  </li>
+                </>
+              )}
+              <li>
+                Fold right over left so the front cover is on the outside.
+                {printSize !== "8.5x11" && " Trim to size if using letter paper."}
+              </li>
             </ul>
           </div>
         </div>
       </div>
 
-      {/* Sheet 1: Back (left) + Front (right) — one landscape page */}
-      <div className="print-sheet bg-white">
-        <div className="print-half flex flex-col justify-end border-r border-gray-200 print:border-gray-300">
-          <p className="text-xs text-gray-400 print:text-black mt-auto pb-4">Created by Nuuge</p>
+      {/* ── Sheet Previews ── */}
+      <div className="print-wrapper max-w-4xl mx-auto px-6 pb-8">
+
+        {/* Sheet 1 — Back (left) + Front (right) */}
+        <p className="no-print text-xs text-gray-400 uppercase tracking-wide mb-1">
+          Page 1 — Outside (back + front)
+        </p>
+        <div className="card-sheet card-sheet-1">
+          <div className="card-panel flex flex-col items-center justify-end p-4">
+            <p className="text-xs text-gray-400 pb-4">Created by Nuuge</p>
+          </div>
+
+          <div className="card-panel">
+            {card.image_url ? (
+              <>
+                <img
+                  src={card.image_url}
+                  alt="Card front"
+                  style={{
+                    width: "100%",
+                    height: "100%",
+                    objectFit: "cover",
+                    objectPosition: "center",
+                    display: "block",
+                  }}
+                />
+                {card.front_text && (
+                  <div
+                    className="front-text-overlay"
+                    style={{
+                      position: "absolute",
+                      ...ftPosCSS,
+                      ...frontFontStyle,
+                      ...ftStyleCSS,
+                      maxWidth: "90%",
+                    }}
+                  >
+                    {card.front_text}
+                  </div>
+                )}
+              </>
+            ) : (
+              <div className="w-full h-full bg-gradient-to-br from-indigo-100 to-purple-100 flex items-center justify-center">
+                <p className="text-indigo-400 text-lg font-medium">{card.occasion}</p>
+              </div>
+            )}
+          </div>
         </div>
-        <div className={`print-half print-front-half relative flex items-center justify-center bg-white overflow-hidden ${printSize === "5x7" ? "size-5x7" : ""}`}>
-          {card.image_url ? (
-            <>
+
+        {/* Sheet 2 — Inside left (blank) + Inside right (message) */}
+        <p className="no-print text-xs text-gray-400 uppercase tracking-wide mb-1 mt-4">
+          Page 2 — Inside (blank + message)
+        </p>
+        <div className="card-sheet card-sheet-2">
+          <div className="card-panel" />
+
+          {/* Inside right — message + illustration */}
+          <div
+            className="card-panel"
+            style={{
+              ...messageFontStyle,
+              position: "relative",
+              display: "flex",
+              flexDirection: insidePos === "left" || insidePos === "right" ? "row" : "column",
+            }}
+          >
+            {/* ── Watermark: fills entire panel, text overlays on top ── */}
+            {insidePos === "behind" && card.inside_image_url && (
               <img
-                src={card.image_url}
-                alt="Card front"
+                src={card.inside_image_url}
+                alt=""
+                style={{
+                  position: "absolute",
+                  top: 0,
+                  left: 0,
+                  width: "100%",
+                  height: "100%",
+                  objectFit: "cover",
+                  opacity: 0.12,
+                  pointerEvents: "none",
+                }}
               />
-              {card.front_text && (
-                <div className={`absolute text-lg font-medium text-gray-800 print:text-black ${frontTextClass}`}>
-                  {card.front_text}
+            )}
+
+            {insidePos === "left" && card.inside_image_url && (
+              <div style={{ width: "18%", flexShrink: 0, height: "100%" }}>
+                <img src={card.inside_image_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+              </div>
+            )}
+
+            {insidePos === "top" && card.inside_image_url && (
+              <div style={{ width: "100%", height: "16%", flexShrink: 0 }}>
+                <img src={card.inside_image_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+              </div>
+            )}
+
+            {/* Message text — centered, adaptive sizing */}
+            <div
+              style={{
+                flex: 1,
+                display: "flex",
+                flexDirection: "column",
+                justifyContent: "center",
+                alignItems: "center",
+                padding: insidePos === "left" || insidePos === "right"
+                  ? "6% 4%"
+                  : "8% 10%",
+                overflow: "hidden",
+                position: "relative",
+                zIndex: 1,
+                gap: sizing.gap,
+              }}
+            >
+              {insidePos === "middle" && card.inside_image_url && (
+                <div style={{ width: "100%", height: "16%", flexShrink: 0 }}>
+                  <img src={card.inside_image_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: "0.25rem" }} />
                 </div>
               )}
-            </>
-          ) : (
-            <div className="w-full h-full min-h-[200px] bg-gradient-to-br from-indigo-100 to-purple-100 flex items-center justify-center">
-              <p className="text-indigo-400 text-lg font-medium">{card.occasion}</p>
+
+              <p
+                className="text-gray-800 text-center"
+                style={{ fontSize: sizing.greetingSize, fontWeight: 600, lineHeight: 1.3 }}
+              >
+                {greeting}
+              </p>
+              {body && (
+                <p
+                  className="text-gray-700 whitespace-pre-wrap text-center"
+                  style={{ fontSize: sizing.bodySize, lineHeight: 1.55 }}
+                >
+                  {body}
+                </p>
+              )}
+              {closing && (
+                <p
+                  className="text-gray-600 text-center"
+                  style={{ fontSize: sizing.closingSize, fontStyle: "italic", lineHeight: 1.4 }}
+                >
+                  {closing}
+                </p>
+              )}
             </div>
-          )}
+
+            {insidePos === "bottom" && card.inside_image_url && (
+              <div style={{ width: "100%", height: "16%", flexShrink: 0 }}>
+                <img src={card.inside_image_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+              </div>
+            )}
+
+            {insidePos === "right" && card.inside_image_url && (
+              <div style={{ width: "18%", flexShrink: 0, height: "100%" }}>
+                <img src={card.inside_image_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
-      {/* Sheet 2: Inside left (blank/art) + Inside right (message) — one landscape page */}
-      <div className="print-sheet bg-white">
-        <div className="print-half flex flex-col items-center justify-center border-r border-gray-200 print:border-gray-300">
-          {card.inside_image_url && (
-            <img
-              src={card.inside_image_url}
-              alt=""
-              className="max-h-32 w-auto object-contain"
-            />
-          )}
+      {!imagesLoaded && imageUrls.length > 0 && (
+        <div className="no-print fixed bottom-4 right-4 bg-amber-100 text-amber-800 text-sm px-4 py-2 rounded-lg shadow">
+          Loading images...
         </div>
-        <div className="print-half flex flex-col justify-center text-center p-4">
-          <p className="text-xl font-medium text-gray-800 mb-4">{greeting}</p>
-          <p className="text-base text-gray-700 leading-relaxed mb-4 whitespace-pre-wrap">{body}</p>
-          <p className="text-base text-gray-600 italic">{closing}</p>
-        </div>
-      </div>
+      )}
     </>
   );
 }

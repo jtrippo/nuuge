@@ -40,9 +40,17 @@ export default function ProfilePage() {
     );
   }
 
+  function toTags(val: unknown): string[] {
+    if (Array.isArray(val)) return val;
+    if (typeof val === "string") return val.split(",").map((s) => s.trim()).filter(Boolean);
+    return [];
+  }
+
   function handleSave() {
     saveUserProfile({
       ...editData,
+      interests: toTags(editData.interests),
+      values: toTags(editData.values),
       partner_name: partnerName || null,
     });
     const refreshed = getUserProfile();

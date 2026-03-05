@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter, useParams } from "next/navigation";
-import { getRecipients, saveRecipient, deleteRecipient, getCards, getCardsForRecipient, saveCard, getCardExpandedState, setCardExpanded, linkRecipients, unlinkRecipients } from "@/lib/store";
+import { getRecipients, saveRecipient, deleteRecipient, getCards, getCardsForRecipient, saveCard, getCardExpandedState, setCardExpanded, linkRecipients, unlinkRecipients, hydrateCardImages } from "@/lib/store";
 import ProfileEditor from "@/components/ProfileEditor";
 import type { Recipient, ImportantDate, Card, PersonProfile } from "@/types/database";
 
@@ -33,6 +33,7 @@ export default function RecipientDetailPage() {
   const [reuseCardId, setReuseCardId] = useState<string | null>(null);
   const [reuseTargetRecipientId, setReuseTargetRecipientId] = useState("");
   const [mounted, setMounted] = useState(false);
+  const [hydratedImages, setHydratedImages] = useState<Record<string, string>>({});
 
   const refreshCards = () => setCards(getCardsForRecipient(id));
 
@@ -52,39 +53,25 @@ export default function RecipientDetailPage() {
     const found = all.find((r) => r.id === id);
     if (found) {
       setRecipient(found);
-      setProfileData({
-        display_name: found.name,
-        birthday: found.birthday || null,
-        personality: found.personality_notes,
-        humor_style: found.humor_style || null,
-        interests: found.interests || [],
-        values: found.values || [],
-        occupation: found.occupation || null,
-        location: found.location || null,
-        lifestyle: found.lifestyle || null,
-        pets: found.pets || null,
-        children: found.children || null,
-        favorite_foods: found.favorite_foods || null,
-        favorite_music: found.favorite_music || null,
-        favorite_movies_tv: found.favorite_movies_tv || null,
-        favorite_books: found.favorite_books || null,
-        dislikes: found.dislikes || null,
-        communication_style: found.communication_style || null,
-        notes: found.notes || null,
-      });
-      setRecipientFields({
-        relationship_type: found.relationship_type,
-        humor_tolerance: found.humor_tolerance || "",
-        tone_preference: found.tone_preference || "",
-        important_dates: found.important_dates || [],
-        milestones: (found.milestones || []).join(", "),
-      });
+      setProfileData(initProfileData(found));
+      setRecipientFields(initRecipientFields(found));
     }
   }, [id]);
 
   useEffect(() => {
-    setCards(getCardsForRecipient(id));
+    const rawCards = getCardsForRecipient(id);
+    setCards(rawCards);
     setExpandedCards(getCardExpandedState(id));
+
+    rawCards.forEach((c) => {
+      if (c.image_url) {
+        hydrateCardImages(c).then((h) => {
+          if (h.image_url && !h.image_url.startsWith("idb:")) {
+            setHydratedImages((prev) => ({ ...prev, [c.id]: h.image_url! }));
+          }
+        });
+      }
+    });
   }, [id]);
 
   if (!mounted) return null;
@@ -103,6 +90,53 @@ export default function RecipientDetailPage() {
     );
   }
 
+  function toTags(val: unknown): string[] {
+    if (Array.isArray(val)) return val;
+    if (typeof val === "string") return val.split(",").map((s) => s.trim()).filter(Boolean);
+    return [];
+  }
+
+  function initProfileData(r: Recipient): Partial<PersonProfile> {
+    return {
+      display_name: r.name,
+      birthday: r.birthday || null,
+      personality: r.personality_notes,
+      humor_style: r.humor_style || null,
+      interests: r.interests || [],
+      values: r.values || [],
+      occupation: r.occupation || null,
+      location: r.location || null,
+      lifestyle: r.lifestyle || null,
+      pets: r.pets || null,
+      children: r.children || null,
+      favorite_foods: r.favorite_foods || null,
+      favorite_music: r.favorite_music || null,
+      favorite_movies_tv: r.favorite_movies_tv || null,
+      favorite_books: r.favorite_books || null,
+      dislikes: r.dislikes || null,
+      communication_style: r.communication_style || null,
+      notes: r.notes || null,
+    };
+  }
+
+  function initRecipientFields(r: Recipient): RecipientFields {
+    return {
+      relationship_type: r.relationship_type,
+      humor_tolerance: r.humor_tolerance || "",
+      tone_preference: r.tone_preference || "",
+      important_dates: r.important_dates || [],
+      milestones: (r.milestones || []).join(", "),
+    };
+  }
+
+  function handleCancel() {
+    if (recipient) {
+      setProfileData(initProfileData(recipient));
+      setRecipientFields(initRecipientFields(recipient));
+    }
+    setEditing(false);
+  }
+
   function handleSave() {
     if (!recipientFields || !recipient) return;
     const updated: Partial<Recipient> = {
@@ -110,8 +144,8 @@ export default function RecipientDetailPage() {
       name: (profileData.display_name as string) || recipient.name,
       relationship_type: recipientFields.relationship_type,
       personality_notes: (profileData.personality as string) || null,
-      interests: profileData.interests || [],
-      values: profileData.values || [],
+      interests: toTags(profileData.interests),
+      values: toTags(profileData.values),
       humor_style: profileData.humor_style || null,
       humor_tolerance: recipientFields.humor_tolerance,
       tone_preference: recipientFields.tone_preference,
@@ -135,7 +169,11 @@ export default function RecipientDetailPage() {
     const all = getRecipients();
     setAllRecipients(all);
     const refreshed = all.find((r) => r.id === recipient.id);
-    if (refreshed) setRecipient(refreshed);
+    if (refreshed) {
+      setRecipient(refreshed);
+      setProfileData(initProfileData(refreshed));
+      setRecipientFields(initRecipientFields(refreshed));
+    }
     setEditing(false);
   }
 
@@ -181,9 +219,7 @@ export default function RecipientDetailPage() {
             {editing ? (
               <>
                 <button
-                  onClick={() => {
-                    setEditing(false);
-                  }}
+                  onClick={handleCancel}
                   className="text-sm text-gray-500 hover:text-gray-700 px-3 py-1.5"
                 >
                   Cancel
@@ -552,10 +588,10 @@ export default function RecipientDetailPage() {
                       </button>
                       {expanded && (
                         <div className="flex flex-col sm:flex-row sm:items-stretch border-t border-gray-100">
-                          {card.image_url && (
+                          {(hydratedImages[card.id] || (card.image_url && !card.image_url.startsWith("idb:"))) && (
                             <div className="sm:w-36 flex-shrink-0 bg-gray-100">
                               <img
-                                src={card.image_url}
+                                src={hydratedImages[card.id] || card.image_url!}
                                 alt=""
                                 className="w-full h-32 sm:h-full object-cover"
                               />

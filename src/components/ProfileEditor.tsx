@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useRef, useState } from "react";
 import { PERSON_PROFILE_FIELDS, type PersonProfile } from "@/types/database";
 
 interface ProfileEditorProps {
@@ -19,22 +20,32 @@ export default function ProfileEditor({
     (f) => !excludeFields.includes(f.key)
   );
 
-  function getValue(key: keyof PersonProfile): string {
+  // Local editing buffer — keeps raw strings so commas don't get eaten
+  const [editBuf, setEditBuf] = useState<Record<string, string>>({});
+  const prevEditing = useRef(false);
+
+  useEffect(() => {
+    if (editing && !prevEditing.current) {
+      const buf: Record<string, string> = {};
+      for (const f of fields) {
+        const val = profile[f.key];
+        buf[f.key] = Array.isArray(val) ? val.join(", ") : (val as string) || "";
+      }
+      setEditBuf(buf);
+    }
+    prevEditing.current = editing;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editing]);
+
+  function getDisplayValue(key: keyof PersonProfile): string {
     const val = profile[key];
     if (Array.isArray(val)) return val.join(", ");
     return (val as string) || "";
   }
 
   function handleChange(key: keyof PersonProfile, value: string) {
-    const field = PERSON_PROFILE_FIELDS.find((f) => f.key === key);
-    if (field?.type === "tags") {
-      onChange({
-        ...profile,
-        [key]: value.split(",").map((s) => s.trim()).filter(Boolean),
-      });
-    } else {
-      onChange({ ...profile, [key]: value || null });
-    }
+    setEditBuf((prev) => ({ ...prev, [key]: value }));
+    onChange({ ...profile, [key]: value || null });
   }
 
   if (editing) {
@@ -50,7 +61,7 @@ export default function ProfileEditor({
             </label>
             {field.type === "textarea" ? (
               <textarea
-                value={getValue(field.key)}
+                value={editBuf[field.key] ?? getDisplayValue(field.key)}
                 onChange={(e) => handleChange(field.key, e.target.value)}
                 rows={2}
                 className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm
@@ -58,7 +69,7 @@ export default function ProfileEditor({
               />
             ) : (
               <input
-                value={getValue(field.key)}
+                value={editBuf[field.key] ?? getDisplayValue(field.key)}
                 onChange={(e) => handleChange(field.key, e.target.value)}
                 className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm
                            outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 transition-colors"

@@ -1,79 +1,123 @@
 import { NextRequest, NextResponse } from "next/server";
-import OpenAI from "openai";
+import OpenAI, { toFile } from "openai";
 import { trackUsage } from "@/lib/usage";
+import { GLOBAL_GUARDRAILS } from "@/lib/card-recipes";
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 export async function POST(req: NextRequest) {
+  if (!process.env.OPENAI_API_KEY?.trim()) {
+    return NextResponse.json(
+      { error: "OPENAI_API_KEY is not set. Add it in Vercel under Settings → Environment Variables." },
+      { status: 500 }
+    );
+  }
   try {
     const body = await req.json();
     const {
       imagePrompt,
-      refinement,
-      promptHistory,
       userId,
       isInsideIllustration,
       cardSize,
+      existingImageBase64,
+      insideImageSize,
+      frontImageBase64,
     }: {
       imagePrompt: string;
-      refinement?: string;
-      promptHistory?: { prompt: string; refinement?: string }[];
       userId: string;
       isInsideIllustration?: boolean;
-      /** "4x6" | "5x7" — use portrait aspect ratio so image fills card front */
       cardSize?: "4x6" | "5x7";
+      existingImageBase64?: string;
+      insideImageSize?: "1536x1024" | "1024x1536" | "1024x1024";
+      frontImageBase64?: string;
     } = body;
 
-    const historyBlock =
-      promptHistory && promptHistory.length > 0
-        ? `CRITICAL - The user has already requested changes. Follow their SPECIFIC description literally:\n${promptHistory
-            .map(
-              (h, i) =>
-                `Previous request ${i + 1}: ${h.prompt}${h.refinement ? `\nTheir refinement: ${h.refinement}` : ""}`
-            )
-            .join("\n\n")}\n\nCurrent request (you MUST match this literally, do not substitute a different scene, culture, or setting):\n`
-        : "";
-
-    const fullPrompt = refinement
-      ? `${imagePrompt}\n\nAdditional refinement: ${refinement}`
-      : imagePrompt;
-
+    const avoidList = GLOBAL_GUARDRAILS.avoid.join("; ");
     const literalRules = `
-STRICT RULES - follow the user's description LITERALLY:
-- Do NOT substitute a different scene, location, or culture (e.g. if they say "hiking in Sierra Nevada" do NOT show desert or different clothing).
-- Create an ORIGINAL illustration suitable for a greeting card — NOT a stock photo, NOT generic imagery.
-- No text or words in the image unless the user explicitly asks for text.
-- Style: warm, illustrated, hand-crafted feel — avoid photorealistic or clip-art stock look.`;
+STRICT RULES — follow the scene description LITERALLY:
+- Depict EXACTLY the scene described. Do NOT change the location, add/remove people, or substitute a different setting.
+- ${GLOBAL_GUARDRAILS.alwaysInclude.join(". ")}.
+- ${GLOBAL_GUARDRAILS.prefer.join(". ")}.
+- AVOID: ${avoidList}.`;
 
     const isPortraitCard = !isInsideIllustration && (cardSize === "4x6" || cardSize === "5x7");
-    const size = isInsideIllustration ? "1024x1024" : isPortraitCard ? "1024x1792" : "1024x1024";
+    const size = isInsideIllustration
+      ? (insideImageSize || "1024x1024")
+      : isPortraitCard
+        ? "1024x1536" as const
+        : "1024x1024";
 
-    const cardPrompt = isInsideIllustration
-      ? `Create a small, subtle inside-card illustration that carries the same theme as the card. Simple, minimal, decorative — no text. Suitable for the inside of a folded greeting card.\n\n${literalRules}\n\n${historyBlock}${fullPrompt}`
-      : `Create a greeting card FRONT illustration. The image will be printed as a portrait-format card (taller than wide). Compose so the art fills the full card with no important details at the very edges. Clean composition, no text in the image, visually appealing. Optional text may be overlaid later.${literalRules}\n\n${historyBlock}${fullPrompt}`;
+    // For inside illustrations: always edit from a source image (front cover or existing inside image)
+    // For front cover: edit existing if refining, otherwise generate fresh
+    const sourceImageBase64 = isInsideIllustration
+      ? (existingImageBase64 || frontImageBase64)
+      : existingImageBase64;
 
-    const response = await openai.images.generate({
-      model: "dall-e-3",
-      prompt: cardPrompt,
-      n: 1,
-      size: size as "1024x1024" | "1024x1792" | "1792x1024",
-      quality: "standard",
-    });
+    const isEditing = Boolean(sourceImageBase64);
 
-    const imageUrl = response.data?.[0]?.url;
-    if (!imageUrl) {
-      throw new Error("No image returned from DALL-E");
+    let imageBase64: string;
+
+    if (isEditing && sourceImageBase64) {
+      let editPrompt: string;
+      if (isInsideIllustration && !existingImageBase64 && frontImageBase64) {
+        // First inside generation: deriving from the front cover
+        editPrompt = `Using this greeting card front cover as the source, create a decorative inside-card element by extracting or re-composing elements from it.\n\n${imagePrompt}\n\nKeep the exact same art style, colors, and feel as the source image. The result should look like a detail or crop from the same artwork. No text.`;
+      } else if (isInsideIllustration) {
+        // Refining an existing inside illustration
+        editPrompt = `Edit this inside-card illustration. Keep the same style and composition. Apply this change:\n\n${imagePrompt}`;
+      } else {
+        // Refining the front cover
+        editPrompt = `Edit this greeting card illustration. Keep the same overall composition, style, and artistic feel. Apply this change:\n\n${literalRules}\n\nUpdated scene: ${imagePrompt}`;
+      }
+
+      const rawBase64 = sourceImageBase64.replace(/^data:image\/\w+;base64,/, "");
+      const imageBuffer = Buffer.from(rawBase64, "base64");
+      const imageFile = await toFile(imageBuffer, "card.png", { type: "image/png" });
+
+      const response = await openai.images.edit({
+        model: "gpt-image-1",
+        image: imageFile,
+        prompt: editPrompt,
+        size: size as "1024x1024" | "1024x1536",
+        input_fidelity: "high",
+      });
+
+      const b64 = response.data?.[0]?.b64_json;
+      if (!b64) throw new Error("No image returned from edit");
+      imageBase64 = b64;
+
+      trackUsage(userId, "image_edit", {
+        prompt_length: imagePrompt.length,
+        model: "gpt-image-1",
+        size,
+      });
+    } else {
+      const cardPrompt = `Greeting card FRONT illustration, portrait format (taller than wide). Full-bleed composition, no important details at the very edges. No text in image.\n\n${literalRules}\n\nScene: ${imagePrompt}`;
+
+      const response = await openai.images.generate({
+        model: "gpt-image-1",
+        prompt: cardPrompt,
+        n: 1,
+        size: size as "1024x1024" | "1024x1536",
+        quality: "medium",
+      });
+
+      const b64 = response.data?.[0]?.b64_json;
+      if (!b64) throw new Error("No image returned from generation");
+      imageBase64 = b64;
+
+      trackUsage(userId, "image_generation", {
+        prompt_length: imagePrompt.length,
+        model: "gpt-image-1",
+        size,
+      });
     }
 
-    trackUsage(userId, "image_generation", {
-      prompt_length: fullPrompt.length,
-      model: "dall-e-3",
-      size,
-    });
+    const dataUrl = `data:image/png;base64,${imageBase64}`;
 
     return NextResponse.json({
-      imageUrl,
-      revisedPrompt: response.data?.[0]?.revised_prompt,
+      imageUrl: dataUrl,
+      isEdit: isEditing,
     });
   } catch (error: unknown) {
     console.error("Image generation error:", error);

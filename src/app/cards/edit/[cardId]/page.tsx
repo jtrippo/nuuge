@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { getCardById, updateCard, getRecipients } from "@/lib/store";
+import { getCardById, updateCard, getRecipients, hydrateCardImages } from "@/lib/store";
 import type { Card, Recipient } from "@/types/database";
 
 export default function EditCardPage() {
@@ -23,15 +23,15 @@ export default function EditCardPage() {
     setMounted(true);
     const c = getCardById(cardId);
     if (c) {
-      setCard(c);
-      const parts = c.message_text.split("\n\n");
-      setGreeting(parts[0] || "");
-      setBody(parts.slice(1, -1).join("\n\n") || parts[1] || "");
-      setClosing(parts[parts.length - 1] || "");
-      setFrontText(c.front_text ?? "");
-      setFrontTextPosition(c.front_text_position ?? "bottom-right");
-    }
-    if (c) {
+      hydrateCardImages(c).then((hydrated) => {
+        setCard(hydrated);
+        const parts = hydrated.message_text.split("\n\n");
+        setGreeting(parts[0] || "");
+        setBody(parts.slice(1, -1).join("\n\n") || parts[1] || "");
+        setClosing(parts[parts.length - 1] || "");
+        setFrontText(hydrated.front_text ?? "");
+        setFrontTextPosition(hydrated.front_text_position ?? "bottom-right");
+      });
       const recipients = getRecipients();
       const r = recipients.find((rec) => rec.id === c.recipient_id);
       if (r) setRecipient(r);

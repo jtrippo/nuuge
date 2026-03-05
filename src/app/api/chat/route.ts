@@ -5,6 +5,12 @@ import { buildOnboardingMessages, buildRecipientMessages } from "@/lib/ai/prompt
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 export async function POST(req: NextRequest) {
+  if (!process.env.OPENAI_API_KEY?.trim()) {
+    return NextResponse.json(
+      { error: "OPENAI_API_KEY is not set. Add it in Vercel under Settings → Environment Variables." },
+      { status: 500 }
+    );
+  }
   try {
     const body = await req.json();
     const {

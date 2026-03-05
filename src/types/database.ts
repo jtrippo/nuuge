@@ -138,6 +138,18 @@ export interface Card {
   hidden?: boolean;
   /** Print size: 4x6 or 5x7 inches (folded card). Used for image aspect ratio and print layout. */
   card_size?: "4x6" | "5x7";
+  /** Where the inside illustration appears relative to the message text */
+  inside_image_position?: "top" | "middle" | "bottom" | "left" | "right" | "behind";
+  /** Font style for the front cover text overlay */
+  front_text_font?: "sans" | "script" | "block";
+  /** Visual style of the front text overlay */
+  front_text_style?: "dark_box" | "white_box" | "plain";
+  /** Font style for the inside message text */
+  font?: "sans" | "script" | "block";
+  /** 4-step image builder selections */
+  image_subject?: string | null;
+  art_style?: string | null;
+  image_mood?: string | null;
 }
 
 export type ConversationMessage = {

@@ -1,8 +1,10 @@
 import type { UserProfile, Recipient, Card, ConversationMessage } from "@/types/database";
+import { saveImage, getImage, getAllImages, isLargeDataUrl } from "./image-store";
 
 /**
  * Local storage-based state management for MVP.
  * Will migrate to Supabase once auth is wired up.
+ * Large images are stored in IndexedDB to avoid localStorage quota limits.
  */
 const KEYS = {
   USER_PROFILE: "nuuge_user_profile",
@@ -106,11 +108,29 @@ export function saveCard(card: Partial<Card>) {
     recipient_ids: card.recipient_ids || [card.recipient_id || ""],
     created_at: card.created_at || new Date().toISOString(),
   };
+
+  const imageFields: (keyof Pick<Card, "image_url" | "inside_image_url">)[] = [
+    "image_url",
+    "inside_image_url",
+  ];
+  const toStore = { ...full } as Record<string, unknown>;
+
+  for (const field of imageFields) {
+    const val = toStore[field] as string | null | undefined;
+    if (isLargeDataUrl(val)) {
+      const imgKey = `card_${id}_${field}`;
+      saveImage(imgKey, val!).catch((err) =>
+        console.error(`Failed to save ${field} to IndexedDB:`, err)
+      );
+      toStore[field] = `idb:${imgKey}`;
+    }
+  }
+
   const idx = existing.findIndex((c) => c.id === id);
   if (idx >= 0) {
-    existing[idx] = { ...existing[idx], ...full } as Card;
+    existing[idx] = { ...existing[idx], ...toStore } as Card;
   } else {
-    existing.push(full as Card);
+    existing.push(toStore as Card);
   }
   localStorage.setItem(KEYS.CARDS, JSON.stringify(existing));
   return full as Card;
@@ -121,7 +141,24 @@ export function updateCard(cardId: string, updates: Partial<Card>) {
   const existing = getCards();
   const idx = existing.findIndex((c) => c.id === cardId);
   if (idx < 0) return null;
-  const updated = { ...existing[idx], ...updates } as Card;
+
+  const toStore = { ...updates } as Record<string, unknown>;
+  const imageFields: (keyof Pick<Card, "image_url" | "inside_image_url">)[] = [
+    "image_url",
+    "inside_image_url",
+  ];
+  for (const field of imageFields) {
+    const val = toStore[field] as string | null | undefined;
+    if (isLargeDataUrl(val)) {
+      const imgKey = `card_${cardId}_${field}`;
+      saveImage(imgKey, val!).catch((err) =>
+        console.error(`Failed to save ${field} to IndexedDB:`, err)
+      );
+      toStore[field] = `idb:${imgKey}`;
+    }
+  }
+
+  const updated = { ...existing[idx], ...toStore } as Card;
   existing[idx] = updated;
   localStorage.setItem(KEYS.CARDS, JSON.stringify(existing));
   return updated;
@@ -129,6 +166,26 @@ export function updateCard(cardId: string, updates: Partial<Card>) {
 
 export function getCardById(cardId: string): Card | null {
   return getCards().find((c) => c.id === cardId) ?? null;
+}
+
+/** Load any IndexedDB-stored images back into a card object. */
+export async function hydrateCardImages(card: Card): Promise<Card> {
+  const hydrated = { ...card };
+  const fields: (keyof Pick<Card, "image_url" | "inside_image_url">)[] = [
+    "image_url",
+    "inside_image_url",
+  ];
+  for (const field of fields) {
+    const val = hydrated[field];
+    if (typeof val === "string" && val.startsWith("idb:")) {
+      const imgKey = val.slice(4);
+      const data = await getImage(imgKey);
+      if (data) {
+        (hydrated as Record<string, unknown>)[field] = data;
+      }
+    }
+  }
+  return hydrated;
 }
 
 export function linkRecipients(
@@ -190,4 +247,52 @@ export function saveOnboardingHistory(messages: ConversationMessage[]) {
 export function clearOnboardingHistory() {
   if (!isBrowser()) return;
   localStorage.removeItem(KEYS.ONBOARDING_HISTORY);
+}
+
+// ─── Export / Import ────────────────────────────────────────────────
+
+export interface NuugeBackup {
+  version: 1;
+  exportedAt: string;
+  profile: Partial<UserProfile> | null;
+  recipients: Recipient[];
+  cards: Card[];
+  onboardingHistory: ConversationMessage[];
+  images: Record<string, string>;
+}
+
+export async function exportAllData(): Promise<NuugeBackup> {
+  const images = await getAllImages();
+  return {
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    profile: getUserProfile(),
+    recipients: getRecipients(),
+    cards: getCards(),
+    onboardingHistory: getOnboardingHistory(),
+    images,
+  };
+}
+
+export async function importAllData(backup: NuugeBackup): Promise<void> {
+  if (backup.profile) {
+    localStorage.setItem(KEYS.USER_PROFILE, JSON.stringify(backup.profile));
+  }
+  if (backup.recipients) {
+    localStorage.setItem(KEYS.RECIPIENTS, JSON.stringify(backup.recipients));
+  }
+  if (backup.cards) {
+    localStorage.setItem(KEYS.CARDS, JSON.stringify(backup.cards));
+  }
+  if (backup.onboardingHistory) {
+    localStorage.setItem(
+      KEYS.ONBOARDING_HISTORY,
+      JSON.stringify(backup.onboardingHistory)
+    );
+  }
+  if (backup.images) {
+    for (const [key, value] of Object.entries(backup.images)) {
+      await saveImage(key, value);
+    }
+  }
 }

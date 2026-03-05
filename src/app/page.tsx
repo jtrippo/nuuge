@@ -130,12 +130,20 @@ export default function Dashboard() {
       <header className="border-b border-gray-200 bg-white px-6 py-4">
         <div className="max-w-4xl mx-auto flex items-center justify-between">
           <h1 className="text-xl font-bold text-gray-900">nuuge</h1>
-          <button
-            onClick={() => router.push("/profile")}
-            className="text-sm text-gray-500 hover:text-indigo-600 transition-colors"
-          >
-            {profile.display_name} &middot; My profile
-          </button>
+          <div className="flex items-center gap-4">
+            <button
+              onClick={() => router.push("/backup")}
+              className="text-sm text-gray-400 hover:text-indigo-600 transition-colors"
+            >
+              Backup
+            </button>
+            <button
+              onClick={() => router.push("/profile")}
+              className="text-sm text-gray-500 hover:text-indigo-600 transition-colors"
+            >
+              {profile.display_name} &middot; My profile
+            </button>
+          </div>
         </div>
       </header>
 
