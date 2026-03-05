@@ -9,7 +9,7 @@ import { join } from "path";
 export interface UsageEvent {
   id: string;
   user_id: string;
-  event_type: "image_generation" | "message_generation" | "design_suggestion";
+  event_type: "image_generation" | "image_edit" | "message_generation" | "design_suggestion";
   timestamp: string;
   metadata: Record<string, unknown>;
 }

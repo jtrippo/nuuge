@@ -130,7 +130,7 @@ export function saveCard(card: Partial<Card>) {
   if (idx >= 0) {
     existing[idx] = { ...existing[idx], ...toStore } as Card;
   } else {
-    existing.push(toStore as Card);
+    existing.push(toStore as unknown as Card);
   }
   localStorage.setItem(KEYS.CARDS, JSON.stringify(existing));
   return full as Card;
