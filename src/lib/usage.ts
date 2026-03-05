@@ -1,6 +1,7 @@
 /**
  * Server-side usage tracking for analytics and billing.
- * Stores to a JSON file for MVP. Will migrate to database.
+ * In production (Vercel), logs to console only since the filesystem is read-only.
+ * Locally, stores to a JSON file. Will migrate to database.
  */
 
 import { writeFileSync, readFileSync, existsSync } from "fs";
@@ -14,9 +15,11 @@ export interface UsageEvent {
   metadata: Record<string, unknown>;
 }
 
+const IS_READONLY = process.env.VERCEL === "1" || process.env.NODE_ENV === "production";
 const USAGE_FILE = join(process.cwd(), "usage-log.json");
 
 function getUsageLog(): UsageEvent[] {
+  if (IS_READONLY) return [];
   if (!existsSync(USAGE_FILE)) return [];
   try {
     const raw = readFileSync(USAGE_FILE, "utf-8");
@@ -27,7 +30,12 @@ function getUsageLog(): UsageEvent[] {
 }
 
 function saveUsageLog(events: UsageEvent[]) {
-  writeFileSync(USAGE_FILE, JSON.stringify(events, null, 2));
+  if (IS_READONLY) return;
+  try {
+    writeFileSync(USAGE_FILE, JSON.stringify(events, null, 2));
+  } catch {
+    // Filesystem may be read-only — silently skip
+  }
 }
 
 export function trackUsage(
@@ -35,14 +43,21 @@ export function trackUsage(
   eventType: UsageEvent["event_type"],
   metadata: Record<string, unknown> = {}
 ) {
-  const events = getUsageLog();
-  events.push({
+  const event = {
     id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     user_id: userId,
     event_type: eventType,
     timestamp: new Date().toISOString(),
     metadata,
-  });
+  };
+
+  if (IS_READONLY) {
+    console.log(`[usage] ${eventType}`, metadata);
+    return;
+  }
+
+  const events = getUsageLog();
+  events.push(event);
   saveUsageLog(events);
 }
 
