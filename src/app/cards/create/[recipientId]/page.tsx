@@ -1156,10 +1156,12 @@ Tone preference: ${r.tone_preference || "Not specified"}`.replace(/\n{2,}/g, "\n
               </button>
               <button
                 onClick={() => {
-                  const defaultContext = `Recipient: ${recipient!.name} (${recipient!.relationship_type}). ${
-                    recipient!.interests?.length ? `Interests: ${recipient!.interests.join(", ")}.` : ""
-                  } ${recipient!.personality_notes ? `Personality: ${recipient!.personality_notes}.` : ""}`;
-                  setPersonalContext(defaultContext);
+                  if (!personalContext.trim()) {
+                    const defaultContext = `Recipient: ${recipient!.name} (${recipient!.relationship_type}). ${
+                      recipient!.interests?.length ? `Interests: ${recipient!.interests.join(", ")}.` : ""
+                    } ${recipient!.personality_notes ? `Personality: ${recipient!.personality_notes}.` : ""}`;
+                    setPersonalContext(defaultContext);
+                  }
                   setStep("design_context");
                 }}
                 disabled={!artStyle}
@@ -1352,10 +1354,7 @@ Tone preference: ${r.tone_preference || "Not specified"}`.replace(/\n{2,}/g, "\n
 
             <div className="flex gap-3">
               <button
-                onClick={() => {
-                  setPendingSceneDescription("");
-                  setStep("design_context");
-                }}
+                onClick={() => setStep("design_context")}
                 className="text-sm text-gray-400 hover:text-gray-600 px-4 py-2"
               >
                 &larr; Back
