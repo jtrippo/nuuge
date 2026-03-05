@@ -366,7 +366,10 @@ Tone preference: ${r.tone_preference || "Not specified"}`.replace(/\n{2,}/g, "\n
     setStep("design_loading");
     setError(null);
 
-    const ctx = buildContextString(profile, recipient);
+    const elementsForDesign = Object.keys(activeProfileElements).length > 0
+      ? activeProfileElements
+      : undefined;
+    const ctx = buildContextString(profile, recipient, elementsForDesign);
     const fullMessage = `${editedMessage.greeting}\n${editedMessage.body}\n${editedMessage.closing}`;
 
     const pastCards = getCardsForRecipient(recipient.id);
@@ -407,10 +410,18 @@ Tone preference: ${r.tone_preference || "Not specified"}`.replace(/\n{2,}/g, "\n
     }
   }
 
+  function getActiveInterests(): string[] {
+    const hasToggles = Object.keys(activeProfileElements).length > 0;
+    if (!hasToggles) return recipient?.interests || [];
+    return Object.entries(activeProfileElements)
+      .filter(([k, v]) => v && k.startsWith("interest: "))
+      .map(([k]) => k.slice(10));
+  }
+
   function buildImagePromptFromSelections(): string {
     if (!imageSubject || !artStyle) return "";
 
-    const interests = recipient?.interests || [];
+    const interests = getActiveInterests();
     const age = calculateAge(recipient?.birthday);
     return buildRecipePrompt({
       subjectId: imageSubject,
