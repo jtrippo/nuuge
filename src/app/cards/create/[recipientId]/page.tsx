@@ -17,6 +17,7 @@ import {
   getMoodRecipe,
   toneToMoodId,
   pickRandom,
+  calculateAge,
 } from "@/lib/card-recipes";
 
 const OCCASIONS = [
@@ -233,6 +234,9 @@ Lifestyle: ${p.lifestyle || "Not specified"}`
       ? Object.entries(profileElements).filter(([, v]) => v).map(([k]) => k)
       : null;
 
+    const age = calculateAge(r.birthday);
+    const ageLine = age != null ? `Age: ${age}` : "";
+
     let recipientCtx: string;
     if (active && active.length > 0) {
       const interests = active.filter((e) => e.startsWith("interest: ")).map((e) => e.slice(10));
@@ -242,20 +246,23 @@ Lifestyle: ${p.lifestyle || "Not specified"}`
       });
       recipientCtx = `Name: ${r.name}
 Relationship: ${r.relationship_type}
+${ageLine}
 ${interests.length > 0 ? `Interests: ${interests.join(", ")}` : "Interests: Not specified"}
 ${otherDetails.join("\n")}
-Tone preference: ${r.tone_preference || "Not specified"}`;
+Tone preference: ${r.tone_preference || "Not specified"}`.replace(/\n{2,}/g, "\n");
     } else if (active && active.length === 0) {
       recipientCtx = `Name: ${r.name}
 Relationship: ${r.relationship_type}
-(No specific profile details selected — write a more universal, occasion-focused message.)`;
+${ageLine}
+(No specific profile details selected — write a more universal, occasion-focused message.)`.replace(/\n{2,}/g, "\n");
     } else {
       recipientCtx = `Name: ${r.name}
 Relationship: ${r.relationship_type}
+${ageLine}
 Personality: ${r.personality_notes || "Not specified"}
 Interests: ${(r.interests || []).join(", ") || "Not specified"}
 Humor tolerance: ${r.humor_tolerance || "Not specified"}
-Tone preference: ${r.tone_preference || "Not specified"}`;
+Tone preference: ${r.tone_preference || "Not specified"}`.replace(/\n{2,}/g, "\n");
     }
 
     return { sender, recipient: recipientCtx };
@@ -404,6 +411,7 @@ Tone preference: ${r.tone_preference || "Not specified"}`;
     if (!imageSubject || !artStyle) return "";
 
     const interests = recipient?.interests || [];
+    const age = calculateAge(recipient?.birthday);
     return buildRecipePrompt({
       subjectId: imageSubject,
       subjectDetail: subjectDetail.trim() || undefined,
@@ -412,6 +420,8 @@ Tone preference: ${r.tone_preference || "Not specified"}`;
       personalContext: personalContext.trim() || undefined,
       profileInterests: interests.length > 0 ? interests : undefined,
       occasion,
+      recipientAge: age,
+      relationshipType: recipient?.relationship_type || undefined,
     });
   }
 

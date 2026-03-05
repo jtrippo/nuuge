@@ -785,6 +785,20 @@ export function filterProfileInterests(
 /**
  * Build a complete image prompt from all recipe layers + profile context.
  */
+/** Calculate age from a birthday string (YYYY-MM-DD or similar parseable format) */
+export function calculateAge(birthday: string | null | undefined): number | null {
+  if (!birthday) return null;
+  const dob = new Date(birthday);
+  if (isNaN(dob.getTime())) return null;
+  const today = new Date();
+  let age = today.getFullYear() - dob.getFullYear();
+  const monthDiff = today.getMonth() - dob.getMonth();
+  if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < dob.getDate())) {
+    age--;
+  }
+  return age >= 0 ? age : null;
+}
+
 export function buildRecipePrompt(opts: {
   subjectId: string;
   subjectDetail?: string;
@@ -793,6 +807,8 @@ export function buildRecipePrompt(opts: {
   personalContext?: string;
   profileInterests?: string[];
   occasion: string;
+  recipientAge?: number | null;
+  relationshipType?: string;
 }): string {
   const subject = getSubjectRecipe(opts.subjectId);
   const mood = getMoodRecipe(opts.tone);
@@ -828,10 +844,30 @@ export function buildRecipePrompt(opts: {
     ? `\nAdditional context: ${opts.personalContext.trim()}`
     : "";
 
+  // Build age/relationship context so the AI knows who this card is for
+  let recipientContext = "";
+  if (opts.recipientAge != null || opts.relationshipType) {
+    const parts: string[] = [];
+    if (opts.relationshipType) parts.push(`Recipient is the sender's ${opts.relationshipType.toLowerCase()}`);
+    if (opts.recipientAge != null) {
+      parts.push(`${opts.recipientAge} years old`);
+      if (opts.recipientAge < 5) parts.push("— design for a toddler/young child");
+      else if (opts.recipientAge < 13) parts.push("— design for a child");
+      else if (opts.recipientAge < 20) parts.push("— design for a teenager");
+      else if (opts.recipientAge < 30) parts.push("— design for a young adult");
+      else if (opts.recipientAge < 60) parts.push("— design for an adult");
+      else parts.push("— design for a mature adult");
+    }
+    recipientContext = `\nRecipient: ${parts.join(", ")}. Do NOT depict the recipient as a different age.`;
+  }
+
   // Compose the prompt from all layers
   const lines = [
     // Global guardrails
     GLOBAL_GUARDRAILS.alwaysInclude.join(". ") + ".",
+
+    // Recipient age/relationship (high priority — placed early)
+    recipientContext,
 
     // Scene description (from subject × mood)
     `\nScene: ${chosenSketch}`,
