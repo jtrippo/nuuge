@@ -1,12 +1,15 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useRouter, useParams } from "next/navigation";
+import { useEffect, useState, Suspense } from "react";
+import { useRouter, useParams, useSearchParams } from "next/navigation";
 import {
   getUserProfile,
   getRecipients,
   getCardsForRecipient,
   saveCard,
+  getCardById,
+  updateCard,
+  hydrateCardImages,
 } from "@/lib/store";
 import type { Recipient, UserProfile } from "@/types/database";
 import {
@@ -116,15 +119,27 @@ type InsidePosition = typeof INSIDE_POSITIONS[number]["id"];
 type SubjectId = string;
 type StyleId = string;
 
-export default function CreateCardPage() {
+export default function CreateCardPageWrapper() {
+  return (
+    <Suspense fallback={<div className="flex items-center justify-center h-screen"><p className="text-gray-400">Loading...</p></div>}>
+      <CreateCardPage />
+    </Suspense>
+  );
+}
+
+function CreateCardPage() {
   const router = useRouter();
   const params = useParams();
+  const searchParams = useSearchParams();
   const recipientId = params.recipientId as string;
+  const editCardId = searchParams.get("editCardId");
+  const startStep = searchParams.get("startStep") as Step | null;
 
   const [profile, setProfile] = useState<Partial<UserProfile> | null>(null);
   const [recipient, setRecipient] = useState<Recipient | null>(null);
   const [allRecipients, setAllRecipients] = useState<Recipient[]>([]);
   const [mounted, setMounted] = useState(false);
+  const [editMode, setEditMode] = useState(false);
 
   const [step, setStep] = useState<Step>("occasion");
   const [occasion, setOccasion] = useState("");
@@ -170,6 +185,7 @@ export default function CreateCardPage() {
   const [deliveryMethod, setDeliveryMethod] = useState<"digital" | "print_at_home" | "mail">("digital");
   const [savedCardId, setSavedCardId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [pendingChangeType, setPendingChangeType] = useState<"refine" | "redesign">("refine");
 
   useEffect(() => {
     setMounted(true);
@@ -178,7 +194,57 @@ export default function CreateCardPage() {
     setAllRecipients(all);
     const found = all.find((r) => r.id === recipientId);
     if (found) setRecipient(found);
-  }, [recipientId]);
+
+    if (editCardId) {
+      const existing = getCardById(editCardId);
+      if (existing) {
+        hydrateCardImages(existing).then((card) => {
+          setEditMode(true);
+          setOccasion(card.occasion ?? "");
+          setTone(card.tone_used ?? "");
+          setCardSize(card.card_size ?? "5x7");
+          setFont(card.font ?? "sans");
+          setFrontText(card.front_text ?? "");
+          setFrontTextPosition(card.front_text_position ?? "bottom-right");
+          setFrontTextStyle((card.front_text_style as "dark_box" | "white_box" | "plain") ?? "dark_box");
+          setImageSubject(card.image_subject ?? null);
+          setArtStyle(card.art_style ?? null);
+          if (card.image_url) setGeneratedImageUrl(card.image_url);
+          if (card.inside_image_url) setInsideImageUrl(card.inside_image_url);
+          if (card.inside_image_position) {
+            setInsideImagePosition(card.inside_image_position as typeof insideImagePosition);
+          }
+          if (card.inside_image_prompt) {
+            setInsideSceneDescription(card.inside_image_prompt);
+          }
+          if (card.image_prompt) {
+            setCurrentSceneDescription(card.image_prompt);
+            setPendingSceneDescription(card.image_prompt);
+          }
+          if (card.delivery_method) {
+            setDeliveryMethod(card.delivery_method);
+          }
+
+          const parts = card.message_text.split("\n\n");
+          const g = parts[0] || "";
+          const b = parts.slice(1, -1).join("\n\n") || parts[1] || "";
+          const c = parts[parts.length - 1] || "";
+          const msg: CardMessage = { label: card.style ?? "Restored", greeting: g, body: b, closing: c };
+          setSelected(msg);
+          setEditedMessage(msg);
+          setSavedCardId(editCardId);
+
+          // Initialize profile elements from recipient so image generation
+          // uses the same filtered baseline the message was built with
+          if (found) {
+            setActiveProfileElements(extractProfileElements(found));
+          }
+
+          setStep(startStep ?? "occasion");
+        });
+      }
+    }
+  }, [recipientId, editCardId, startStep]);
 
   if (!mounted) return null;
 
@@ -519,6 +585,7 @@ Tone preference: ${r.tone_preference || "Not specified"}`.replace(/\n{2,}/g, "\n
       }
       const data = await res.json();
       setPendingSceneDescription(data.mergedScene);
+      setPendingChangeType(data.changeType === "redesign" ? "redesign" : "refine");
       setStep("design_confirm_refinement");
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Something went wrong";
@@ -558,6 +625,7 @@ Tone preference: ${r.tone_preference || "Not specified"}`.replace(/\n{2,}/g, "\n
       }
       const data = await res.json();
       setPendingInsideScene(data.mergedScene);
+      setPendingChangeType(data.changeType === "redesign" ? "redesign" : "refine");
       setStep("inside_confirm_refinement");
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Something went wrong";
@@ -594,15 +662,14 @@ Tone preference: ${r.tone_preference || "Not specified"}`.replace(/\n{2,}/g, "\n
     if (!editedMessage || !recipient) return;
     const method = options?.deliveryMethodOverride ?? deliveryMethod;
     const fullText = `${editedMessage.greeting}\n\n${editedMessage.body}\n\n${editedMessage.closing}`;
-    const allRecipientIds = [recipient.id, ...sharedWith];
-    const saved = saveCard({
+    const cardData: Partial<import("@/types/database").Card> = {
       user_id: "local",
       recipient_id: recipient.id,
-      recipient_ids: allRecipientIds,
+      recipient_ids: [recipient.id, ...sharedWith],
       occasion,
       message_text: fullText,
       image_url: generatedImageUrl,
-      image_prompt: selectedDesign?.image_prompt || null,
+      image_prompt: selectedDesign?.image_prompt || currentSceneDescription || null,
       inside_image_url: insideImageUrl,
       inside_image_prompt: selectedInsideConcept?.image_prompt || null,
       front_text: frontText.trim() || null,
@@ -620,13 +687,25 @@ Tone preference: ${r.tone_preference || "Not specified"}`.replace(/\n{2,}/g, "\n
       sent: false,
       co_signed_with: coSign ? profile?.partner_name || null : null,
       card_size: cardSize,
-    }) as { id: string } | undefined;
-    if (saved) {
-      setSavedCardId(saved.id);
+    };
+
+    if (editMode && editCardId) {
+      updateCard(editCardId, cardData);
+      setSavedCardId(editCardId);
       setDeliveryMethod(method);
       if (method === "print_at_home") {
-        router.push(`/cards/print/${saved.id}`);
+        router.push(`/cards/print/${editCardId}`);
         return;
+      }
+    } else {
+      const saved = saveCard(cardData) as { id: string } | undefined;
+      if (saved) {
+        setSavedCardId(saved.id);
+        setDeliveryMethod(method);
+        if (method === "print_at_home") {
+          router.push(`/cards/print/${saved.id}`);
+          return;
+        }
       }
     }
     setStep("saved");
@@ -637,13 +716,16 @@ Tone preference: ${r.tone_preference || "Not specified"}`.replace(/\n{2,}/g, "\n
       <header className="border-b border-gray-200 bg-white px-6 py-4">
         <div className="max-w-2xl mx-auto flex items-center justify-between">
           <button
-            onClick={() => router.push("/")}
+            onClick={() => editMode && editCardId
+              ? router.push(`/cards/edit/${editCardId}`)
+              : router.push("/")
+            }
             className="text-sm text-gray-500 hover:text-gray-700"
           >
-            &larr; Dashboard
+            &larr; {editMode ? "Back to edit" : "Dashboard"}
           </button>
           <span className="text-sm text-gray-500">
-            Card for {recipient.name}
+            {editMode ? "Regenerating" : "Card"} for {recipient.name}
           </span>
         </div>
       </header>
@@ -1000,12 +1082,23 @@ Tone preference: ${r.tone_preference || "Not specified"}`.replace(/\n{2,}/g, "\n
               >
                 &larr; Pick a different one
               </button>
+              {editMode && generatedImageUrl && (
+                <button
+                  onClick={() => {
+                    handleSave({ deliveryMethodOverride: deliveryMethod });
+                  }}
+                  className="bg-green-600 text-white px-6 py-3 rounded-xl font-medium
+                             hover:bg-green-700 transition-colors"
+                >
+                  Save &amp; finish
+                </button>
+              )}
               <button
                 onClick={() => setStep("design_subject")}
                 className="bg-indigo-600 text-white px-8 py-3 rounded-xl font-medium
                            hover:bg-indigo-700 transition-colors flex-1"
               >
-                Next: Design the card
+                {editMode && generatedImageUrl ? "Continue: Redesign image" : "Next: Design the card"}
               </button>
             </div>
           </div>
@@ -1523,11 +1616,21 @@ Tone preference: ${r.tone_preference || "Not specified"}`.replace(/\n{2,}/g, "\n
         {step === "design_confirm_refinement" && (
           <div>
             <h2 className="text-xl font-bold text-gray-900 mb-2">
-              Confirm the updated scene
+              {pendingChangeType === "redesign" ? "New image will be generated" : "Confirm the updated scene"}
             </h2>
             <p className="text-sm text-gray-500 mb-4">
-              We merged your change into the full description. Edit it if anything looks off, then generate.
+              {pendingChangeType === "redesign"
+                ? "Your change requires a completely new image. The current image will be replaced (you can revert after)."
+                : "We merged your change into the full description. Edit it if anything looks off, then generate."}
             </p>
+
+            {pendingChangeType === "redesign" && (
+              <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-lg">
+                <p className="text-sm text-amber-800">
+                  This is a major style or subject change. A fresh image will be generated from scratch instead of editing the current one.
+                </p>
+              </div>
+            )}
 
             <div className="bg-white border border-gray-200 rounded-xl p-4 mb-6">
               <label className="text-xs text-gray-500 uppercase tracking-wide mb-2 block">
@@ -1551,7 +1654,6 @@ Tone preference: ${r.tone_preference || "Not specified"}`.replace(/\n{2,}/g, "\n
             <div className="flex gap-3">
               <button
                 onClick={() => {
-                  setPendingSceneDescription("");
                   setStep("design_preview");
                 }}
                 className="text-sm text-gray-400 hover:text-gray-600 px-4 py-2"
@@ -1563,13 +1665,20 @@ Tone preference: ${r.tone_preference || "Not specified"}`.replace(/\n{2,}/g, "\n
                   setPreviousImageUrl(generatedImageUrl);
                   setPreviousSceneDescription(currentSceneDescription);
                   setCurrentSceneDescription(pendingSceneDescription);
-                  generateDesignImage(pendingSceneDescription, { editExisting: true });
+                  if (pendingChangeType === "redesign") {
+                    generateDesignImage(pendingSceneDescription, { editExisting: false });
+                  } else {
+                    generateDesignImage(pendingSceneDescription, { editExisting: true });
+                  }
                 }}
                 disabled={!pendingSceneDescription.trim()}
-                className="bg-indigo-600 text-white px-8 py-3 rounded-xl font-medium
-                           hover:bg-indigo-700 transition-colors flex-1"
+                className={`px-8 py-3 rounded-xl font-medium transition-colors flex-1 text-white ${
+                  pendingChangeType === "redesign"
+                    ? "bg-amber-600 hover:bg-amber-700"
+                    : "bg-indigo-600 hover:bg-indigo-700"
+                }`}
               >
-                Looks good — edit image
+                {pendingChangeType === "redesign" ? "Generate new image" : "Looks good \u2014 edit image"}
               </button>
             </div>
           </div>
@@ -1679,12 +1788,23 @@ Tone preference: ${r.tone_preference || "Not specified"}`.replace(/\n{2,}/g, "\n
               >
                 &larr; {designConcepts.length > 0 ? "Pick different design" : "Back to design builder"}
               </button>
+              {editMode && (
+                <button
+                  onClick={() => {
+                    handleSave({ deliveryMethodOverride: deliveryMethod });
+                  }}
+                  className="bg-green-600 text-white px-6 py-3 rounded-xl font-medium
+                             hover:bg-green-700 transition-colors"
+                >
+                  Save &amp; finish
+                </button>
+              )}
               <button
                 onClick={() => setStep("inside_design_ask")}
                 className="bg-indigo-600 text-white px-8 py-3 rounded-xl font-medium
                            hover:bg-indigo-700 transition-colors flex-1"
               >
-                Next: Inside &amp; front text
+                {editMode ? "Continue: Inside & front text" : "Next: Inside & front text"}
               </button>
             </div>
           </div>
@@ -1708,10 +1828,16 @@ Tone preference: ${r.tone_preference || "Not specified"}`.replace(/\n{2,}/g, "\n
                 Yes, choose placement
               </button>
               <button
-                onClick={() => loadFrontTextSuggestion()}
+                onClick={() => {
+                  if (editMode) {
+                    handleSave({ deliveryMethodOverride: deliveryMethod });
+                  } else {
+                    loadFrontTextSuggestion();
+                  }
+                }}
                 className="bg-white border border-gray-200 text-gray-700 px-8 py-3 rounded-xl font-medium hover:bg-gray-50 flex-1"
               >
-                No, skip
+                {editMode ? "No, save & finish" : "No, skip"}
               </button>
             </div>
             <button
@@ -1943,11 +2069,21 @@ Tone preference: ${r.tone_preference || "Not specified"}`.replace(/\n{2,}/g, "\n
         {step === "inside_confirm_refinement" && (
           <div>
             <h2 className="text-xl font-bold text-gray-900 mb-2">
-              Confirm the updated illustration
+              {pendingChangeType === "redesign" ? "New illustration will be generated" : "Confirm the updated illustration"}
             </h2>
             <p className="text-sm text-gray-500 mb-4">
-              We merged your change. Edit if anything looks off, then generate.
+              {pendingChangeType === "redesign"
+                ? "Your change requires a completely new illustration. The current one will be replaced (you can revert after)."
+                : "We merged your change. Edit if anything looks off, then generate."}
             </p>
+
+            {pendingChangeType === "redesign" && (
+              <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-lg">
+                <p className="text-sm text-amber-800">
+                  This is a major change. A fresh illustration will be generated from scratch.
+                </p>
+              </div>
+            )}
 
             <div className="bg-white border border-gray-200 rounded-xl p-4 mb-6">
               <label className="text-xs text-gray-500 uppercase tracking-wide mb-2 block">
@@ -1982,13 +2118,20 @@ Tone preference: ${r.tone_preference || "Not specified"}`.replace(/\n{2,}/g, "\n
                 onClick={() => {
                   setPreviousInsideImageUrl(insideImageUrl);
                   setInsideSceneDescription(pendingInsideScene);
-                  generateDesignImage(pendingInsideScene, { isInside: true, editExisting: true });
+                  if (pendingChangeType === "redesign") {
+                    generateDesignImage(pendingInsideScene, { isInside: true, editExisting: false });
+                  } else {
+                    generateDesignImage(pendingInsideScene, { isInside: true, editExisting: true });
+                  }
                 }}
                 disabled={!pendingInsideScene.trim()}
-                className="bg-indigo-600 text-white px-8 py-3 rounded-xl font-medium
-                           hover:bg-indigo-700 transition-colors flex-1"
+                className={`px-8 py-3 rounded-xl font-medium transition-colors flex-1 text-white ${
+                  pendingChangeType === "redesign"
+                    ? "bg-amber-600 hover:bg-amber-700"
+                    : "bg-indigo-600 hover:bg-indigo-700"
+                }`}
               >
-                Looks good — edit image
+                {pendingChangeType === "redesign" ? "Generate new illustration" : "Looks good \u2014 edit image"}
               </button>
             </div>
           </div>
@@ -2077,6 +2220,17 @@ Tone preference: ${r.tone_preference || "Not specified"}`.replace(/\n{2,}/g, "\n
               >
                 &larr; Pick different
               </button>
+              {editMode && (
+                <button
+                  onClick={() => {
+                    handleSave({ deliveryMethodOverride: deliveryMethod });
+                  }}
+                  className="bg-green-600 text-white px-6 py-3 rounded-xl font-medium
+                             hover:bg-green-700 transition-colors"
+                >
+                  Save &amp; finish
+                </button>
+              )}
               <button
                 onClick={() => {
                   setStep("front_text_loading");
@@ -2084,7 +2238,7 @@ Tone preference: ${r.tone_preference || "Not specified"}`.replace(/\n{2,}/g, "\n
                 }}
                 className="bg-indigo-600 text-white px-8 py-3 rounded-xl font-medium hover:bg-indigo-700 transition-colors flex-1"
               >
-                Next: Front text
+                {editMode ? "Continue: Front text" : "Next: Front text"}
               </button>
             </div>
           </div>
@@ -2220,18 +2374,33 @@ Tone preference: ${r.tone_preference || "Not specified"}`.replace(/\n{2,}/g, "\n
               <button
                 onClick={() => {
                   setFrontText("");
-                  setStep("delivery");
+                  if (editMode) {
+                    handleSave({ deliveryMethodOverride: deliveryMethod });
+                  } else {
+                    setStep("delivery");
+                  }
                 }}
                 className="text-sm text-gray-400 hover:text-gray-600 px-4 py-2"
               >
                 Skip
               </button>
-              <button
-                onClick={() => setStep("delivery")}
-                className="bg-indigo-600 text-white px-8 py-3 rounded-xl font-medium hover:bg-indigo-700 transition-colors flex-1"
-              >
-                Next: Choose delivery
-              </button>
+              {editMode ? (
+                <button
+                  onClick={() => {
+                    handleSave({ deliveryMethodOverride: deliveryMethod });
+                  }}
+                  className="bg-green-600 text-white px-8 py-3 rounded-xl font-medium hover:bg-green-700 transition-colors flex-1"
+                >
+                  Save &amp; finish
+                </button>
+              ) : (
+                <button
+                  onClick={() => setStep("delivery")}
+                  className="bg-indigo-600 text-white px-8 py-3 rounded-xl font-medium hover:bg-indigo-700 transition-colors flex-1"
+                >
+                  Next: Choose delivery
+                </button>
+              )}
             </div>
           </div>
         )}
@@ -2297,7 +2466,7 @@ Tone preference: ${r.tone_preference || "Not specified"}`.replace(/\n{2,}/g, "\n
           <div className="text-center py-16">
             <div className="text-5xl mb-4">&#127881;</div>
             <h2 className="text-2xl font-bold text-gray-900 mb-3">
-              Card saved!
+              Card {editMode ? "updated" : "saved"}!
             </h2>
             <p className="text-gray-500 mb-8">
               Your {occasion.toLowerCase()} card for {recipient.name} is ready
@@ -2346,56 +2515,67 @@ Tone preference: ${r.tone_preference || "Not specified"}`.replace(/\n{2,}/g, "\n
               </div>
             )}
 
-            <div className="flex gap-3 justify-center">
-              <button
-                onClick={() => {
-                  setStep("occasion");
-                  setOccasion("");
-                  setTone("");
-                  setNotes("");
-                  setMessages([]);
-                  setRejectedMessages([]);
-                  setRegenerationCount(0);
-                  setSelected(null);
-                  setEditedMessage(null);
-                  setImageSubject(null);
-                  setSubjectDetail("");
-                  setArtStyle(null);
-                  setActiveProfileElements({});
-                  setPersonalContext("");
-                  setDesignConcepts([]);
-                  setSelectedDesign(null);
-                  setGeneratedImageUrl(null);
-                  setDesignFeedback("");
-                  setCurrentSceneDescription("");
-                  setPreviousImageUrl(null);
-                  setPreviousSceneDescription(null);
-                  setPendingSceneDescription("");
-                  setInsideConcepts([]);
-                  setSelectedInsideConcept(null);
-                  setInsideImageUrl(null);
-                  setPreviousInsideImageUrl(null);
-                  setInsideSceneDescription("");
-                  setInsideDesignFeedback("");
-                  setPendingInsideScene("");
-                  setInsideImagePosition("top");
-                  setFont("sans");
-                  setFrontTextSuggestion(null);
-                  setFrontText("");
-                  setFrontTextPosition("bottom-right");
-                  setFrontTextStyle("dark_box");
-                  setCardSize("5x7");
-                  setSavedCardId(null);
-                }}
-                className="bg-white text-indigo-600 border border-indigo-200 px-6 py-3 rounded-xl
-                           font-medium hover:bg-indigo-50 transition-colors"
-              >
-                Create another card
-              </button>
+            <div className="flex gap-3 justify-center flex-wrap">
+              {editMode && savedCardId && (
+                <button
+                  onClick={() => router.push(`/cards/edit/${savedCardId}`)}
+                  className="bg-indigo-600 text-white px-6 py-3 rounded-xl font-medium
+                             hover:bg-indigo-700 transition-colors"
+                >
+                  Back to edit
+                </button>
+              )}
+              {!editMode && (
+                <button
+                  onClick={() => {
+                    setStep("occasion");
+                    setOccasion("");
+                    setTone("");
+                    setNotes("");
+                    setMessages([]);
+                    setRejectedMessages([]);
+                    setRegenerationCount(0);
+                    setSelected(null);
+                    setEditedMessage(null);
+                    setImageSubject(null);
+                    setSubjectDetail("");
+                    setArtStyle(null);
+                    setActiveProfileElements({});
+                    setPersonalContext("");
+                    setDesignConcepts([]);
+                    setSelectedDesign(null);
+                    setGeneratedImageUrl(null);
+                    setDesignFeedback("");
+                    setCurrentSceneDescription("");
+                    setPreviousImageUrl(null);
+                    setPreviousSceneDescription(null);
+                    setPendingSceneDescription("");
+                    setInsideConcepts([]);
+                    setSelectedInsideConcept(null);
+                    setInsideImageUrl(null);
+                    setPreviousInsideImageUrl(null);
+                    setInsideSceneDescription("");
+                    setInsideDesignFeedback("");
+                    setPendingInsideScene("");
+                    setInsideImagePosition("top");
+                    setFont("sans");
+                    setFrontTextSuggestion(null);
+                    setFrontText("");
+                    setFrontTextPosition("bottom-right");
+                    setFrontTextStyle("dark_box");
+                    setCardSize("5x7");
+                    setSavedCardId(null);
+                  }}
+                  className="bg-white text-indigo-600 border border-indigo-200 px-6 py-3 rounded-xl
+                             font-medium hover:bg-indigo-50 transition-colors"
+                >
+                  Create another card
+                </button>
+              )}
               <button
                 onClick={() => router.push("/")}
-                className="bg-indigo-600 text-white px-6 py-3 rounded-xl font-medium
-                           hover:bg-indigo-700 transition-colors"
+                className="bg-white text-indigo-600 border border-indigo-200 px-6 py-3 rounded-xl
+                           font-medium hover:bg-indigo-50 transition-colors"
               >
                 Back to dashboard
               </button>

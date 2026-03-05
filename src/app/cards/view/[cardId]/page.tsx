@@ -1,61 +1,13 @@
 "use client";
 
-import { useEffect, useState, CSSProperties } from "react";
+import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { getCards, getRecipients, hydrateCardImages } from "@/lib/store";
 import type { Card } from "@/types/database";
+import { fontCSS, positionCSS, textStyleCSS } from "@/lib/card-ui-helpers";
+import type { TextStyleChoice } from "@/lib/card-ui-helpers";
 
 type ViewStage = "envelope" | "front" | "inside";
-type FontChoice = "sans" | "script" | "block";
-type TextStyleChoice = "dark_box" | "white_box" | "plain";
-
-function fontCSS(font: FontChoice | undefined): CSSProperties {
-  switch (font) {
-    case "script":
-      return { fontFamily: "'Georgia', 'Palatino', 'Times New Roman', serif", fontStyle: "italic" };
-    case "block":
-      return { fontFamily: "'Impact', 'Arial Black', sans-serif", textTransform: "uppercase", letterSpacing: "0.05em" };
-    default:
-      return { fontFamily: "'Inter', 'Helvetica Neue', Arial, sans-serif" };
-  }
-}
-
-function positionCSS(pos: string): CSSProperties {
-  switch (pos) {
-    case "top-left": return { top: "6%", left: "6%" };
-    case "top-center": return { top: "6%", left: "50%", transform: "translateX(-50%)" };
-    case "top-right": return { top: "6%", right: "6%" };
-    case "center": return { top: "50%", left: "50%", transform: "translate(-50%, -50%)" };
-    case "bottom-left": return { bottom: "6%", left: "6%" };
-    case "bottom-center": return { bottom: "6%", left: "50%", transform: "translateX(-50%)" };
-    default: return { bottom: "6%", right: "6%" };
-  }
-}
-
-function textStyleCSS(style: TextStyleChoice): CSSProperties {
-  switch (style) {
-    case "dark_box":
-      return {
-        color: "#fff",
-        textShadow: "0 2px 8px rgba(0,0,0,0.6), 0 1px 3px rgba(0,0,0,0.4)",
-        backgroundColor: "rgba(0,0,0,0.35)",
-        borderRadius: "0.5rem",
-        padding: "0.5rem 1rem",
-      };
-    case "white_box":
-      return {
-        color: "#111",
-        backgroundColor: "rgba(255,255,255,0.75)",
-        borderRadius: "0.5rem",
-        padding: "0.5rem 1rem",
-      };
-    default:
-      return {
-        color: "#111",
-        textShadow: "0 1px 4px rgba(255,255,255,0.6)",
-      };
-  }
-}
 
 export default function CardViewerPage() {
   const params = useParams();

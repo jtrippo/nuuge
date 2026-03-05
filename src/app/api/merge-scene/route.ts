@@ -20,26 +20,44 @@ export async function POST(req: NextRequest) {
       messages: [
         {
           role: "system",
-          content: `You merge a user's change into an existing scene description.
-Rules:
-- Output ONLY the updated scene description. No preamble, no explanation.
-- Keep everything from the current scene UNLESS the user's change contradicts it (e.g. "no people" removes people).
+          content: `You merge a user's change into an existing scene description and classify the change type.
+
+Rules for merging:
+- Keep everything from the current scene UNLESS the user's change contradicts it.
 - Apply the change literally: add what they want added, remove what they want removed.
 - Keep it concise (2-4 sentences). Plain language, no flowery prose.
-- Do NOT invent new elements the user didn't ask for.`,
+- Do NOT invent new elements the user didn't ask for.
+
+Rules for classification:
+- "refine" = small edits the AI image editor can handle on the existing image: add/remove an element, change a color, adjust lighting, reposition something.
+- "redesign" = the user is asking for a fundamentally different image that cannot be achieved by editing: changing the entire art style (e.g. "make it a sketch"), switching the subject entirely, requesting a completely different scene, changing from color to black-and-white, etc.
+
+Respond in JSON: { "mergedScene": "...", "changeType": "refine" | "redesign" }
+Output ONLY valid JSON, no markdown fences, no explanation.`,
         },
         {
           role: "user",
           content: `Current scene: ${currentScene}\n\nUser's change: ${change}`,
         },
       ],
-      max_tokens: 300,
+      max_tokens: 400,
     });
 
-    const merged = choices?.[0]?.message?.content?.trim();
-    if (!merged) throw new Error("No response from merge");
+    const raw = choices?.[0]?.message?.content?.trim();
+    if (!raw) throw new Error("No response from merge");
 
-    return NextResponse.json({ mergedScene: merged });
+    let mergedScene: string;
+    let changeType: "refine" | "redesign" = "refine";
+
+    try {
+      const parsed = JSON.parse(raw);
+      mergedScene = parsed.mergedScene;
+      changeType = parsed.changeType === "redesign" ? "redesign" : "refine";
+    } catch {
+      mergedScene = raw;
+    }
+
+    return NextResponse.json({ mergedScene, changeType });
   } catch (error: unknown) {
     console.error("Merge scene error:", error);
     const message =

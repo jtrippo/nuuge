@@ -1,12 +1,11 @@
 "use client";
 
-import { useEffect, useState, CSSProperties } from "react";
+import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { getCards, getRecipients, hydrateCardImages, updateCard } from "@/lib/store";
 import type { Card, Recipient } from "@/types/database";
-
-type FontChoice = "sans" | "script" | "block";
-type TextStyleChoice = "dark_box" | "white_box" | "plain";
+import { fontCSS, positionCSS, textStyleCSS, messageSizing } from "@/lib/card-ui-helpers";
+import type { FontChoice, TextStyleChoice } from "@/lib/card-ui-helpers";
 
 const FONT_OPTIONS: { value: FontChoice; label: string }[] = [
   { value: "sans", label: "Clean" },
@@ -29,76 +28,6 @@ const TEXT_STYLE_OPTIONS: { value: TextStyleChoice; label: string }[] = [
   { value: "white_box", label: "Black on white" },
   { value: "dark_box", label: "White on dark" },
 ];
-
-function fontCSS(font: FontChoice | undefined): CSSProperties {
-  switch (font) {
-    case "script":
-      return { fontFamily: "'Georgia', 'Palatino', 'Times New Roman', serif", fontStyle: "italic" };
-    case "block":
-      return { fontFamily: "'Impact', 'Arial Black', sans-serif", textTransform: "uppercase", letterSpacing: "0.05em" };
-    default:
-      return { fontFamily: "'Inter', 'Helvetica Neue', Arial, sans-serif" };
-  }
-}
-
-function positionCSS(pos: string): CSSProperties {
-  switch (pos) {
-    case "top-left": return { top: "5%", left: "5%" };
-    case "top-center": return { top: "5%", left: "50%", transform: "translateX(-50%)" };
-    case "top-right": return { top: "5%", right: "5%" };
-    case "center": return { top: "50%", left: "50%", transform: "translate(-50%, -50%)" };
-    case "bottom-left": return { bottom: "5%", left: "5%" };
-    case "bottom-center": return { bottom: "5%", left: "50%", transform: "translateX(-50%)" };
-    default: return { bottom: "5%", right: "5%" };
-  }
-}
-
-function textStyleCSS(style: TextStyleChoice): CSSProperties {
-  switch (style) {
-    case "dark_box":
-      return {
-        color: "#fff",
-        textShadow: "0 2px 8px rgba(0,0,0,0.6), 0 1px 3px rgba(0,0,0,0.4)",
-        backgroundColor: "rgba(0,0,0,0.35)",
-        borderRadius: "0.5rem",
-        padding: "0.6rem 1.2rem",
-      };
-    case "white_box":
-      return {
-        color: "#111",
-        backgroundColor: "rgba(255,255,255,0.75)",
-        borderRadius: "0.5rem",
-        padding: "0.6rem 1.2rem",
-      };
-    default:
-      return {
-        color: "#111",
-        textShadow: "0 1px 4px rgba(255,255,255,0.6)",
-      };
-  }
-}
-
-/**
- * Compute font sizes for the inside message based on total character count
- * so the text fills the space naturally — not too large, not too small.
- */
-function messageSizing(totalChars: number): {
-  greetingSize: string;
-  bodySize: string;
-  closingSize: string;
-  gap: string;
-} {
-  if (totalChars < 80) {
-    return { greetingSize: "1.5rem", bodySize: "1.15rem", closingSize: "1.1rem", gap: "1.25rem" };
-  }
-  if (totalChars < 160) {
-    return { greetingSize: "1.3rem", bodySize: "1.05rem", closingSize: "1rem", gap: "1rem" };
-  }
-  if (totalChars < 300) {
-    return { greetingSize: "1.15rem", bodySize: "0.95rem", closingSize: "0.9rem", gap: "0.75rem" };
-  }
-  return { greetingSize: "1.05rem", bodySize: "0.85rem", closingSize: "0.85rem", gap: "0.6rem" };
-}
 
 export default function PrintCardPage() {
   const params = useParams();
@@ -130,6 +59,7 @@ export default function PrintCardPage() {
       setFtPosition(found.front_text_position ?? "bottom-right");
       setFtStyle(found.front_text_style ?? "dark_box");
       setMsgFont(found.font ?? "sans");
+      if (found.card_size) setPrintSize(found.card_size as "4x6" | "5x7");
 
       hydrateCardImages(found).then((hydrated) => setCard(hydrated));
     }
@@ -203,6 +133,12 @@ export default function PrintCardPage() {
     : printSize === "5x7" ? "0.75in 0.5in"
       : "0";
 
+  // Explicit content-area height so print doesn't rely on 100vh
+  // (some browsers resolve 100vh to full paper height, ignoring @page margins).
+  const printHeight = printSize === "4x6" ? "6in"
+    : printSize === "5x7" ? "7in"
+      : "8.5in";
+
   return (
     <>
       <style>{`
@@ -254,12 +190,15 @@ export default function PrintCardPage() {
           }
           .card-sheet {
             width: 100%;
-            height: 100vh;
-            max-height: none;
+            height: ${printHeight};
+            max-height: ${printHeight};
             aspect-ratio: auto;
             border: none;
             border-radius: 0;
             margin: 0;
+            padding: 0;
+            overflow: hidden;
+            box-sizing: border-box;
             page-break-inside: avoid;
             break-inside: avoid;
           }
@@ -270,6 +209,11 @@ export default function PrintCardPage() {
           .card-sheet-2 {
             page-break-after: avoid;
             break-after: avoid;
+          }
+          .card-panel {
+            overflow: hidden;
+            position: relative;
+            box-sizing: border-box;
           }
           .card-panel + .card-panel { border-left: none; }
           .front-text-overlay {
