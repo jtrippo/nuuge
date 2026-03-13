@@ -36,6 +36,11 @@ yarn-error.log*
 # usage tracking (local)
 usage-log.json
 
+# backup files and card output (local data, not source code)
+/backup
+/Card output
+*.pdf
+
 # vercel
 .vercel
 

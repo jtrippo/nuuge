@@ -69,19 +69,21 @@ export default function SeedPage() {
 
   if (status === "done") {
     return (
-      <div className="flex flex-col items-center justify-center h-screen bg-gradient-to-b from-indigo-50 to-white px-4">
+      <div
+        className="flex flex-col items-center justify-center h-screen px-4"
+        style={{ background: "var(--color-cream)" }}
+      >
         <div className="text-center max-w-md">
           <div className="text-5xl mb-4">&#9989;</div>
-          <h1 className="text-2xl font-bold text-gray-900 mb-3">Done</h1>
+          <h1 className="text-2xl font-semibold text-charcoal mb-3">Done</h1>
           {statusMessage && (
-            <p className="text-sm text-gray-600 mb-6">{statusMessage}</p>
+            <p className="text-sm text-warm-gray mb-6">{statusMessage}</p>
           )}
           <button
             onClick={() => router.push("/")}
-            className="bg-indigo-600 text-white px-8 py-3 rounded-xl font-medium
-                       hover:bg-indigo-700 transition-colors"
+            className="btn-primary"
           >
-            Go to dashboard
+            Go to Circle of People
           </button>
         </div>
       </div>
@@ -89,23 +91,26 @@ export default function SeedPage() {
   }
 
   return (
-    <div className="flex flex-col items-center justify-center h-screen bg-gradient-to-b from-indigo-50 to-white px-4">
+    <div
+      className="flex flex-col items-center justify-center h-screen px-4"
+      style={{ background: "var(--color-cream)" }}
+    >
       <div className="max-w-lg w-full">
-        <h1 className="text-2xl font-bold text-gray-900 mb-2 text-center">
+        <h1 className="text-2xl font-semibold text-charcoal mb-2 text-center">
           Data Manager
         </h1>
-        <p className="text-sm text-gray-500 mb-8 text-center">
+        <p className="text-sm text-warm-gray mb-8 text-center">
           Restore from a backup, load seed data, or clear everything.
         </p>
 
         {existingProfile?.onboarding_complete && (
-          <div className="bg-white border border-gray-200 rounded-xl p-4 mb-6 text-sm">
-            <p className="font-medium text-gray-800 mb-1">Current state:</p>
-            <p className="text-gray-600">
+          <div className="card-surface p-4 mb-6 text-sm">
+            <p className="font-medium text-charcoal mb-1">Current state:</p>
+            <p className="text-warm-gray">
               Profile: {existingProfile.display_name || "unnamed"} &middot;{" "}
               {existingRecipients.length} recipient{existingRecipients.length !== 1 ? "s" : ""}
               {existingRecipients.length > 0 && (
-                <span className="text-gray-400">
+                <span className="text-warm-gray opacity-60">
                   {" "}({existingRecipients.map((r) => r.name).join(", ")})
                 </span>
               )}
@@ -128,55 +133,52 @@ export default function SeedPage() {
           <button
             onClick={() => fileInput.current?.click()}
             disabled={importing}
-            className="w-full bg-indigo-600 text-white px-6 py-4 rounded-xl font-medium
-                       hover:bg-indigo-700 transition-colors text-left disabled:opacity-50"
+            className="w-full btn-primary px-6 py-4 text-left disabled:opacity-50"
           >
             <span className="block text-base">
               {importing ? "Restoring..." : "Restore from backup file"}
             </span>
-            <span className="block text-sm text-indigo-200 mt-1">
+            <span className="block text-sm mt-1" style={{ color: "rgba(255,255,255,0.7)" }}>
               Load all profiles, recipients, cards, and images from a .json backup
             </span>
           </button>
 
           <button
             onClick={() => loadSeedData(true)}
-            className="w-full bg-white text-gray-800 border border-gray-200 px-6 py-4 rounded-xl
-                       font-medium hover:border-indigo-300 transition-colors text-left"
+            className="w-full card-surface card-surface-clickable px-6 py-4 text-left"
           >
-            <span className="block text-base">Load seed data (fresh start)</span>
-            <span className="block text-sm text-gray-500 mt-1">
+            <span className="block text-base font-medium text-charcoal">Load seed data (fresh start)</span>
+            <span className="block text-sm text-warm-gray mt-1">
               Clears everything, loads demo profile + demo recipients
             </span>
           </button>
 
           <button
             onClick={() => loadSeedData(false)}
-            className="w-full bg-white text-gray-800 border border-gray-200 px-6 py-4 rounded-xl
-                       font-medium hover:border-indigo-300 transition-colors text-left"
+            className="w-full card-surface card-surface-clickable px-6 py-4 text-left"
           >
-            <span className="block text-base">Add seed data (keep existing)</span>
-            <span className="block text-sm text-gray-500 mt-1">
+            <span className="block text-base font-medium text-charcoal">Add seed data (keep existing)</span>
+            <span className="block text-sm text-warm-gray mt-1">
               Adds demo data without clearing your current data
             </span>
           </button>
 
           <button
             onClick={clearAll}
-            className="w-full bg-white text-red-600 border border-red-200 px-6 py-4 rounded-xl
-                       font-medium hover:border-red-400 transition-colors text-left"
+            className="w-full px-6 py-4 rounded-xl font-medium text-left transition-colors"
+            style={{ background: "var(--color-error-light)", border: "1.5px solid var(--color-error)", color: "var(--color-error)" }}
           >
             <span className="block text-base">Clear all data</span>
-            <span className="block text-sm text-red-300 mt-1">
+            <span className="block text-sm mt-1 opacity-60">
               Removes everything — profile, recipients, cards, history
             </span>
           </button>
 
           <button
             onClick={() => router.push("/")}
-            className="w-full text-center text-sm text-gray-500 hover:text-gray-700 py-2"
+            className="w-full text-center text-sm text-warm-gray hover:text-charcoal py-2 transition-colors"
           >
-            Cancel — go back to dashboard
+            Cancel — go back to Circle of People
           </button>
         </div>
       </div>

@@ -3,6 +3,9 @@ import type { UserProfile, Recipient } from "@/types/database";
 export const SEED_USER: Partial<UserProfile> = {
   id: "seed-user-001",
   display_name: "JT",
+  first_name: "John",
+  last_name: null,
+  nickname: "JT",
   personality: "Happy, fun-loving, genuine, trustworthy, loving",
   humor_style: "Witty, enjoys playful banter",
   interests: ["cooking", "gardening", "bird watching", "hiking", "travel"],
@@ -19,6 +22,7 @@ export const SEED_USER: Partial<UserProfile> = {
   favorite_books: null,
   dislikes: null,
   communication_style: null,
+  emotional_energy: null,
   notes: null,
   partner_name: "Linda",
   partner_recipient_id: "seed-recipient-002",

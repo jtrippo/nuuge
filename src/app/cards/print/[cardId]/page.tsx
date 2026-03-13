@@ -2,16 +2,14 @@
 
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { getCards, getRecipients, hydrateCardImages, updateCard } from "@/lib/store";
+import { getCards, getRecipients, getUserProfile, hydrateCardImages, updateCard, deleteCard } from "@/lib/store";
+import AppHeader from "@/components/AppHeader";
 import type { Card, Recipient } from "@/types/database";
-import { fontCSS, positionCSS, textStyleCSS, messageSizing } from "@/lib/card-ui-helpers";
+import { getDisplayOccasion } from "@/lib/occasions";
+import { fontCSS, positionCSS, textStyleCSS, frontTextAlign, messageSizing, FONT_OPTIONS } from "@/lib/card-ui-helpers";
 import type { FontChoice, TextStyleChoice } from "@/lib/card-ui-helpers";
-
-const FONT_OPTIONS: { value: FontChoice; label: string }[] = [
-  { value: "sans", label: "Clean" },
-  { value: "script", label: "Elegant" },
-  { value: "block", label: "Bold" },
-];
+import { shareCard } from "@/lib/share-card";
+import { copyToClipboard } from "@/lib/clipboard";
 
 const POSITION_OPTIONS: { value: string; label: string }[] = [
   { value: "center", label: "Center" },
@@ -24,8 +22,9 @@ const POSITION_OPTIONS: { value: string; label: string }[] = [
 ];
 
 const TEXT_STYLE_OPTIONS: { value: TextStyleChoice; label: string }[] = [
-  { value: "plain", label: "Plain black" },
-  { value: "white_box", label: "Black on white" },
+  { value: "white_box", label: "Plain black" },
+  { value: "plain", label: "Black on white" },
+  { value: "plain_white", label: "Plain white" },
   { value: "dark_box", label: "White on dark" },
 ];
 
@@ -38,13 +37,25 @@ export default function PrintCardPage() {
   const [mounted, setMounted] = useState(false);
   const [imagesLoaded, setImagesLoaded] = useState(false);
   const [duplex, setDuplex] = useState(true);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [showLetterEditor, setShowLetterEditor] = useState(false);
+  const [showPrintInfo, setShowPrintInfo] = useState(false);
+  const [sharing, setSharing] = useState(false);
+  const [shareUrl, setShareUrl] = useState<string | null>(null);
+  const [shareError, setShareError] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+  const [letterText, setLetterText] = useState("");
+  const [letterFont, setLetterFont] = useState<string>("handwritten");
+  const [letterSizeScale, setLetterSizeScale] = useState<number>(1);
 
   const [printSize, setPrintSize] = useState<"4x6" | "5x7" | "8.5x11">("5x7");
-  const [ftFont, setFtFont] = useState<FontChoice>("sans");
+  const [ftFont, setFtFont] = useState<string>("sans");
   const [ftPosition, setFtPosition] = useState("bottom-right");
-  const [ftStyle, setFtStyle] = useState<TextStyleChoice>("dark_box");
-  const [msgFont, setMsgFont] = useState<FontChoice>("sans");
-  const [showSettings, setShowSettings] = useState(false);
+  const [ftStyle, setFtStyle] = useState<TextStyleChoice>("plain");
+  const [msgFont, setMsgFont] = useState<string>("sans");
+  const [insidePos, setInsidePos] = useState<"top" | "middle" | "bottom" | "left" | "right" | "behind">("top");
+  const [msgSizeScale, setMsgSizeScale] = useState<number>(1.5);
+  const [ftSizeScale, setFtSizeScale] = useState<number>(1);
 
   useEffect(() => {
     setMounted(true);
@@ -57,9 +68,15 @@ export default function PrintCardPage() {
 
       setFtFont(found.front_text_font ?? "sans");
       setFtPosition(found.front_text_position ?? "bottom-right");
-      setFtStyle(found.front_text_style ?? "dark_box");
+      setFtStyle(found.front_text_style ?? "plain");
       setMsgFont(found.font ?? "sans");
+      setInsidePos((found.inside_image_position as typeof insidePos) ?? "top");
       if (found.card_size) setPrintSize(found.card_size as "4x6" | "5x7");
+      if (found.msg_font_scale != null) setMsgSizeScale(found.msg_font_scale);
+      if (found.ft_font_scale != null) setFtSizeScale(found.ft_font_scale);
+      if (found.letter_text) setLetterText(found.letter_text);
+      if (found.letter_font) setLetterFont(found.letter_font);
+      if (found.letter_font_scale != null) setLetterSizeScale(found.letter_font_scale);
 
       hydrateCardImages(found).then((hydrated) => setCard(hydrated));
     }
@@ -82,24 +99,30 @@ export default function PrintCardPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [card?.id]);
 
-  function saveSettings() {
+  useEffect(() => {
     if (!card) return;
     updateCard(card.id, {
       front_text_font: ftFont,
       front_text_position: ftPosition,
       front_text_style: ftStyle,
       font: msgFont,
+      inside_image_position: insidePos,
+      msg_font_scale: msgSizeScale,
+      ft_font_scale: ftSizeScale,
+      letter_font: letterFont,
+      letter_font_scale: letterSizeScale,
     });
-  }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ftFont, ftPosition, ftStyle, msgFont, insidePos, msgSizeScale, ftSizeScale, letterFont, letterSizeScale]);
 
   if (!mounted) return null;
 
   if (!card) {
     return (
-      <div className="flex flex-col items-center justify-center h-screen bg-white">
-        <p className="text-gray-500 mb-4">Card not found.</p>
-        <button onClick={() => router.push("/")} className="text-indigo-600 font-medium">
-          Back to dashboard
+      <div className="flex flex-col items-center justify-center h-screen" style={{ background: "var(--color-cream)" }}>
+        <p className="text-warm-gray mb-4">Card not found.</p>
+        <button onClick={() => router.push("/")} style={{ color: "var(--color-brand)" }} className="font-medium">
+          Back to Circle of People
         </button>
       </div>
     );
@@ -110,13 +133,44 @@ export default function PrintCardPage() {
   const body = messageParts.length > 2 ? messageParts.slice(1, -1).join("\n\n") : "";
   const closing = messageParts.length > 1 ? messageParts[messageParts.length - 1] : "";
   const totalChars = card.message_text.length;
-  const sizing = messageSizing(totalChars);
+  const baseSizing = messageSizing(totalChars);
 
-  const insidePos = card.inside_image_position ?? "top";
+  const scaleRem = (rem: string) => {
+    const n = parseFloat(rem);
+    return `${(n * msgSizeScale).toFixed(3)}rem`;
+  };
+  const sizing = {
+    greetingSize: scaleRem(baseSizing.greetingSize),
+    bodySize: scaleRem(baseSizing.bodySize),
+    closingSize: scaleRem(baseSizing.closingSize),
+    gap: scaleRem(baseSizing.gap),
+  };
+
   const frontFontStyle = fontCSS(ftFont);
   const messageFontStyle = fontCSS(msgFont);
   const ftPosCSS = positionCSS(ftPosition);
   const ftStyleCSS = textStyleCSS(ftStyle);
+  // Print-safe inline styles: PDF renderers turn ANY text-shadow into visible
+  // rectangles, so we strip text-shadow from every style for print output.
+  // Only dark_box keeps its background/padding (the user explicitly chose a box).
+  const ftStyleCSSForPrint: React.CSSProperties = (() => {
+    switch (ftStyle) {
+      case "dark_box":
+        return {
+          color: ftStyleCSS.color,
+          backgroundColor: ftStyleCSS.backgroundColor,
+          borderRadius: ftStyleCSS.borderRadius,
+          padding: ftStyleCSS.padding,
+        };
+      case "plain_white":
+        return { color: "#fff" };
+      case "plain":
+        return { color: "#111" };
+      case "white_box":
+      default:
+        return { color: "#111" };
+    }
+  })();
 
   // On-screen preview aspect ratios (landscape sheet with 2 portrait panels)
   const sheetAspect = printSize === "4x6" ? "8 / 6"
@@ -153,11 +207,11 @@ export default function PrintCardPage() {
           width: 100%;
           aspect-ratio: ${sheetAspect};
           max-height: 60vh;
-          border: 1px solid #e5e7eb;
+          border: 1px solid var(--color-light-gray);
           border-radius: 0.5rem;
           overflow: hidden;
           margin-bottom: 1rem;
-          background: #fff;
+          background: var(--color-white);
         }
         .card-panel {
           width: 50%;
@@ -167,15 +221,14 @@ export default function PrintCardPage() {
           box-sizing: border-box;
         }
         .card-panel + .card-panel {
-          border-left: 1px dashed #d1d5db;
+          border-left: 1px dashed var(--color-light-gray);
         }
 
         .front-text-overlay {
-          font-size: clamp(1.4rem, 4vw, 2.5rem);
+          font-size: calc(clamp(1.4rem, 4vw, 2.5rem) * var(--ft-scale, 1));
           line-height: 1.2;
           text-align: center;
         }
-
         @media print {
           .no-print { display: none !important; }
           html, body {
@@ -210,6 +263,13 @@ export default function PrintCardPage() {
             page-break-after: avoid;
             break-after: avoid;
           }
+          .card-sheet-3 {
+            page-break-before: always;
+            break-before: page;
+            page-break-after: avoid;
+            break-after: avoid;
+            column-rule: none !important;
+          }
           .card-panel {
             overflow: hidden;
             position: relative;
@@ -217,229 +277,206 @@ export default function PrintCardPage() {
           }
           .card-panel + .card-panel { border-left: none; }
           .front-text-overlay {
-            font-size: clamp(1.6rem, 5vw, 3rem) !important;
+            font-size: calc(clamp(1.6rem, 5vw, 3rem) * var(--ft-scale, 1)) !important;
           }
         }
       `}</style>
 
-      {/* ── Top Bar ── */}
-      <div className="no-print bg-gray-50 border-b border-gray-200 px-6 py-3">
-        <div className="max-w-4xl mx-auto flex items-center justify-between flex-wrap gap-3">
-          <div className="flex items-center gap-3">
+      <AppHeader title={card ? `${getDisplayOccasion(card)} card for ${recipient?.name ?? "recipient"}` : undefined}>
+        <button
+          onClick={() => recipient ? router.push(`/recipients/${recipient.id}`) : router.push("/")}
+          className="flex items-center gap-1.5 px-4 py-1.5 rounded-full text-sm text-warm-gray hover:text-charcoal transition-colors"
+          style={{ border: "1.5px solid var(--color-sage)" }}
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+          {recipient?.name ?? "Circle of People"}
+        </button>
+        <button
+          onClick={() => router.push(`/cards/edit/${cardId}`)}
+          className="px-4 py-1.5 rounded-full text-sm text-warm-gray hover:text-charcoal transition-colors"
+          style={{ border: "1.5px solid var(--color-sage)" }}
+        >
+          Edit card
+        </button>
+        <button
+          onClick={() => setShowLetterEditor(true)}
+          className="px-4 py-1.5 rounded-full text-sm text-warm-gray hover:text-charcoal transition-colors"
+          style={{ border: "1.5px solid var(--color-sage)" }}
+        >
+          {letterText.trim() ? "Edit letter" : "Add letter"}
+        </button>
+        <button
+          onClick={() => router.push(`/cards/view/${cardId}`)}
+          className="px-4 py-1.5 rounded-full text-sm text-warm-gray hover:text-charcoal transition-colors"
+          style={{ border: "1.5px solid var(--color-sage)" }}
+        >
+          View e-card
+        </button>
+        <button
+          onClick={async () => {
+            if (!card || sharing) return;
+            setSharing(true);
+            setShareError(null);
+            try {
+              const profile = getUserProfile();
+              const sName = (profile?.first_name as string) || (profile?.display_name as string) || "";
+              const rName = recipient?.first_name || recipient?.display_name || recipient?.name || "";
+              const hydrated = await hydrateCardImages(card);
+              const result = await shareCard(hydrated, rName, sName);
+              if ("error" in result) { setShareError(result.error); }
+              else { setShareUrl(result.shareUrl); }
+            } catch (err) {
+              setShareError(err instanceof Error ? err.message : "Failed to share. Check your connection and try again.");
+            } finally {
+              setSharing(false);
+            }
+          }}
+          disabled={sharing}
+          className="px-4 py-1.5 rounded-full text-sm transition-colors hover:opacity-80 disabled:opacity-50"
+          style={{ color: "var(--color-brand)", border: "1.5px solid var(--color-sage)" }}
+        >
+          {sharing ? "Sharing..." : "Share e-card"}
+        </button>
+      </AppHeader>
+
+      {/* Share URL banner */}
+      {shareUrl && (
+        <div className="no-print max-w-4xl mx-auto px-6 pt-3">
+          <div className="flex items-center gap-2 p-3 rounded-xl" style={{ background: "var(--color-brand-light)", border: "1px solid var(--color-sage)" }}>
+            <span className="text-xs text-charcoal font-medium">Shareable link:</span>
+            <input
+              readOnly
+              value={shareUrl}
+              className="flex-1 text-xs bg-transparent outline-none text-charcoal"
+              onFocus={(e) => e.target.select()}
+            />
             <button
-              onClick={() => router.push("/")}
-              className="text-sm text-gray-500 hover:text-gray-700"
+              onClick={async () => {
+                const ok = await copyToClipboard(shareUrl);
+                if (ok) { setCopied(true); setTimeout(() => setCopied(false), 2000); }
+              }}
+              className="px-3 py-1 rounded-full text-xs font-medium"
+              style={{ color: "var(--color-brand)", border: "1.5px solid var(--color-sage)" }}
             >
-              &larr; Dashboard
+              {copied ? "Copied!" : "Copy"}
             </button>
-            <button
-              onClick={() => router.push(`/cards/edit/${cardId}`)}
-              className="text-sm font-medium text-indigo-600 hover:text-indigo-800"
-            >
-              &larr; Edit card
-            </button>
-            {recipient && (
-              <button
-                onClick={() => router.push(`/recipients/${recipient.id}`)}
-                className="text-sm text-gray-500 hover:text-gray-700"
-              >
-                {recipient.name}&apos;s profile
-              </button>
-            )}
-          </div>
-
-          <div className="flex items-center gap-3 flex-wrap">
-            <div className="flex items-center gap-1.5">
-              <span className="text-xs text-gray-500">Size:</span>
-              {(["4x6", "5x7", "8.5x11"] as const).map((s) => (
-                <label key={s} className="flex items-center gap-1 text-sm cursor-pointer">
-                  <input
-                    type="radio"
-                    name="printSize"
-                    checked={printSize === s}
-                    onChange={() => setPrintSize(s)}
-                    className="text-indigo-600"
-                  />
-                  <span className="text-gray-700">
-                    {s === "4x6" ? "4×6" : s === "5x7" ? "5×7" : "8.5×11"}
-                  </span>
-                </label>
-              ))}
-            </div>
-
-            <label className="flex items-center gap-1.5 text-sm cursor-pointer">
-              <input
-                type="checkbox"
-                checked={duplex}
-                onChange={(e) => setDuplex(e.target.checked)}
-                className="text-indigo-600 rounded"
-              />
-              <span className="text-gray-600">Duplex</span>
-            </label>
-
-            <button
-              onClick={() => setShowSettings((v) => !v)}
-              className="text-sm text-indigo-600 hover:text-indigo-800 font-medium"
-            >
-              {showSettings ? "Hide settings" : "Card settings"}
-            </button>
-
-            <button
-              onClick={() => { saveSettings(); setTimeout(() => window.print(), 100); }}
-              disabled={!imagesLoaded && imageUrls.length > 0}
-              className="bg-indigo-600 text-white px-5 py-2 rounded-lg text-sm font-medium
-                         hover:bg-indigo-700 transition-colors disabled:opacity-50"
-            >
-              Print card
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* ── Editable Settings Panel ── */}
-      {showSettings && (
-        <div className="no-print bg-white border-b border-gray-200 px-6 py-4">
-          <div className="max-w-4xl mx-auto">
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-              <div>
-                <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">
-                  Front text position
-                </label>
-                <select
-                  value={ftPosition}
-                  onChange={(e) => setFtPosition(e.target.value)}
-                  className="w-full text-sm border border-gray-300 rounded-lg px-2 py-1.5"
-                >
-                  {POSITION_OPTIONS.map((o) => (
-                    <option key={o.value} value={o.value}>{o.label}</option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">
-                  Front text style
-                </label>
-                <select
-                  value={ftStyle}
-                  onChange={(e) => setFtStyle(e.target.value as TextStyleChoice)}
-                  className="w-full text-sm border border-gray-300 rounded-lg px-2 py-1.5"
-                >
-                  {TEXT_STYLE_OPTIONS.map((o) => (
-                    <option key={o.value} value={o.value}>{o.label}</option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">
-                  Front font
-                </label>
-                <select
-                  value={ftFont}
-                  onChange={(e) => setFtFont(e.target.value as FontChoice)}
-                  className="w-full text-sm border border-gray-300 rounded-lg px-2 py-1.5"
-                >
-                  {FONT_OPTIONS.map((o) => (
-                    <option key={o.value} value={o.value}>{o.label}</option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">
-                  Message font
-                </label>
-                <select
-                  value={msgFont}
-                  onChange={(e) => setMsgFont(e.target.value as FontChoice)}
-                  className="w-full text-sm border border-gray-300 rounded-lg px-2 py-1.5"
-                >
-                  {FONT_OPTIONS.map((o) => (
-                    <option key={o.value} value={o.value}>{o.label}</option>
-                  ))}
-                </select>
-              </div>
-            </div>
-            <div className="mt-3 flex justify-end">
-              <button
-                onClick={() => { saveSettings(); setShowSettings(false); }}
-                className="text-sm bg-indigo-600 text-white px-4 py-1.5 rounded-lg hover:bg-indigo-700"
-              >
-                Save changes
-              </button>
-            </div>
           </div>
         </div>
       )}
+      {shareError && (
+        <div className="no-print max-w-4xl mx-auto px-6 pt-2">
+          <div className="p-3 rounded-lg text-sm" style={{ background: "var(--color-error-light)", color: "var(--color-error)" }}>{shareError}</div>
+        </div>
+      )}
 
-      {/* ── Print Instructions ── */}
-      <div className="no-print px-6 py-4">
-        <div className="max-w-4xl mx-auto">
-          <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 text-sm text-amber-800">
-            <p className="font-medium mb-1">
-              How to print {duplex ? "(automatic two-sided)" : "(manual two-sided)"}
-            </p>
-            <ul className="list-disc list-inside space-y-1 text-amber-700">
-              <li>
-                Card size:{" "}
-                <strong>
-                  {printSize === "4x6" ? "4\" × 6\""
-                    : printSize === "5x7" ? "5\" × 7\""
-                      : "5.5\" × 8.5\" (half letter)"}
-                </strong>
-                {" "} — folded card with two portrait panels.
-              </li>
-              <li>
-                Load <strong>letter paper (8.5×11)</strong>
-                {printSize !== "8.5x11" && " — card stock or regular paper for test prints"}.
-              </li>
-              <li>
-                In the print dialog: <strong>Landscape</strong> orientation, <strong>Scale 100%</strong> (not &quot;Fit to page&quot;).
-              </li>
-              <li>
-                <strong>Page 1 (outside):</strong> Left = back · Right = front cover
-              </li>
-              <li>
-                <strong>Page 2 (inside):</strong> Left = blank · Right = message
-              </li>
-              {duplex ? (
-                <>
-                  <li>
-                    Enable <strong>Two-sided / Duplex</strong> and set flip to <strong>&quot;Flip on short edge&quot;</strong>.
-                  </li>
-                  <li>
-                    Hit print — both sides print on <strong>one sheet</strong> automatically.
-                  </li>
-                </>
-              ) : (
-                <>
-                  <li>
-                    Make sure <strong>Two-sided / Duplex is OFF</strong>.
-                    Print <strong>page 1 only</strong>.
-                  </li>
-                  <li>
-                    Re-insert the printed sheet <strong>face-down, rotated 180°</strong>,
-                    then print <strong>page 2 only</strong>.
-                  </li>
-                </>
-              )}
-              <li>
-                Fold right over left so the front cover is on the outside.
-                {printSize !== "8.5x11" && " Trim to size if using letter paper."}
-              </li>
-            </ul>
+      {/* ── Print controls (above Page 1) ── */}
+      <div className="no-print print-wrapper max-w-4xl mx-auto px-6 pt-4 flex items-center justify-between gap-4">
+        <button
+          onClick={() => setShowDeleteConfirm(true)}
+          className="px-4 py-1.5 rounded-full text-sm transition-colors hover:opacity-80"
+          style={{ color: "var(--color-error)", border: "1.5px solid var(--color-error)" }}
+        >
+          Delete
+        </button>
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-1.5">
+            {(["4x6", "5x7", "8.5x11"] as const).map((s) => (
+              <button
+                key={s}
+                onClick={() => setPrintSize(s)}
+                className={`px-3 py-1 rounded-full text-sm transition-colors ${
+                  printSize === s
+                    ? "font-medium"
+                    : "text-warm-gray hover:text-charcoal"
+                }`}
+                style={printSize === s
+                  ? { background: "var(--color-brand-light)", color: "var(--color-brand)", border: "1.5px solid var(--color-brand)" }
+                  : { border: "1.5px solid var(--color-sage)" }
+                }
+              >
+                {s === "4x6" ? "4×6" : s === "5x7" ? "5×7" : "8.5×11"}
+              </button>
+            ))}
           </div>
+          <label className="flex items-center gap-1.5 text-sm cursor-pointer">
+            <input
+              type="checkbox"
+              checked={duplex}
+              onChange={(e) => setDuplex(e.target.checked)}
+              className="rounded"
+              style={{ accentColor: "var(--color-brand)" }}
+            />
+            <span className="text-warm-gray">Duplex</span>
+          </label>
+          <div className="relative">
+            <button
+              onClick={() => setShowPrintInfo(!showPrintInfo)}
+              className="w-7 h-7 rounded-full flex items-center justify-center text-warm-gray hover:text-charcoal transition-colors"
+              style={{ border: "1.5px solid var(--color-sage)" }}
+              title="Print instructions"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+            </button>
+            {showPrintInfo && (
+              <>
+                <div className="fixed inset-0 z-40" onClick={() => setShowPrintInfo(false)} />
+                <div
+                  className="absolute right-0 top-full mt-2 z-50 w-80 rounded-xl shadow-lg p-4 text-sm"
+                  style={{ background: "var(--color-white)", border: "1px solid var(--color-light-gray)" }}
+                >
+                  <p className="font-medium text-charcoal mb-2">
+                    How to print {duplex ? "(automatic two-sided)" : "(manual two-sided)"}
+                  </p>
+                  <ul className="list-disc list-inside space-y-1 text-warm-gray">
+                    <li>
+                      Card size: <strong className="text-charcoal">
+                        {printSize === "4x6" ? "4\" × 6\"" : printSize === "5x7" ? "5\" × 7\"" : "5.5\" × 8.5\""}
+                      </strong>
+                    </li>
+                    <li>Load <strong className="text-charcoal">letter paper (8.5×11)</strong></li>
+                    <li>Print dialog: <strong className="text-charcoal">Landscape</strong>, <strong className="text-charcoal">Scale 100%</strong></li>
+                    <li><strong className="text-charcoal">Page 1:</strong> Left = back · Right = front</li>
+                    <li><strong className="text-charcoal">Page 2:</strong> Left = blank · Right = message</li>
+                    {duplex ? (
+                      <>
+                        <li>Enable <strong className="text-charcoal">Duplex</strong> → <strong className="text-charcoal">Flip on short edge</strong></li>
+                        <li>Both sides print on one sheet</li>
+                      </>
+                    ) : (
+                      <>
+                        <li><strong className="text-charcoal">Duplex OFF</strong> — print page 1 first</li>
+                        <li>Re-insert face-down, rotated 180°, print page 2</li>
+                      </>
+                    )}
+                    <li>Fold right over left{printSize !== "8.5x11" && ", trim to size"}</li>
+                  </ul>
+                  <p className="text-warm-gray mt-3 pt-2" style={{ borderTop: "1px solid var(--color-light-gray)", fontSize: "0.8rem" }}>
+                    <strong className="text-charcoal">Tip:</strong> If duplex doesn&apos;t work from the browser, save as PDF first, then print from the PDF viewer — this fixes duplex on most printers.
+                  </p>
+                </div>
+              </>
+            )}
+          </div>
+          <button
+            onClick={() => { window.print(); }}
+            disabled={!imagesLoaded && imageUrls.length > 0}
+            className="btn-primary px-5 py-2 rounded-full text-sm disabled:opacity-50"
+          >
+            Print card
+          </button>
         </div>
       </div>
 
       {/* ── Sheet Previews ── */}
-      <div className="print-wrapper max-w-4xl mx-auto px-6 pb-8">
+      <div className="print-wrapper max-w-4xl mx-auto px-6 pt-4 pb-8">
 
         {/* Sheet 1 — Back (left) + Front (right) */}
-        <p className="no-print text-xs text-gray-400 uppercase tracking-wide mb-1">
+        <p className="no-print section-label mb-1">
           Page 1 — Outside (back + front)
         </p>
         <div className="card-sheet card-sheet-1">
           <div className="card-panel flex flex-col items-center justify-end p-4">
-            <p className="text-xs text-gray-400 pb-4">Created by Nuuge</p>
+            <p className="text-xs text-warm-gray pb-4">Created by Nuuge</p>
           </div>
 
           <div className="card-panel">
@@ -451,7 +488,7 @@ export default function PrintCardPage() {
                   style={{
                     width: "100%",
                     height: "100%",
-                    objectFit: "contain",
+                    objectFit: "cover",
                     objectPosition: "center",
                     display: "block",
                   }}
@@ -463,8 +500,13 @@ export default function PrintCardPage() {
                       position: "absolute",
                       ...ftPosCSS,
                       ...frontFontStyle,
-                      ...ftStyleCSS,
-                      maxWidth: "90%",
+                      ...ftStyleCSSForPrint,
+                      width: "84%",
+                      padding: "0.5rem",
+                      boxSizing: "border-box",
+                      textAlign: frontTextAlign(ftPosition),
+                      whiteSpace: "pre-line",
+                      ...({ "--ft-scale": ftSizeScale } as React.CSSProperties),
                     }}
                   >
                     {card.front_text}
@@ -472,15 +514,74 @@ export default function PrintCardPage() {
                 )}
               </>
             ) : (
-              <div className="w-full h-full bg-gradient-to-br from-indigo-100 to-purple-100 flex items-center justify-center">
-                <p className="text-indigo-400 text-lg font-medium">{card.occasion}</p>
+              <div className="w-full h-full flex items-center justify-center" style={{ background: "var(--color-brand-light)" }}>
+                <p className="text-lg font-medium" style={{ color: "var(--color-brand)" }}>{getDisplayOccasion(card)}</p>
               </div>
             )}
           </div>
         </div>
 
+        {/* ── Front cover settings ── */}
+        {card.front_text && (
+          <div className="no-print rounded-lg p-4 mb-2" style={{ background: "var(--color-faint-gray)", border: "1px solid var(--color-light-gray)" }}>
+            <p className="text-xs font-medium text-warm-gray uppercase tracking-wide mb-2">Front text settings</p>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs text-warm-gray mb-1">Position</label>
+                <select
+                  value={ftPosition}
+                  onChange={(e) => { setFtPosition(e.target.value); }}
+                  className="w-full text-sm input-field px-2 py-1.5"
+                >
+                  {POSITION_OPTIONS.map((o) => (
+                    <option key={o.value} value={o.value}>{o.label}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs text-warm-gray mb-1">Style</label>
+                <select
+                  value={ftStyle}
+                  onChange={(e) => { setFtStyle(e.target.value as TextStyleChoice); }}
+                  className="w-full text-sm input-field px-2 py-1.5"
+                >
+                  {TEXT_STYLE_OPTIONS.map((o) => (
+                    <option key={o.value} value={o.value}>{o.label}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs text-warm-gray mb-1">Font</label>
+                <select
+                  value={ftFont}
+                  onChange={(e) => { setFtFont(e.target.value); }}
+                  className="w-full text-sm input-field px-2 py-1.5"
+                >
+                  {FONT_OPTIONS.map((o) => (
+                    <option key={o.id} value={o.id}>{o.label}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs text-warm-gray mb-1">Text size</label>
+                <select
+                  value={ftSizeScale}
+                  onChange={(e) => { setFtSizeScale(parseFloat(e.target.value)); }}
+                  className="w-full text-sm input-field px-2 py-1.5"
+                >
+                  <option value={0.7}>Small</option>
+                  <option value={0.85}>Medium</option>
+                  <option value={1}>Auto</option>
+                  <option value={1.2}>Large</option>
+                  <option value={1.4}>Extra Large</option>
+                </select>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Sheet 2 — Inside left (blank) + Inside right (message) */}
-        <p className="no-print text-xs text-gray-400 uppercase tracking-wide mb-1 mt-4">
+        <p className="no-print section-label mb-1 mt-4">
           Page 2 — Inside (blank + message)
         </p>
         <div className="card-sheet card-sheet-2">
@@ -550,23 +651,23 @@ export default function PrintCardPage() {
               )}
 
               <p
-                className="text-gray-800 text-center"
-                style={{ fontSize: sizing.greetingSize, fontWeight: 600, lineHeight: 1.3 }}
+                className="text-charcoal text-center"
+                style={{ ...messageFontStyle, fontSize: sizing.greetingSize, fontWeight: 600, lineHeight: 1.3 }}
               >
                 {greeting}
               </p>
               {body && (
                 <p
-                  className="text-gray-700 whitespace-pre-wrap text-center"
-                  style={{ fontSize: sizing.bodySize, lineHeight: 1.55 }}
+                  className="text-charcoal whitespace-pre-wrap text-center"
+                  style={{ ...messageFontStyle, fontSize: sizing.bodySize, lineHeight: 1.55 }}
                 >
                   {body}
                 </p>
               )}
               {closing && (
                 <p
-                  className="text-gray-600 text-center"
-                  style={{ fontSize: sizing.closingSize, fontStyle: "italic", lineHeight: 1.4 }}
+                  className="text-charcoal text-center whitespace-pre-line"
+                  style={{ ...messageFontStyle, fontSize: sizing.closingSize, fontStyle: "italic", lineHeight: 1.4 }}
                 >
                   {closing}
                 </p>
@@ -586,11 +687,269 @@ export default function PrintCardPage() {
             )}
           </div>
         </div>
+
+        {/* ── Message settings ── */}
+        <div className="no-print rounded-lg p-4 mt-2" style={{ background: "var(--color-faint-gray)", border: "1px solid var(--color-light-gray)" }}>
+          <p className="text-xs font-medium text-warm-gray uppercase tracking-wide mb-2">Message settings</p>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs text-warm-gray mb-1">Font</label>
+              <select
+                value={msgFont}
+                onChange={(e) => { setMsgFont(e.target.value); }}
+                className="w-full text-sm input-field px-2 py-1.5"
+              >
+                {FONT_OPTIONS.map((o) => (
+                  <option key={o.id} value={o.id}>{o.label}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs text-warm-gray mb-1">Text size</label>
+              <select
+                value={msgSizeScale}
+                onChange={(e) => { setMsgSizeScale(parseFloat(e.target.value)); }}
+                className="w-full text-sm input-field px-2 py-1.5"
+              >
+                <option value={1}>Small</option>
+                <option value={1.25}>Medium</option>
+                <option value={1.5}>Auto</option>
+                <option value={1.75}>Large</option>
+                <option value={2}>Extra Large</option>
+              </select>
+            </div>
+            {card.inside_image_url && (
+              <div>
+                <label className="block text-xs text-warm-gray mb-1">Decoration position</label>
+                <select
+                  value={insidePos}
+                  onChange={(e) => { setInsidePos(e.target.value as typeof insidePos); }}
+                  className="w-full text-sm input-field px-2 py-1.5"
+                >
+                  <option value="top">Top</option>
+                  <option value="middle">Middle</option>
+                  <option value="bottom">Bottom</option>
+                  <option value="left">Left</option>
+                  <option value="right">Right</option>
+                  <option value="behind">Behind (watermark)</option>
+                </select>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* ── Sheet 3 — Letter Insert (optional) ── */}
+        {letterText.trim() && (() => {
+          const letterFontStyle = fontCSS((letterFont || "handwritten") as FontChoice);
+          const baseFontSize = 0.75 * letterSizeScale;
+          const greetingSize = `${(0.85 * letterSizeScale).toFixed(3)}rem`;
+          const bodySize = `${baseFontSize.toFixed(3)}rem`;
+          const closingSize = `${baseFontSize.toFixed(3)}rem`;
+          return (
+            <>
+              <p className="no-print section-label mb-1 mt-4">
+                Page 3 — Letter insert
+              </p>
+              <div className="card-sheet card-sheet-3" style={{ pageBreakBefore: "always", breakBefore: "page" }}>
+                <div
+                  style={{
+                    ...letterFontStyle,
+                    width: "100%",
+                    height: "100%",
+                    columnCount: 2,
+                    columnFill: "auto" as const,
+                    columnGap: "2rem",
+                    columnRule: "1px dashed var(--color-light-gray)",
+                    padding: "6% 6%",
+                    boxSizing: "border-box",
+                    position: "relative",
+                    textAlign: "left",
+                  }}
+                >
+                  {/* Subtle paper lines */}
+                  <div style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, opacity: 0.04, backgroundImage: "repeating-linear-gradient(0deg, transparent, transparent 27px, #8b7d6b 28px)", pointerEvents: "none" }} />
+                  <div style={{ position: "relative", zIndex: 1 }}>
+                    <p className="text-charcoal" style={{ fontSize: greetingSize, fontWeight: 500, lineHeight: 1.4, marginBottom: "0.6em" }}>
+                      {letterText.split("\n\n")[0]}
+                    </p>
+                    {letterText.split("\n\n").length > 2 && (
+                      <div className="text-charcoal whitespace-pre-wrap" style={{ fontSize: bodySize, lineHeight: 1.65, marginBottom: "0.6em" }}>
+                        {letterText.split("\n\n").slice(1, -1).join("\n\n")}
+                      </div>
+                    )}
+                    {letterText.split("\n\n").length > 1 && (
+                      <p className="text-charcoal whitespace-pre-line" style={{ fontSize: closingSize, fontStyle: "italic", lineHeight: 1.5 }}>
+                        {letterText.split("\n\n")[letterText.split("\n\n").length - 1]}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* ── Letter settings ── */}
+              <div className="no-print rounded-lg p-4 mt-2" style={{ background: "var(--color-faint-gray)", border: "1px solid var(--color-light-gray)" }}>
+                <p className="text-xs font-medium text-warm-gray uppercase tracking-wide mb-2">Letter settings</p>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs text-warm-gray mb-1">Font</label>
+                    <select
+                      value={letterFont}
+                      onChange={(e) => { setLetterFont(e.target.value); }}
+                      className="w-full text-sm input-field px-2 py-1.5"
+                    >
+                      {FONT_OPTIONS.map((o) => (
+                        <option key={o.id} value={o.id}>{o.label}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs text-warm-gray mb-1">Text size</label>
+                    <select
+                      value={letterSizeScale}
+                      onChange={(e) => { setLetterSizeScale(parseFloat(e.target.value)); }}
+                      className="w-full text-sm input-field px-2 py-1.5"
+                    >
+                      <option value={0.8}>Small</option>
+                      <option value={0.9}>Medium</option>
+                      <option value={1}>Auto</option>
+                      <option value={1.15}>Large</option>
+                      <option value={1.3}>Extra Large</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+            </>
+          );
+        })()}
+
       </div>
 
       {!imagesLoaded && imageUrls.length > 0 && (
-        <div className="no-print fixed bottom-4 right-4 bg-amber-100 text-amber-800 text-sm px-4 py-2 rounded-lg shadow">
+        <div className="no-print fixed bottom-4 right-4 text-sm px-4 py-2 rounded-lg shadow" style={{ background: "var(--color-amber-light)", color: "var(--color-charcoal)" }}>
           Loading images...
+        </div>
+      )}
+
+      {showLetterEditor && (
+        <div
+          className="no-print fixed inset-0 z-[100] flex items-center justify-center"
+          style={{ background: "rgba(0,0,0,0.4)" }}
+          onClick={() => setShowLetterEditor(false)}
+        >
+          <div
+            className="rounded-2xl shadow-xl p-6 w-full max-w-lg mx-4"
+            style={{ background: "var(--color-white)" }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-lg font-semibold text-charcoal mb-1">Personal letter insert</h3>
+            <p className="text-sm text-warm-gray mb-4">
+              Write a personal note that will print as a separate page tucked inside the card.
+            </p>
+            <textarea
+              value={letterText}
+              onChange={(e) => setLetterText(e.target.value)}
+              rows={6}
+              placeholder="Dear friend, I wanted to add a personal note..."
+              className="input-field rounded-xl w-full mb-3 text-base"
+              style={fontCSS(letterFont as FontChoice)}
+            />
+            <div className="flex items-center gap-3 mb-4">
+              <span className="text-sm text-warm-gray">Font:</span>
+              {FONT_OPTIONS.map((f) => (
+                <button
+                  key={f.id}
+                  onClick={() => setLetterFont(f.id)}
+                  className={`text-sm px-3 py-1.5 rounded-lg border transition-colors ${
+                    letterFont === f.id
+                      ? "border-brand bg-brand-light font-medium"
+                      : "border-light-gray hover:border-sage"
+                  }`}
+                  style={fontCSS(f.id)}
+                >
+                  {f.label}
+                </button>
+              ))}
+            </div>
+            <div className="flex gap-3 justify-end">
+              <button
+                onClick={() => setShowLetterEditor(false)}
+                className="px-4 py-2 text-sm rounded-lg font-medium text-charcoal"
+                style={{ border: "1px solid var(--color-light-gray)" }}
+              >
+                Cancel
+              </button>
+              {letterText.trim() && (
+                <button
+                  onClick={() => {
+                    setLetterText("");
+                    if (card) {
+                      updateCard(card.id, { letter_text: null, letter_font: null });
+                      setCard({ ...card, letter_text: null, letter_font: null });
+                    }
+                    setShowLetterEditor(false);
+                  }}
+                  className="px-4 py-2 text-sm rounded-lg font-medium"
+                  style={{ color: "var(--color-error)", border: "1px solid var(--color-error)" }}
+                >
+                  Remove letter
+                </button>
+              )}
+              <button
+                onClick={() => {
+                  if (card) {
+                    const updates = {
+                      letter_text: letterText.trim() || null,
+                      letter_font: letterFont,
+                    };
+                    updateCard(card.id, updates);
+                    setCard({ ...card, ...updates });
+                  }
+                  setShowLetterEditor(false);
+                }}
+                className="btn-primary px-4 py-2 text-sm rounded-lg"
+              >
+                {letterText.trim() ? "Save letter" : "Close"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showDeleteConfirm && (
+        <div
+          className="no-print fixed inset-0 z-[100] flex items-center justify-center"
+          style={{ background: "rgba(0,0,0,0.4)" }}
+          onClick={() => setShowDeleteConfirm(false)}
+        >
+          <div
+            className="rounded-2xl shadow-xl p-6 w-full max-w-sm mx-4"
+            style={{ background: "var(--color-white)" }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-lg font-semibold text-charcoal mb-2">Delete this card?</h3>
+            <p className="text-sm text-warm-gray mb-6">
+              This will permanently remove the card and its message. This can&apos;t be undone.
+            </p>
+            <div className="flex gap-3 justify-end">
+              <button
+                onClick={() => setShowDeleteConfirm(false)}
+                className="px-4 py-2 text-sm rounded-lg font-medium text-charcoal"
+                style={{ border: "1px solid var(--color-light-gray)" }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  deleteCard(cardId);
+                  router.push("/");
+                }}
+                className="px-4 py-2 text-sm rounded-lg font-medium text-white"
+                style={{ background: "var(--color-error)" }}
+              >
+                Delete
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </>

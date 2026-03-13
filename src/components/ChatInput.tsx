@@ -39,7 +39,11 @@ export default function ChatInput({
   }
 
   return (
-    <form onSubmit={handleSubmit} className="flex items-end gap-3 p-4 border-t border-gray-200 bg-white">
+    <form
+      onSubmit={handleSubmit}
+      className="flex items-end gap-3 p-4"
+      style={{ borderTop: "1px solid var(--color-light-gray)", background: "var(--color-white)" }}
+    >
       <textarea
         ref={textareaRef}
         value={text}
@@ -48,16 +52,12 @@ export default function ChatInput({
         placeholder={placeholder}
         disabled={disabled}
         rows={1}
-        className="flex-1 resize-none rounded-xl border border-gray-300 px-4 py-3 text-sm
-                   focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent
-                   disabled:bg-gray-50 disabled:text-gray-400"
+        className="input-field flex-1 resize-none rounded-xl"
       />
       <button
         type="submit"
         disabled={disabled || !text.trim()}
-        className="rounded-xl bg-indigo-600 px-5 py-3 text-sm font-medium text-white
-                   hover:bg-indigo-700 transition-colors
-                   disabled:bg-gray-300 disabled:cursor-not-allowed"
+        className="btn-primary px-5 py-3 text-sm"
       >
         Send
       </button>

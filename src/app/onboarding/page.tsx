@@ -3,6 +3,8 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { saveUserProfile, getUserProfile } from "@/lib/store";
+import TraitPickerWheel from "@/components/TraitPickerWheel";
+import AppHeader from "@/components/AppHeader";
 
 // ─── Curated selection lists ────────────────────────────────────────
 
@@ -23,12 +25,42 @@ const INTEREST_CATEGORIES: Record<string, string[]> = {
   "Tech & Learning": ["Technology", "Science", "History", "Languages", "Puzzles"],
 };
 
+const ALL_INTERESTS = Object.values(INTEREST_CATEGORIES).flat();
+
+/** Map each interest to its category for grouping in "Your picks" */
+function getInterestCategory(interest: string): string | null {
+  for (const [category, items] of Object.entries(INTEREST_CATEGORIES)) {
+    if (items.includes(interest)) return category;
+  }
+  return null;
+}
+
 const COMMUNICATION_STYLES = [
-  { id: "sentimental", label: "Big and sentimental", desc: "I go all-in on feelings" },
-  { id: "short", label: "Short and sweet", desc: "A few genuine words" },
-  { id: "funny", label: "Funny first", desc: "Humor is how I show love" },
-  { id: "thoughtful", label: "Thoughtful and specific", desc: "I reference details that matter" },
-  { id: "understated", label: "Simple and understated", desc: "Less is more" },
+  { id: "heartfelt", label: "Big and heartfelt", desc: "Expressive, emotional messages that say a lot" },
+  { id: "short", label: "Short and sweet", desc: "Keep things simple and to the point" },
+  { id: "funny", label: "Funny first", desc: "Humor leads the message" },
+  { id: "thoughtful", label: "Thoughtful and specific", desc: "Personal messages referencing memories or shared experiences" },
+  { id: "understated", label: "Simple and understated", desc: "Elegant and restrained tone" },
+  { id: "conversational", label: "Warm and conversational", desc: "Sounds like a natural message from a friend" },
+  { id: "playful", label: "Playful and lighthearted", desc: "Cheerful, upbeat energy" },
+];
+
+const HUMOR_STYLES = [
+  { id: "dry", label: "Dry wit", desc: "Subtle, clever humor" },
+  { id: "dad", label: "Dad jokes", desc: "Classic punny humor" },
+  { id: "goofy", label: "Goofy / silly", desc: "Over-the-top fun" },
+  { id: "deadpan", label: "Deadpan", desc: "Humor delivered very seriously" },
+  { id: "teasing", label: "Playful teasing", desc: "Friendly roasting between people who know each other" },
+  { id: "sarcastic", label: "Sarcastic / snarky", desc: "Edgy humor with attitude" },
+  { id: "pun", label: "Pun-based", desc: "Wordplay-driven humor" },
+  { id: "observational", label: "Observational", desc: "Humor about everyday life" },
+];
+
+const EMOTIONAL_ENERGY = [
+  { id: "lowkey", label: "Low-key", desc: "Calm, relaxed tone" },
+  { id: "warm", label: "Warm", desc: "Friendly and sincere" },
+  { id: "emotional", label: "Emotional", desc: "Deeply heartfelt" },
+  { id: "celebratory", label: "Celebratory", desc: "High-energy happiness" },
 ];
 
 const LIFESTYLE_OPTIONS = [
@@ -46,16 +78,27 @@ export default function OnboardingPage() {
   const [step, setStep] = useState<OnboardingStep>("intro");
 
   // Form state
-  const [name, setName] = useState("");
+  const [firstName, setFirstName] = useState("");
+  const [lastName, setLastName] = useState("");
+  const [email, setEmail] = useState("");
+  const [nickname, setNickname] = useState("");
   const [birthday, setBirthday] = useState("");
+  const [addressStreet, setAddressStreet] = useState("");
+  const [addressCity, setAddressCity] = useState("");
+  const [addressState, setAddressState] = useState("");
+  const [addressPostal, setAddressPostal] = useState("");
+  const [lifestyle, setLifestyle] = useState("");
+  const [partnerName, setPartnerName] = useState("");
   const [selectedTraits, setSelectedTraits] = useState<string[]>([]);
   const [customTrait, setCustomTrait] = useState("");
   const [selectedInterests, setSelectedInterests] = useState<string[]>([]);
   const [customInterest, setCustomInterest] = useState("");
   const [commStyle, setCommStyle] = useState<string[]>([]);
-  const [lifestyle, setLifestyle] = useState("");
-  const [partnerName, setPartnerName] = useState("");
-  const [humorStyle, setHumorStyle] = useState("");
+  const [emotionalEnergy, setEmotionalEnergy] = useState("");
+  const [humorStyleId, setHumorStyleId] = useState("");
+  const [centeredCommLabel, setCenteredCommLabel] = useState<string | null>(null);
+  const [centeredEnergyLabel, setCenteredEnergyLabel] = useState<string | null>(null);
+  const [centeredHumorLabel, setCenteredHumorLabel] = useState<string | null>(null);
 
   useEffect(() => {
     setMounted(true);
@@ -63,7 +106,53 @@ export default function OnboardingPage() {
     if (existing?.onboarding_complete) {
       setCompleted(true);
     }
+    if (existing) {
+      const ex = existing as { first_name?: string; last_name?: string; nickname?: string };
+      if (ex.first_name) setFirstName(ex.first_name);
+      if (ex.last_name) setLastName(ex.last_name || "");
+      if ((existing as { email?: string | null }).email) setEmail((existing as { email?: string | null }).email || "");
+      if (ex.nickname) setNickname(ex.nickname || "");
+      if (!ex.first_name && existing.display_name) setFirstName(existing.display_name);
+      if (existing.birthday) setBirthday(existing.birthday);
+      if (existing.lifestyle) setLifestyle(existing.lifestyle);
+      if ((existing as { partner_name?: string }).partner_name) setPartnerName((existing as { partner_name?: string }).partner_name || "");
+      const ma = existing.mailing_address;
+      if (ma && typeof ma === "string") {
+        const parts = ma.split("|");
+        if (parts.length >= 4) {
+          setAddressStreet(parts[0] || ""); setAddressCity(parts[1] || ""); setAddressState(parts[2] || ""); setAddressPostal(parts[3] || "");
+        }
+      }
+      if (existing.personality) setSelectedTraits(existing.personality.split(", ").filter(Boolean));
+      if (existing.interests?.length) setSelectedInterests(existing.interests);
+      if (existing.communication_style) {
+        const cs = existing.communication_style;
+        let labels: string[] = [];
+        const primaryMatch = cs.match(/Primary — ([^.]+)/);
+        const secondaryMatch = cs.match(/Secondary — ([^.]+)/);
+        if (primaryMatch) labels.push(primaryMatch[1].trim());
+        if (secondaryMatch) labels.push(secondaryMatch[1].trim());
+        if (labels.length === 0) labels = cs.split(",").map((s) => s.trim()).filter(Boolean);
+        const ids = labels.map((l) => COMMUNICATION_STYLES.find((s) => s.label === l)?.id).filter(Boolean) as string[];
+        setCommStyle(ids);
+      }
+      const ee = (existing as { emotional_energy?: string }).emotional_energy;
+      if (ee) {
+        const found = EMOTIONAL_ENERGY.find((e) => e.label === ee);
+        if (found) setEmotionalEnergy(found.id);
+      }
+      if (existing.humor_style) {
+        const match = HUMOR_STYLES.find((h) => h.label === existing.humor_style || existing.humor_style?.toLowerCase().includes(h.label.toLowerCase()));
+        if (match) setHumorStyleId(match.id);
+      }
+    }
   }, []);
+
+  // Scroll to top when moving to the next step so the user sees the top of the page
+  useEffect(() => {
+    if (!mounted) return;
+    window.scrollTo({ top: 0, behavior: "auto" });
+  }, [step, mounted]);
 
   if (!mounted) return null;
 
@@ -75,10 +164,14 @@ export default function OnboardingPage() {
 
   function addCustomTrait() {
     const t = customTrait.trim();
-    if (t && !selectedTraits.includes(t)) {
+    if (!t) return;
+    const match = PERSONALITY_TRAITS.find((p) => p.toLowerCase() === t.toLowerCase());
+    if (match) {
+      if (!selectedTraits.includes(match)) toggleTrait(match);
+    } else if (!selectedTraits.includes(t)) {
       setSelectedTraits((prev) => [...prev, t]);
-      setCustomTrait("");
     }
+    setCustomTrait("");
   }
 
   function toggleInterest(interest: string) {
@@ -89,16 +182,37 @@ export default function OnboardingPage() {
 
   function addCustomInterest() {
     const i = customInterest.trim();
-    if (i && !selectedInterests.includes(i)) {
+    if (!i) return;
+    const match = ALL_INTERESTS.find((x) => x.toLowerCase() === i.toLowerCase());
+    if (match) {
+      if (!selectedInterests.includes(match)) toggleInterest(match);
+    } else if (!selectedInterests.includes(i)) {
       setSelectedInterests((prev) => [...prev, i]);
-      setCustomInterest("");
     }
+    setCustomInterest("");
   }
 
   function toggleCommStyle(id: string) {
     setCommStyle((prev) =>
-      prev.includes(id) ? prev.filter((s) => s !== id) : prev.length < 2 ? [...prev, id] : prev
+      prev.includes(id) ? prev.filter((s) => s !== id) : prev.length < 2 ? [...prev, id] : [prev[0], id]
     );
+  }
+
+  function toggleCommStyleByLabel(label: string) {
+    const style = COMMUNICATION_STYLES.find((s) => s.label === label);
+    if (style) toggleCommStyle(style.id);
+  }
+
+  function toggleEmotionalEnergyByLabel(label: string) {
+    const e = EMOTIONAL_ENERGY.find((x) => x.label === label);
+    if (!e) return;
+    setEmotionalEnergy((prev) => (prev === e.id ? "" : e.id));
+  }
+
+  function toggleHumorStyleByLabel(label: string) {
+    const h = HUMOR_STYLES.find((x) => x.label === label);
+    if (!h) return;
+    setHumorStyleId((prev) => (prev === h.id ? "" : h.id));
   }
 
   const showPartner = ["In a relationship", "Married"].includes(lifestyle);
@@ -107,17 +221,32 @@ export default function OnboardingPage() {
     const commLabels = COMMUNICATION_STYLES
       .filter((s) => commStyle.includes(s.id))
       .map((s) => s.label);
+    const commStr = commLabels.length > 0
+      ? `Primary — ${commLabels[0]}.${commLabels.length > 1 ? ` Secondary — ${commLabels[1]}.` : ""}`
+      : null;
+    const humorLabel = humorStyleId ? HUMOR_STYLES.find((h) => h.id === humorStyleId)?.label || null : null;
+    const energyLabel = emotionalEnergy ? EMOTIONAL_ENERGY.find((e) => e.id === emotionalEnergy)?.label || null : null;
+    const mailingAddr = [addressStreet, addressCity, addressState, addressPostal].some((s) => s.trim())
+      ? [addressStreet.trim(), addressCity.trim(), addressState.trim(), addressPostal.trim()].join("|")
+      : null;
 
+    const displayName = nickname.trim() || firstName.trim();
     saveUserProfile({
-      display_name: name.trim(),
+      display_name: displayName,
+      first_name: firstName.trim() || null,
+      last_name: lastName.trim() || null,
+      email: email.trim() || null,
+      nickname: nickname.trim() || null,
       personality: selectedTraits.join(", "),
-      humor_style: humorStyle || null,
+      humor_style: humorLabel,
       interests: selectedInterests,
       values: [],
       birthday: birthday || null,
       lifestyle: lifestyle || null,
       partner_name: showPartner && partnerName.trim() ? partnerName.trim() : null,
-      communication_style: commLabels.join(", ") || null,
+      communication_style: commStr,
+      emotional_energy: energyLabel,
+      mailing_address: mailingAddr,
       onboarding_complete: true,
     });
     setCompleted(true);
@@ -127,28 +256,26 @@ export default function OnboardingPage() {
 
   if (completed) {
     return (
-      <div className="flex flex-col items-center justify-center h-screen bg-gradient-to-b from-indigo-50 to-white px-4">
+      <div className="flex flex-col items-center justify-center h-screen px-4" style={{ background: "var(--color-cream)" }}>
         <div className="text-center max-w-md">
           <div className="text-5xl mb-4">&#10024;</div>
-          <h1 className="text-2xl font-bold text-gray-900 mb-3">
+          <h1 className="text-2xl font-bold text-charcoal mb-3">
             You&apos;re all set!
           </h1>
-          <p className="text-gray-600 mb-8">
+          <p className="text-warm-gray mb-8">
             Nuuge knows you now. Next, add someone you&apos;d like to send cards to.
           </p>
           <button
             onClick={() => router.push("/recipients/new")}
-            className="bg-indigo-600 text-white px-8 py-3 rounded-xl font-medium
-                       hover:bg-indigo-700 transition-colors mr-3"
+            className="btn-primary mr-3"
           >
             Add someone
           </button>
           <button
             onClick={() => router.push("/")}
-            className="bg-white text-indigo-600 border border-indigo-200 px-8 py-3 rounded-xl
-                       font-medium hover:bg-indigo-50 transition-colors"
+            className="btn-secondary"
           >
-            Go to dashboard
+            Go to Circle of People
           </button>
         </div>
       </div>
@@ -159,40 +286,40 @@ export default function OnboardingPage() {
 
   if (step === "intro") {
     return (
-      <div className="flex flex-col items-center justify-center h-screen bg-gradient-to-b from-indigo-50 to-white px-4">
+      <div className="flex flex-col items-center justify-center h-screen px-4" style={{ background: "var(--color-cream)" }}>
         <div className="max-w-lg text-center">
-          <h1 className="text-3xl font-bold text-gray-900 mb-3">
+          <h1 className="text-4xl font-bold text-charcoal mb-4">
             Welcome to Nuuge
           </h1>
-          <p className="text-lg text-gray-600 mb-8">
+          <p className="text-xl text-warm-gray mb-8 leading-relaxed">
             Cards that actually sound like you.
           </p>
 
-          <div className="bg-white rounded-2xl border border-gray-200 p-8 mb-8 text-left">
-            <h2 className="text-md font-semibold text-gray-900 mb-4">
+          <div className="card-surface p-8 mb-8 text-left">
+            <h2 className="text-xl font-semibold text-charcoal mb-5">
               Here&apos;s how this works
             </h2>
-            <div className="space-y-4 text-sm text-gray-600">
-              <div className="flex gap-3">
-                <span className="text-indigo-500 font-bold text-base mt-[-2px]">1</span>
+            <div className="space-y-5 text-base text-warm-gray leading-relaxed">
+              <div className="flex justify-between items-start gap-3">
+                <span className="font-bold text-lg" style={{ color: "var(--color-brand)" }}>1</span>
                 <p>
-                  <span className="font-medium text-gray-800">Quick setup.</span>{" "}
+                  <span className="font-medium text-charcoal">Quick setup.</span>{" "}
                   Tell Nuuge a bit about yourself — your personality, what you&apos;re into,
                   how you like to communicate. Takes about a minute.
                 </p>
               </div>
-              <div className="flex gap-3">
-                <span className="text-indigo-500 font-bold text-base mt-[-2px]">2</span>
+              <div className="flex justify-between items-start gap-3">
+                <span className="font-bold text-lg" style={{ color: "var(--color-brand)" }}>2</span>
                 <p>
-                  <span className="font-medium text-gray-800">Add your people.</span>{" "}
+                  <span className="font-medium text-charcoal">Add your people.</span>{" "}
                   For each person you send cards to, tell us a little about them
                   and your relationship.
                 </p>
               </div>
-              <div className="flex gap-3">
-                <span className="text-indigo-500 font-bold text-base mt-[-2px]">3</span>
+              <div className="flex justify-between items-start gap-3">
+                <span className="font-bold text-lg" style={{ color: "var(--color-brand)" }}>3</span>
                 <p>
-                  <span className="font-medium text-gray-800">Nuuge creates cards for you.</span>{" "}
+                  <span className="font-medium text-charcoal">Nuuge creates cards for you.</span>{" "}
                   Using what it knows about you and the recipient, Nuuge writes messages
                   and designs cards that feel genuinely personal.
                 </p>
@@ -202,8 +329,7 @@ export default function OnboardingPage() {
 
           <button
             onClick={() => setStep("basics")}
-            className="bg-indigo-600 text-white px-10 py-4 rounded-xl text-lg font-medium
-                       hover:bg-indigo-700 transition-colors shadow-lg shadow-indigo-200"
+            className="btn-primary text-lg px-10 py-4 shadow-lg"
           >
             Let&apos;s go
           </button>
@@ -217,81 +343,178 @@ export default function OnboardingPage() {
   const stepNumber = step === "basics" ? 1 : step === "about" ? 2 : step === "style" ? 3 : 4;
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-indigo-50 to-white">
-      <header className="border-b border-gray-200 bg-white px-6 py-4">
-        <div className="max-w-2xl mx-auto flex items-center justify-between">
-          <h1 className="text-lg font-semibold text-gray-900">
-            About you
-          </h1>
-          <div className="flex items-center gap-2">
-            {[1, 2, 3, 4].map((n) => (
-              <div
-                key={n}
-                className={`w-8 h-1.5 rounded-full transition-colors ${
-                  n <= stepNumber ? "bg-indigo-500" : "bg-gray-200"
-                }`}
-              />
-            ))}
-            <span className="text-xs text-gray-400 ml-2">Step {stepNumber} of 4</span>
-          </div>
+    <div className="min-h-screen" style={{ background: "var(--color-cream)" }}>
+      <AppHeader hideAccount>
+        <span className="font-medium text-charcoal">Account setup</span>
+        <span className="flex-1" />
+        <div className="flex items-center gap-2">
+          {[1, 2, 3, 4].map((n) => (
+            <div
+              key={n}
+              className={`w-8 h-1.5 rounded-full transition-colors ${
+                n <= stepNumber ? "bg-brand" : "bg-light-gray"
+              }`}
+            />
+          ))}
+          <span className="text-xs text-warm-gray ml-2">Step {stepNumber} of 4</span>
         </div>
-      </header>
+      </AppHeader>
 
-      <main className="max-w-2xl mx-auto px-6 py-8">
+      <main className={`mx-auto px-6 py-8 ${step === "about" || step === "style" ? "max-w-4xl" : "max-w-2xl"}`}>
 
-        {/* ─── Step 1: Basics ─── */}
+        {/* ─── Step 1: Basics — Name, birthday, life stage, address ─── */}
         {step === "basics" && (
           <div>
-            <h2 className="text-xl font-bold text-gray-900 mb-1">
+            <h2 className="text-2xl font-bold text-charcoal mb-2">
               The basics
             </h2>
-            <p className="text-sm text-gray-500 mb-6">
-              Just your name and birthday so Nuuge knows who&apos;s sending the cards.
+            <p className="text-xl text-warm-gray mb-6 leading-relaxed">
+              A few details so Nuuge knows who&apos;s sending the cards.
             </p>
 
-            <div className="space-y-4">
+            <p className="text-base text-warm-gray mb-4">First name, last name, and birthday are required.</p>
+            <div className="space-y-5">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Your name
-                </label>
+                <label className="block text-xl font-semibold text-charcoal mb-2" htmlFor="first-name">First name</label>
                 <input
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  placeholder="First name or nickname"
+                  id="first-name"
+                  value={firstName}
+                  onChange={(e) => setFirstName(e.target.value)}
+                  placeholder="Your first name"
                   autoFocus
-                  className="w-full border border-gray-300 rounded-xl px-4 py-3 text-sm
-                             outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
+                  required
+                  aria-required="true"
+                  className="input-field rounded-xl w-full text-lg py-3"
                 />
+              </div>
+              <div>
+                <label className="block text-xl font-semibold text-charcoal mb-2" htmlFor="last-name">Last name</label>
+                <input
+                  id="last-name"
+                  value={lastName}
+                  onChange={(e) => setLastName(e.target.value)}
+                  placeholder="Your last name"
+                  required
+                  aria-required="true"
+                  className="input-field rounded-xl w-full text-lg py-3"
+                />
+                <p className="text-base text-warm-gray mt-2">Used for address labels when we mail cards</p>
+              </div>
+              <div>
+                <label className="block text-xl font-semibold text-charcoal mb-2" htmlFor="email">Email</label>
+                <input
+                  id="email"
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="you@example.com"
+                  className="input-field rounded-xl w-full text-lg py-3"
+                />
+                <p className="text-base text-warm-gray mt-2">Optional — for account and delivery updates</p>
+              </div>
+              <div>
+                <label className="block text-xl font-semibold text-charcoal mb-2" htmlFor="nickname">Nickname</label>
+                <input
+                  id="nickname"
+                  value={nickname}
+                  onChange={(e) => setNickname(e.target.value)}
+                  placeholder="e.g. JT for John Thomas"
+                  className="input-field rounded-xl w-full text-lg py-3"
+                />
+                <p className="text-base text-warm-gray mt-2">Used in card salutations if you prefer it over your first name</p>
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Birthday
-                </label>
+                <label className="block text-xl font-semibold text-charcoal mb-2" htmlFor="birthday">Birthday</label>
                 <input
+                  id="birthday"
                   type="date"
                   value={birthday}
                   onChange={(e) => setBirthday(e.target.value)}
-                  className="w-full border border-gray-300 rounded-xl px-4 py-3 text-sm
-                             outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
+                  required
+                  aria-required="true"
+                  className="input-field rounded-xl w-full text-lg py-3"
                 />
-                <p className="text-xs text-gray-400 mt-1">Optional — helps Nuuge remember your birthday</p>
+                <p className="text-base text-warm-gray mt-2">Helps Nuuge create age-appropriate cards</p>
+              </div>
+
+              <div>
+                <label className="block text-xl font-semibold text-charcoal mb-2">Life stage</label>
+                <div className="flex flex-wrap gap-2">
+                  {LIFESTYLE_OPTIONS.map((opt) => (
+                    <button
+                      key={opt}
+                      onClick={() => setLifestyle(lifestyle === opt ? "" : opt)}
+                      className={`px-3 py-2 rounded-full text-base transition-colors
+                        ${lifestyle === opt
+                          ? "bg-brand text-white"
+                          : "bg-faint-gray text-charcoal hover:bg-light-gray"
+                        }`}
+                    >
+                      {opt}
+                    </button>
+                  ))}
+                </div>
+                {showPartner && (
+                  <div className="mt-3">
+                    <label className="block text-lg font-medium text-charcoal mb-1">Partner&apos;s name</label>
+                    <input
+                      value={partnerName}
+                      onChange={(e) => setPartnerName(e.target.value)}
+                      placeholder="For co-signing cards together"
+                      className="input-field rounded-xl w-full text-lg py-3"
+                    />
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <label className="block text-xl font-semibold text-charcoal mb-2">Address</label>
+                <p className="text-base text-warm-gray mb-3">Optional — useful if we mail cards for you later</p>
+                <div className="space-y-3">
+                  <input
+                    value={addressStreet}
+                    onChange={(e) => setAddressStreet(e.target.value)}
+                    placeholder="Street address"
+                    className="input-field rounded-xl w-full text-lg py-3"
+                  />
+                  <div className="grid grid-cols-2 gap-3">
+                    <input
+                      value={addressCity}
+                      onChange={(e) => setAddressCity(e.target.value)}
+                      placeholder="City"
+                      className="input-field rounded-xl w-full text-lg py-3"
+                    />
+                    <input
+                      value={addressState}
+                      onChange={(e) => setAddressState(e.target.value)}
+                      placeholder="State / Region"
+                      className="input-field rounded-xl w-full text-lg py-3"
+                    />
+                  </div>
+                  <input
+                    value={addressPostal}
+                    onChange={(e) => setAddressPostal(e.target.value)}
+                    placeholder="Postal / ZIP code"
+                    className="input-field rounded-xl w-full text-lg py-3"
+                  />
+                </div>
               </div>
             </div>
 
-            <div className="flex gap-3 mt-8">
+            <div className="flex justify-between items-center gap-3 mt-8">
               <button
                 onClick={() => setStep("intro")}
-                className="text-sm text-gray-400 hover:text-gray-600 px-4 py-2"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium transition-colors"
+                style={{ color: "var(--color-brand)", border: "1.5px solid var(--color-sage)" }}
               >
-                &larr; Back
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+                Back
               </button>
               <button
                 onClick={() => setStep("about")}
-                disabled={!name.trim()}
-                className="bg-indigo-600 text-white px-8 py-3 rounded-xl font-medium
-                           hover:bg-indigo-700 transition-colors flex-1
-                           disabled:opacity-40 disabled:cursor-not-allowed"
+                disabled={!firstName.trim() || !lastName.trim() || !birthday}
+                className="btn-primary disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 Next
               </button>
@@ -299,229 +522,346 @@ export default function OnboardingPage() {
           </div>
         )}
 
-        {/* ─── Step 2: About You ─── */}
+        {/* ─── Step 2: About You — Personality + Interests on same page, combined pick list ─── */}
         {step === "about" && (
-          <div>
-            <h2 className="text-xl font-bold text-gray-900 mb-1">
-              A little about you
-            </h2>
-            <p className="text-sm text-gray-500 mb-6">
-              Pick the traits and interests that fit. These help Nuuge write messages that sound like you.
-            </p>
-
-            {/* Personality traits */}
-            <div className="mb-8">
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Personality — pick a few that fit
-              </label>
-              <div className="flex flex-wrap gap-2 mb-2">
-                {PERSONALITY_TRAITS.map((trait) => (
+          <div className="flex gap-6 min-h-[calc(100vh-12rem)]">
+            {/* Left: Personality + Interests — scrollable, wheels for both */}
+            <div className="flex-1 max-w-xl flex flex-col overflow-y-auto">
+              {/* Personality section */}
+              <div className="mb-8">
+                <h2 className="text-2xl font-bold text-charcoal mb-2">Personality</h2>
+                <p className="text-xl text-warm-gray mb-3 leading-relaxed">
+                  These words help Nuuge write cards that sound like you — warm, funny, thoughtful, or whatever fits.
+                </p>
+                <p className="text-xl font-semibold text-charcoal mb-6">Tap the ones that feel like you.</p>
+                <TraitPickerWheel
+                  items={PERSONALITY_TRAITS}
+                  selected={selectedTraits}
+                  onToggle={toggleTrait}
+                />
+                <div className="flex gap-2 mt-4">
+                  <input
+                    value={customTrait}
+                    onChange={(e) => setCustomTrait(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && addCustomTrait()}
+                    placeholder="Add your own..."
+                    className="input-field flex-1"
+                  />
                   <button
-                    key={trait}
-                    onClick={() => toggleTrait(trait)}
-                    className={`px-3 py-1.5 rounded-full text-sm transition-colors
-                      ${selectedTraits.includes(trait)
-                        ? "bg-indigo-600 text-white"
-                        : "bg-gray-100 text-gray-700 hover:bg-gray-200"
-                      }`}
+                    onClick={addCustomTrait}
+                    disabled={!customTrait.trim()}
+                    className="text-sm font-medium px-3 disabled:text-warm-gray"
+                    style={{ color: "var(--color-brand)" }}
                   >
-                    {trait}
+                    Add
                   </button>
-                ))}
-              </div>
-              <div className="flex gap-2">
-                <input
-                  value={customTrait}
-                  onChange={(e) => setCustomTrait(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && addCustomTrait()}
-                  placeholder="Add your own..."
-                  className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm
-                             outline-none focus:border-indigo-500"
-                />
-                <button
-                  onClick={addCustomTrait}
-                  disabled={!customTrait.trim()}
-                  className="text-sm text-indigo-600 font-medium px-3 disabled:text-gray-300"
-                >
-                  Add
-                </button>
-              </div>
-              {selectedTraits.length > 0 && (
-                <p className="text-xs text-gray-400 mt-2">
-                  Selected: {selectedTraits.join(", ")}
-                </p>
-              )}
-            </div>
-
-            {/* Interests */}
-            <div className="mb-6">
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Interests — what are you into?
-              </label>
-              {Object.entries(INTEREST_CATEGORIES).map(([category, items]) => (
-                <div key={category} className="mb-3">
-                  <p className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-1.5">
-                    {category}
-                  </p>
-                  <div className="flex flex-wrap gap-2">
-                    {items.map((interest) => (
-                      <button
-                        key={interest}
-                        onClick={() => toggleInterest(interest)}
-                        className={`px-3 py-1.5 rounded-full text-sm transition-colors
-                          ${selectedInterests.includes(interest)
-                            ? "bg-indigo-600 text-white"
-                            : "bg-gray-100 text-gray-700 hover:bg-gray-200"
-                          }`}
-                      >
-                        {interest}
-                      </button>
-                    ))}
-                  </div>
                 </div>
-              ))}
-              <div className="flex gap-2 mt-2">
-                <input
-                  value={customInterest}
-                  onChange={(e) => setCustomInterest(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && addCustomInterest()}
-                  placeholder="Add your own interest..."
-                  className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm
-                             outline-none focus:border-indigo-500"
+              </div>
+
+              {/* Interests section — wheel below personality */}
+              <div className="mb-8">
+                <h2 className="text-2xl font-bold text-charcoal mb-2">Interests</h2>
+                <p className="text-xl text-warm-gray mb-3 leading-relaxed">
+                  What you&apos;re into — gives Nuuge ideas for personal touches in your cards.
+                </p>
+                <p className="text-xl font-semibold text-charcoal mb-6">Tap the ones that fit.</p>
+                <TraitPickerWheel
+                  items={ALL_INTERESTS}
+                  selected={selectedInterests}
+                  onToggle={toggleInterest}
                 />
+                <div className="flex gap-2 mt-4">
+                  <input
+                    value={customInterest}
+                    onChange={(e) => setCustomInterest(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && addCustomInterest()}
+                    placeholder="Add your own interest..."
+                    className="input-field flex-1"
+                  />
+                  <button
+                    onClick={addCustomInterest}
+                    disabled={!customInterest.trim()}
+                    className="text-sm font-medium px-3 disabled:text-warm-gray"
+                    style={{ color: "var(--color-brand)" }}
+                  >
+                    Add
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex justify-between items-center gap-3">
                 <button
-                  onClick={addCustomInterest}
-                  disabled={!customInterest.trim()}
-                  className="text-sm text-indigo-600 font-medium px-3 disabled:text-gray-300"
+                  onClick={() => setStep("basics")}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium transition-colors"
+                  style={{ color: "var(--color-brand)", border: "1.5px solid var(--color-sage)" }}
                 >
-                  Add
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+                  Back
+                </button>
+                <button
+                  onClick={() => setStep("style")}
+                  className="btn-primary"
+                >
+                  Next
                 </button>
               </div>
-              {selectedInterests.length > 0 && (
-                <p className="text-xs text-gray-400 mt-2">
-                  Selected: {selectedInterests.join(", ")}
-                </p>
-              )}
             </div>
 
-            <div className="flex gap-3 mt-6">
-              <button
-                onClick={() => setStep("basics")}
-                className="text-sm text-gray-400 hover:text-gray-600 px-4 py-2"
+            {/* Right: This is you! — banner + combined pick list (personality + interests) */}
+            <div
+              className="flex-1 max-w-xl overflow-hidden flex flex-col self-stretch"
+              style={{ background: "var(--color-brand-light)", border: "1px solid var(--color-sage-light)", minHeight: "calc(100vh - 12rem)" }}
+            >
+              <div
+                className="flex-shrink-0 px-5 py-5 flex flex-col justify-center"
+                style={{
+                  backgroundImage: "linear-gradient(rgba(0,0,0,0.5), rgba(0,0,0,0.5)), url('/milky-way-banner.jpg')",
+                  backgroundSize: "cover",
+                  backgroundPosition: "center",
+                  minHeight: "140px",
+                }}
               >
-                &larr; Back
-              </button>
-              <button
-                onClick={() => setStep("style")}
-                className="bg-indigo-600 text-white px-8 py-3 rounded-xl font-medium
-                           hover:bg-indigo-700 transition-colors flex-1"
-              >
-                Next
-              </button>
+                <p className="text-xl font-bold text-white mb-1 text-center" style={{ fontFamily: "var(--font-heading)" }}>
+                  This is you!
+                </p>
+                <p className="text-sm text-white text-center">Map the stars that make you, you</p>
+              </div>
+              <div className="flex-1 p-4 flex flex-col min-h-0 overflow-y-auto">
+                <p className="text-lg font-semibold text-charcoal mb-3">Your picks</p>
+                {selectedTraits.length === 0 && selectedInterests.length === 0 ? (
+                  <p className="text-lg text-warm-gray italic pl-3">Tap traits and interests in the wheels to add them</p>
+                ) : (
+                  <div className="space-y-4 pl-3">
+                    {selectedTraits.length > 0 && (
+                      <div>
+                        <p className="section-label mb-1.5">Personality</p>
+                        <ul className="space-y-1.5 pl-5">
+                          {selectedTraits.map((t) => (
+                            <li key={`trait-${t}`}>
+                              <button
+                                onClick={() => toggleTrait(t)}
+                                className="text-lg font-medium text-brand hover:opacity-70 text-left w-full"
+                              >
+                                {t} ×
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                    {selectedInterests.length > 0 && (
+                      <div>
+                        <p className="section-label mb-1.5">Interests</p>
+                        {(() => {
+                          const byCategory = new Map<string, string[]>();
+                          const uncategorized: string[] = [];
+                          for (const i of selectedInterests) {
+                            const cat = getInterestCategory(i);
+                            if (cat) {
+                              if (!byCategory.has(cat)) byCategory.set(cat, []);
+                              byCategory.get(cat)!.push(i);
+                            } else {
+                              uncategorized.push(i);
+                            }
+                          }
+                          return (
+                            <div className="space-y-3">
+                              {Array.from(byCategory.entries()).map(([category, items]) => (
+                                <div key={category}>
+                                  <p className="text-xs font-medium text-warm-gray mb-1">{category}</p>
+                                  <ul className="space-y-1.5 pl-5">
+                                    {items.map((interest) => (
+                                      <li key={`interest-${interest}`}>
+                                        <button
+                                          onClick={() => toggleInterest(interest)}
+                                          className="text-lg font-medium text-brand hover:opacity-70 text-left w-full"
+                                        >
+                                          {interest} ×
+                                        </button>
+                                      </li>
+                                    ))}
+                                  </ul>
+                                </div>
+                              ))}
+                              {uncategorized.length > 0 && (
+                                <div>
+                                  <p className="text-xs font-medium text-warm-gray mb-1">Your own</p>
+                                  <ul className="space-y-1.5 pl-5">
+                                    {uncategorized.map((interest) => (
+                                      <li key={`interest-${interest}`}>
+                                        <button
+                                          onClick={() => toggleInterest(interest)}
+                                          className="text-lg font-medium text-brand hover:opacity-70 text-left w-full"
+                                        >
+                                          {interest} ×
+                                        </button>
+                                      </li>
+                                    ))}
+                                  </ul>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })()}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         )}
 
-        {/* ─── Step 3: Your Style ─── */}
+        {/* ─── Step 3: Your Style — Communication, humor, emotional energy (wheels + Your picks) ─── */}
         {step === "style" && (
-          <div>
-            <h2 className="text-xl font-bold text-gray-900 mb-1">
-              How you communicate
-            </h2>
-            <p className="text-sm text-gray-500 mb-6">
-              This helps Nuuge match your natural voice when writing card messages.
-            </p>
+          <div className="flex gap-6 min-h-[calc(100vh-12rem)]">
+            <div className="flex-1 max-w-xl flex flex-col overflow-y-auto">
+              <h2 className="text-2xl font-bold text-charcoal mb-2">How you communicate</h2>
+              <p className="text-xl text-warm-gray mb-6 leading-relaxed">
+                This helps Nuuge match your natural voice when writing card messages.
+              </p>
 
-            {/* Communication style */}
-            <div className="mb-8">
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                When you write a card, you tend to be... (pick 1-2)
-              </label>
-              <div className="space-y-2">
-                {COMMUNICATION_STYLES.map((style) => (
-                  <button
-                    key={style.id}
-                    onClick={() => toggleCommStyle(style.id)}
-                    className={`w-full text-left px-4 py-3 rounded-xl border-2 transition-all
-                      ${commStyle.includes(style.id)
-                        ? "border-indigo-500 bg-indigo-50"
-                        : "border-gray-200 bg-white hover:border-indigo-300"
-                      }`}
-                  >
-                    <span className="text-sm font-medium text-gray-900">{style.label}</span>
-                    <span className="text-xs text-gray-500 ml-2">— {style.desc}</span>
-                  </button>
-                ))}
+              {/* Communication style — wheel + description preview */}
+              <div className="mb-8">
+                <label className="block text-xl font-semibold text-charcoal mb-3">
+                  Communication style
+                </label>
+                <p className="text-base text-warm-gray mb-3">Select 1 or 2 styles that describe how you write cards.</p>
+                <TraitPickerWheel
+                  items={COMMUNICATION_STYLES.map((s) => s.label)}
+                  selected={commStyle.map((id) => COMMUNICATION_STYLES.find((s) => s.id === id)!.label)}
+                  onToggle={toggleCommStyleByLabel}
+                  onCenterChange={setCenteredCommLabel}
+                />
+                {centeredCommLabel && (
+                  <div className="mt-3">
+                    <p className="text-sm font-medium text-warm-gray mb-1">Description</p>
+                    <div className="px-4 py-3 rounded-xl text-base text-warm-gray" style={{ background: "rgba(255,255,255,0.8)", border: "1.5px solid var(--color-sage)" }}>
+                      {COMMUNICATION_STYLES.find((s) => s.label === centeredCommLabel)?.desc}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Emotional energy — wheel + description preview */}
+              <div className="mb-8">
+                <label className="block text-xl font-semibold text-charcoal mb-3">Emotional energy</label>
+                <p className="text-base text-warm-gray mb-3">Helps Nuuge control the intensity of your messages. (Optional but recommended)</p>
+                <TraitPickerWheel
+                  items={EMOTIONAL_ENERGY.map((e) => e.label)}
+                  selected={emotionalEnergy ? [EMOTIONAL_ENERGY.find((e) => e.id === emotionalEnergy)!.label] : []}
+                  onToggle={toggleEmotionalEnergyByLabel}
+                  onCenterChange={setCenteredEnergyLabel}
+                />
+                {centeredEnergyLabel && (
+                  <div className="mt-3">
+                    <p className="text-sm font-medium text-warm-gray mb-1">Description</p>
+                    <div className="px-4 py-3 rounded-xl text-base text-warm-gray" style={{ background: "rgba(255,255,255,0.8)", border: "1.5px solid var(--color-sage)" }}>
+                      {EMOTIONAL_ENERGY.find((e) => e.label === centeredEnergyLabel)?.desc}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Humor style — wheel + description preview */}
+              <div className="mb-6">
+                <label className="block text-xl font-semibold text-charcoal mb-3">Humor style</label>
+                <p className="text-base text-warm-gray mb-3">
+                  {commStyle.some((id) => id === "funny" || id === "playful") ? "When you use humor, what kind? (Optional)" : "If you select Funny or Playful above, you can refine your humor style here."}
+                </p>
+                <TraitPickerWheel
+                  items={HUMOR_STYLES.map((h) => h.label)}
+                  selected={humorStyleId ? [HUMOR_STYLES.find((h) => h.id === humorStyleId)!.label] : []}
+                  onToggle={toggleHumorStyleByLabel}
+                  onCenterChange={setCenteredHumorLabel}
+                />
+                {centeredHumorLabel && (
+                  <div className="mt-3">
+                    <p className="text-sm font-medium text-warm-gray mb-1">Description</p>
+                    <div className="px-4 py-3 rounded-xl text-base text-warm-gray" style={{ background: "rgba(255,255,255,0.8)", border: "1.5px solid var(--color-sage)" }}>
+                      {HUMOR_STYLES.find((h) => h.label === centeredHumorLabel)?.desc}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="flex justify-between items-center gap-3">
+                <button onClick={() => setStep("about")} className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium transition-colors" style={{ color: "var(--color-brand)", border: "1.5px solid var(--color-sage)" }}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg> Back</button>
+                <button onClick={() => setStep("review")} className="btn-primary">Review</button>
               </div>
             </div>
 
-            {/* Humor */}
-            <div className="mb-8">
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Your sense of humor
-              </label>
-              <input
-                value={humorStyle}
-                onChange={(e) => setHumorStyle(e.target.value)}
-                placeholder="e.g. dry wit, dad jokes, goofy, deadpan, puns..."
-                className="w-full border border-gray-300 rounded-xl px-4 py-3 text-sm
-                           outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
-              />
-              <p className="text-xs text-gray-400 mt-1">Optional — helps Nuuge know when and how to be funny</p>
-            </div>
-
-            {/* Lifestyle */}
-            <div className="mb-6">
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Life stage
-              </label>
-              <div className="flex flex-wrap gap-2 mb-4">
-                {LIFESTYLE_OPTIONS.map((opt) => (
-                  <button
-                    key={opt}
-                    onClick={() => setLifestyle(lifestyle === opt ? "" : opt)}
-                    className={`px-3 py-1.5 rounded-full text-sm transition-colors
-                      ${lifestyle === opt
-                        ? "bg-indigo-600 text-white"
-                        : "bg-gray-100 text-gray-700 hover:bg-gray-200"
-                      }`}
-                  >
-                    {opt}
-                  </button>
-                ))}
+            {/* Right: Your picks — Primary/Secondary labels */}
+            <div
+              className="flex-1 max-w-xl overflow-hidden flex flex-col self-stretch rounded-xl"
+              style={{ background: "var(--color-brand-light)", border: "1px solid var(--color-sage-light)", minHeight: "calc(100vh - 12rem)" }}
+            >
+              <div className="flex-shrink-0 px-5 py-5">
+                <p className="text-lg font-semibold text-charcoal mb-3">Your picks</p>
               </div>
-
-              {showPartner && (
-                <div className="mt-3">
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Partner&apos;s name
-                  </label>
-                  <input
-                    value={partnerName}
-                    onChange={(e) => setPartnerName(e.target.value)}
-                    placeholder="For co-signing cards together"
-                    className="w-full border border-gray-300 rounded-xl px-4 py-3 text-sm
-                               outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
-                  />
-                  <p className="text-xs text-gray-400 mt-1">Optional — so you can sign cards &ldquo;from both of us&rdquo;</p>
+              <div className="flex-1 p-4 flex flex-col min-h-0 overflow-y-auto">
+                <div className="space-y-4 pl-3">
+                  {(commStyle.length > 0 || emotionalEnergy || humorStyleId) ? (
+                    <>
+                      {commStyle.length > 0 && (
+                        <div>
+                          <p className="section-label mb-1.5">Communication style</p>
+                          <ul className="space-y-1.5 pl-5">
+                            {commStyle.map((id, i) => {
+                              const s = COMMUNICATION_STYLES.find((x) => x.id === id);
+                              return s ? (
+                                <li key={s.id}>
+                                  <span className="text-sm font-medium text-warm-gray">
+                                    {i === 0 ? "Primary:" : "Secondary:"}
+                                  </span>{" "}
+                                  <button
+                                    onClick={() => toggleCommStyle(s.id)}
+                                    className="text-lg font-medium text-brand hover:opacity-70 text-left"
+                                  >
+                                    {s.label} ×
+                                  </button>
+                                </li>
+                              ) : null;
+                            })}
+                          </ul>
+                        </div>
+                      )}
+                      {emotionalEnergy && (
+                        <div>
+                          <p className="section-label mb-1.5">Emotional energy</p>
+                          <ul className="space-y-1.5 pl-5">
+                            <li>
+                              <button
+                                onClick={() => setEmotionalEnergy("")}
+                                className="text-lg font-medium text-brand hover:opacity-70 text-left"
+                              >
+                                {EMOTIONAL_ENERGY.find((e) => e.id === emotionalEnergy)?.label} ×
+                              </button>
+                            </li>
+                          </ul>
+                        </div>
+                      )}
+                      {humorStyleId && (
+                        <div>
+                          <p className="section-label mb-1.5">Humor style</p>
+                          <ul className="space-y-1.5 pl-5">
+                            <li>
+                              <button
+                                onClick={() => setHumorStyleId("")}
+                                className="text-lg font-medium text-brand hover:opacity-70 text-left"
+                              >
+                                {HUMOR_STYLES.find((h) => h.id === humorStyleId)?.label} ×
+                              </button>
+                            </li>
+                          </ul>
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <p className="text-lg text-warm-gray italic pl-3">Tap items in the wheels to add them</p>
+                  )}
                 </div>
-              )}
-            </div>
-
-            <div className="flex gap-3 mt-6">
-              <button
-                onClick={() => setStep("about")}
-                className="text-sm text-gray-400 hover:text-gray-600 px-4 py-2"
-              >
-                &larr; Back
-              </button>
-              <button
-                onClick={() => setStep("review")}
-                className="bg-indigo-600 text-white px-8 py-3 rounded-xl font-medium
-                           hover:bg-indigo-700 transition-colors flex-1"
-              >
-                Review
-              </button>
+              </div>
             </div>
           </div>
         )}
@@ -529,10 +869,10 @@ export default function OnboardingPage() {
         {/* ─── Step 4: Review ─── */}
         {step === "review" && (
           <div>
-            <h2 className="text-xl font-bold text-gray-900 mb-1">
+            <h2 className="text-2xl font-bold text-charcoal mb-2">
               Look good?
             </h2>
-            <p className="text-sm text-gray-500 mb-6">
+            <p className="text-xl text-warm-gray mb-6 leading-relaxed">
               Here&apos;s what Nuuge will use to write cards that sound like you. Tap any section to go back and edit.
             </p>
 
@@ -540,69 +880,78 @@ export default function OnboardingPage() {
               {/* Basics */}
               <button
                 onClick={() => setStep("basics")}
-                className="w-full bg-white border border-gray-200 rounded-xl p-4 text-left hover:border-indigo-300 transition-colors"
+                className="w-full card-surface card-surface-clickable p-5 text-left hover:border-sage transition-colors"
               >
-                <p className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-1">Basics</p>
-                <p className="text-sm text-gray-900 font-medium">{name}</p>
-                {birthday && <p className="text-sm text-gray-500">Birthday: {birthday}</p>}
+                <p className="section-label mb-2">Basics</p>
+                <p className="text-lg text-charcoal font-medium">
+                  {nickname.trim() || firstName.trim()}{lastName.trim() ? ` (${firstName.trim()} ${lastName.trim()})` : ""}
+                </p>
+                {birthday && <p className="text-base text-warm-gray">Birthday: {birthday}</p>}
+                {lifestyle && <p className="text-base text-warm-gray">Life stage: {lifestyle}{showPartner && partnerName.trim() ? ` — partner: ${partnerName.trim()}` : ""}</p>}
+                {[addressStreet, addressCity, addressState, addressPostal].some((s) => s.trim()) && (
+                  <p className="text-base text-warm-gray mt-1">
+                    Address: {[addressStreet, addressCity, addressState, addressPostal].filter((s) => s.trim()).join(", ")}
+                  </p>
+                )}
               </button>
 
               {/* Personality & Interests */}
               <button
                 onClick={() => setStep("about")}
-                className="w-full bg-white border border-gray-200 rounded-xl p-4 text-left hover:border-indigo-300 transition-colors"
+                className="w-full card-surface card-surface-clickable p-5 text-left hover:border-sage transition-colors"
               >
-                <p className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-1">Personality</p>
-                <p className="text-sm text-gray-700">
-                  {selectedTraits.length > 0 ? selectedTraits.join(", ") : <span className="text-gray-400">None selected</span>}
+                <p className="section-label mb-2">Personality</p>
+                <p className="text-lg text-charcoal">
+                  {selectedTraits.length > 0 ? selectedTraits.join(", ") : <span className="text-warm-gray">None selected</span>}
                 </p>
-                <p className="text-xs font-medium text-gray-400 uppercase tracking-wide mt-3 mb-1">Interests</p>
-                <p className="text-sm text-gray-700">
-                  {selectedInterests.length > 0 ? selectedInterests.join(", ") : <span className="text-gray-400">None selected</span>}
+                <p className="section-label mt-4 mb-2">Interests</p>
+                <p className="text-lg text-charcoal">
+                  {selectedInterests.length > 0 ? selectedInterests.join(", ") : <span className="text-warm-gray">None selected</span>}
                 </p>
               </button>
 
               {/* Style */}
               <button
                 onClick={() => setStep("style")}
-                className="w-full bg-white border border-gray-200 rounded-xl p-4 text-left hover:border-indigo-300 transition-colors"
+                className="w-full card-surface card-surface-clickable p-5 text-left hover:border-sage transition-colors"
               >
-                <p className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-1">Communication style</p>
-                <p className="text-sm text-gray-700">
+                <p className="section-label mb-2">Communication style</p>
+                <p className="text-lg text-charcoal">
                   {commStyle.length > 0
-                    ? COMMUNICATION_STYLES.filter((s) => commStyle.includes(s.id)).map((s) => s.label).join(", ")
-                    : <span className="text-gray-400">Not specified</span>
+                    ? (() => {
+                        const labels = COMMUNICATION_STYLES.filter((s) => commStyle.includes(s.id)).map((s) => s.label);
+                        return labels.length > 1 ? `Primary: ${labels[0]}; Secondary: ${labels[1]}` : labels[0];
+                      })()
+                    : <span className="text-warm-gray">Not specified</span>
                   }
                 </p>
-                {humorStyle && (
+                {emotionalEnergy && (
                   <>
-                    <p className="text-xs font-medium text-gray-400 uppercase tracking-wide mt-3 mb-1">Humor</p>
-                    <p className="text-sm text-gray-700">{humorStyle}</p>
+                    <p className="section-label mt-4 mb-2">Emotional energy</p>
+                    <p className="text-lg text-charcoal">{EMOTIONAL_ENERGY.find((e) => e.id === emotionalEnergy)?.label}</p>
                   </>
                 )}
-                {lifestyle && (
+                {humorStyleId && (
                   <>
-                    <p className="text-xs font-medium text-gray-400 uppercase tracking-wide mt-3 mb-1">Life stage</p>
-                    <p className="text-sm text-gray-700">
-                      {lifestyle}
-                      {showPartner && partnerName.trim() ? ` — partner: ${partnerName.trim()}` : ""}
-                    </p>
+                    <p className="section-label mt-4 mb-2">Humor style</p>
+                    <p className="text-lg text-charcoal">{HUMOR_STYLES.find((h) => h.id === humorStyleId)?.label}</p>
                   </>
                 )}
               </button>
             </div>
 
-            <div className="flex gap-3">
+            <div className="flex justify-between items-center gap-3">
               <button
                 onClick={() => setStep("style")}
-                className="text-sm text-gray-400 hover:text-gray-600 px-4 py-2"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium transition-colors"
+                style={{ color: "var(--color-brand)", border: "1.5px solid var(--color-sage)" }}
               >
-                &larr; Back
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+                Back
               </button>
               <button
                 onClick={handleSave}
-                className="bg-indigo-600 text-white px-8 py-3 rounded-xl font-medium
-                           hover:bg-indigo-700 transition-colors flex-1"
+                className="btn-primary"
               >
                 Save &amp; continue
               </button>

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import OpenAI from "openai";
+import { checkRateLimit } from "@/lib/rate-limit";
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
@@ -10,6 +11,14 @@ export async function POST(req: NextRequest) {
       { status: 500 }
     );
   }
+  const ip = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
+  const rl = checkRateLimit(ip, { maxRequests: 20, windowMs: 60_000 });
+  if (!rl.allowed) {
+    return NextResponse.json(
+      { error: "Too many requests. Please wait a moment and try again." },
+      { status: 429, headers: { "Retry-After": String(Math.ceil(rl.retryAfterMs / 1000)) } }
+    );
+  }
   try {
     const body = await req.json();
     const {
@@ -17,6 +26,7 @@ export async function POST(req: NextRequest) {
       recipientContext,
       occasion,
       tone,
+      includeFaithBased = false,
       messageText,
       additionalNotes,
       pastDesignThemes,
@@ -28,6 +38,7 @@ export async function POST(req: NextRequest) {
       recipientContext: string;
       occasion: string;
       tone: string;
+      includeFaithBased?: boolean;
       messageText: string;
       additionalNotes: string;
       pastDesignThemes?: string[];
@@ -35,6 +46,10 @@ export async function POST(req: NextRequest) {
       preferredStyle?: string;
       preferredMood?: string;
     } = body;
+
+    const faithDesignNote = includeFaithBased
+      ? `\nFAITH-BASED CARD: Use respectful, non-denominational imagery (e.g. soft light, peaceful motifs, nature, warmth, hope). Avoid humor, sarcasm, or edgy visuals. Keep all 3 concepts sincere and appropriate for a spiritual/faith-based occasion.\n`
+      : "";
 
     const pastThemesBlock =
       pastDesignThemes && pastDesignThemes.length > 0
@@ -51,6 +66,7 @@ ${recipientContext}
 
 OCCASION: ${occasion}
 TONE: ${tone}
+${faithDesignNote}
 THE CARD MESSAGE: ${messageText}
 ${additionalNotes ? `ADDITIONAL NOTES: ${additionalNotes}` : ""}
 ${pastThemesBlock}
@@ -66,6 +82,9 @@ DIVERSITY IS CRITICAL. The 3 concepts MUST come from different angles:
 **Concept 2 — Relationship & occasion**: Focus on the relationship dynamic between sender and recipient, or the occasion itself. Draw from their shared experiences, the sender's personality/humor style, or the emotional core of the occasion. This should feel like it's about "us" or "this moment" — not about one hobby keyword.
 
 **Concept 3 — Mood & atmosphere**: A broader, evocative scene that captures the tone and feeling without leaning on profile keywords. Think: a beautiful seasonal setting, an abstract warm scene, nature, humor, or a universal visual metaphor. Let the SENDER's personality and style influence the vibe (e.g. if the sender is sarcastic, maybe something playful or unexpected; if sentimental, something tender).
+
+CRITICAL — PEOPLE IN ILLUSTRATIONS:
+${preferredSubject?.toLowerCase().includes("people") ? `The user chose "People / Relationships" as their subject. You MAY include human figures, but ALWAYS describe them as silhouettes, abstract forms, or seen from behind. NEVER describe specific facial features, skin color, hair color, or ethnicity. Use phrases like "two silhouetted figures", "an abstract embrace", "shadows on a path", "hands reaching toward each other". The image generator cannot reliably render diverse human appearances, so keep figures universal and impressionistic.` : `Do NOT include people, human figures, faces, or body parts in ANY image_prompt. The image generator renders people poorly (cartoonish, wrong demographics). Instead, suggest the presence of people through objects: two coffee mugs, a pair of shoes by a door, a handwritten note, an empty swing still swaying, etc. This creates warmth without the risk of bad figure rendering.`}
 
 Each concept should:
 - Be LITERALLY and SPECIFICALLY describable so an image generator follows it exactly (e.g. "a cozy kitchen table with two mugs of coffee, morning light through a window, a small handwritten note" — not vague like "a warm scene")

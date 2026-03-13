@@ -1,0 +1,285 @@
+"use client";
+
+import { useState, useCallback, useEffect } from "react";
+import { fontCSS, positionCSS, textStyleCSS, frontTextAlign, messageSizing } from "@/lib/card-ui-helpers";
+import type { TextStyleChoice } from "@/lib/card-ui-helpers";
+
+type ViewStage = "envelope_front" | "envelope_back" | "front" | "inside" | "letter";
+
+interface Props {
+  cardJson: Record<string, unknown>;
+  frontImageUrl: string | null;
+  insideImageUrl: string | null;
+}
+
+export default function SharedCardViewer({ cardJson, frontImageUrl, insideImageUrl }: Props) {
+  const [stage, setStage] = useState<ViewStage>("envelope_front");
+  const [animating, setAnimating] = useState(false);
+  const [flipVisible, setFlipVisible] = useState(false);
+
+  const card = cardJson;
+  const recipientName = (card.recipient_name as string) || "You";
+  const senderName = (card.sender_name as string) || "";
+  const messageText = (card.message_text as string) || "";
+  const frontText = (card.front_text as string) || "";
+  const frontTextPosition = (card.front_text_position as string) || "bottom-right";
+  const frontTextFont = card.front_text_font as string | undefined;
+  const frontTextStyleChoice = ((card.front_text_style as string) || "dark_box") as TextStyleChoice;
+  const insideImagePosition = (card.inside_image_position as string) || "top";
+  const fontChoice = card.font as string | undefined;
+  const ftScale = (card.ft_font_scale as number) ?? 1;
+  const msgScale = (card.msg_font_scale as number) ?? 1.5;
+  const letterText = (card.letter_text as string) || "";
+  const letterFont = (card.letter_font as string) || "handwritten";
+
+  const messageParts = messageText.split("\n\n");
+  const greeting = messageParts[0] || "";
+  const body = messageParts.slice(1, -1).join("\n\n") || messageParts[1] || "";
+  const closing = messageParts[messageParts.length - 1] || "";
+
+  const msgFontStyle = fontCSS(fontChoice);
+  const ftFontStyle = fontCSS(frontTextFont);
+  const ftPos = positionCSS(frontTextPosition);
+  const ftStyle = textStyleCSS(frontTextStyleChoice);
+  const baseSizing = messageSizing(messageText.length);
+  const scaleRem = (rem: string, scale: number) => `${(parseFloat(rem) * scale).toFixed(3)}rem`;
+  const sizing = {
+    greetingSize: scaleRem(baseSizing.greetingSize, msgScale),
+    bodySize: scaleRem(baseSizing.bodySize, msgScale),
+    closingSize: scaleRem(baseSizing.closingSize, msgScale),
+    gap: scaleRem(baseSizing.gap, msgScale),
+  };
+
+  const hasLetter = Boolean(letterText.trim());
+  const letterFontStyle = fontCSS(letterFont);
+  const letterParts = letterText.split("\n\n");
+  const letterGreeting = letterParts[0] || "";
+  const letterBody = letterParts.length > 2 ? letterParts.slice(1, -1).join("\n\n") : (letterParts[1] || "");
+  const letterClosing = letterParts.length > 1 ? letterParts[letterParts.length - 1] : "";
+
+  const insidePos = insideImagePosition;
+
+  const advanceFromEnvelopeFront = useCallback(() => {
+    if (animating) return;
+    setAnimating(true);
+    setFlipVisible(true);
+    setTimeout(() => {
+      setStage("envelope_back");
+      setAnimating(false);
+    }, 600);
+  }, [animating]);
+
+  const advanceFromFront = useCallback(() => {
+    if (animating) return;
+    setAnimating(true);
+    setTimeout(() => {
+      setStage("inside");
+      setAnimating(false);
+    }, 500);
+  }, [animating]);
+
+  useEffect(() => {
+    if (stage !== "envelope_back") return;
+    const timer = setTimeout(() => {
+      setStage("front");
+      setFlipVisible(false);
+    }, 1200);
+    return () => clearTimeout(timer);
+  }, [stage]);
+
+  const waxSeal = (
+    <svg viewBox="0 0 56 56" width="56" height="56">
+      <circle cx="28" cy="28" r="26" fill="#f87171" stroke="#dc2626" strokeWidth="2" />
+      <defs>
+        <path id="nuuge-arc-share" d="M 10,28 A 18,18 0 0,1 46,28" fill="none" />
+      </defs>
+      <text fill="#fff" fontSize="7.5" fontWeight="700" letterSpacing="1.5" textAnchor="middle">
+        <textPath href="#nuuge-arc-share" startOffset="50%">NUUGE</textPath>
+      </text>
+      <text x="28" y="36" fill="#fff" fontSize="16" fontWeight="800" textAnchor="middle" dominantBaseline="central">
+        N
+      </text>
+    </svg>
+  );
+
+  return (
+    <div className="flex flex-col items-center justify-center min-h-screen px-4 py-8" style={{ background: "var(--color-cream)" }}>
+      <style>{`
+        @keyframes envelopeFlip { 0% { transform: perspective(1200px) rotateY(0deg); } 100% { transform: perspective(1200px) rotateY(180deg); } }
+        @keyframes cardSlideUp { 0% { transform: translateY(40px); opacity: 0; } 100% { transform: translateY(0); opacity: 1; } }
+        @keyframes cardFadeIn { 0% { opacity: 0; transform: scale(0.96); } 100% { opacity: 1; transform: scale(1); } }
+        @keyframes letterFallOut { 0% { opacity: 0; transform: translateY(-20px); } 100% { opacity: 1; transform: translateY(0); } }
+        .envelope-flip-container { perspective: 1200px; width: min(90vw, 420px); height: calc(min(90vw, 420px) * 0.65); }
+        .envelope-flip-inner { position: relative; width: 100%; height: 100%; transition: transform 0.6s ease-in-out; transform-style: preserve-3d; }
+        .envelope-flip-inner.flipped { transform: rotateY(180deg); }
+        .envelope-face { position: absolute; width: 100%; height: 100%; backface-visibility: hidden; border-radius: 0.5rem; }
+        .envelope-back-face { transform: rotateY(180deg); }
+        .slide-up { animation: cardSlideUp 0.6s ease-out forwards; }
+        .card-fade-in { animation: cardFadeIn 0.5s ease-out forwards; }
+        .letter-fall { animation: letterFallOut 0.6s ease-out forwards; }
+        .ecard-panel { width: min(90vw, 420px); }
+      `}</style>
+
+      {/* Envelope */}
+      {(stage === "envelope_front" || stage === "envelope_back") && (
+        <div
+          onClick={stage === "envelope_front" ? advanceFromEnvelopeFront : undefined}
+          className={stage === "envelope_front" ? "cursor-pointer select-none" : "select-none"}
+        >
+          <div className="envelope-flip-container">
+            <div className={`envelope-flip-inner ${flipVisible ? "flipped" : ""}`}>
+              <div className="envelope-face shadow-lg" style={{ background: "#faf7f2", border: "1px solid #e8e0d4" }}>
+                {senderName && (
+                  <p className="absolute top-4 left-5 text-xs" style={{ color: "#8b7d6b", fontFamily: "var(--font-handwritten), cursive" }}>
+                    {senderName}
+                  </p>
+                )}
+                <div className="absolute top-3 right-4" style={{ width: 36, height: 44, border: "1.5px solid #c4b8a8", borderRadius: 2, display: "flex", alignItems: "center", justifyContent: "center", background: "#fefcf8" }}>
+                  <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="#c4b8a8" strokeWidth="1.5">
+                    <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z" />
+                    <polyline points="22,6 12,13 2,6" />
+                  </svg>
+                </div>
+                <div className="absolute inset-0 flex items-center justify-center px-8">
+                  <p className="text-center leading-tight" style={{ fontFamily: "var(--font-handwritten), cursive", fontSize: "clamp(1.6rem, 5vw, 2.8rem)", color: "#3d3529", fontWeight: 500 }}>
+                    {recipientName}
+                  </p>
+                </div>
+                <div className="absolute bottom-8 left-1/2 -translate-x-1/2" style={{ width: 60, height: 1, background: "#d4c9b8" }} />
+              </div>
+              <div className="envelope-face envelope-back-face shadow-lg" style={{ background: "#f0e8db", border: "1px solid #e8e0d4" }}>
+                <div className="absolute top-0 left-0 right-0" style={{ height: "45%", background: "#e8dfd0", clipPath: "polygon(0 0, 50% 100%, 100% 0)", borderBottom: "1px solid #d4c9b8" }} />
+                <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-16 h-16">{waxSeal}</div>
+              </div>
+            </div>
+          </div>
+          {stage === "envelope_front" && (
+            <p className="text-center text-sm text-warm-gray mt-6 animate-pulse">Tap to open</p>
+          )}
+          {stage === "envelope_back" && (
+            <p className="text-center text-sm text-warm-gray mt-6">Opening...</p>
+          )}
+        </div>
+      )}
+
+      {/* Card Front */}
+      {stage === "front" && (
+        <div onClick={advanceFromFront} className="cursor-pointer select-none slide-up">
+          <div className="relative ecard-panel card-surface overflow-hidden" style={{ aspectRatio: "5 / 7" }}>
+            {frontImageUrl ? (
+              <>
+                <img src={frontImageUrl} alt="Card front" className="w-full h-full object-cover" />
+                {frontText && (
+                  <div style={{ position: "absolute", ...ftPos, ...ftFontStyle, ...ftStyle, width: "84%", padding: "0.5rem", boxSizing: "border-box", fontSize: `calc(clamp(1.4rem, 4vw, 2.5rem) * ${ftScale})`, lineHeight: 1.25, textAlign: frontTextAlign(frontTextPosition), whiteSpace: "pre-line" }}>
+                    {frontText}
+                  </div>
+                )}
+              </>
+            ) : (
+              <div className="w-full h-full flex items-center justify-center" style={{ background: "var(--color-brand-light)" }}>
+                <p className="text-4xl" style={{ color: "var(--color-brand)" }}>&#127912;</p>
+              </div>
+            )}
+          </div>
+          <p className="text-center text-sm text-warm-gray mt-6 animate-pulse">Tap to open the card</p>
+        </div>
+      )}
+
+      {/* Card Inside */}
+      {stage === "inside" && (
+        <div className="card-fade-in">
+          <div
+            onClick={hasLetter ? () => setStage("letter") : undefined}
+            className={`ecard-panel card-surface overflow-hidden flex ${hasLetter ? "cursor-pointer" : ""}`}
+            style={{ aspectRatio: "5 / 7", ...msgFontStyle, flexDirection: insidePos === "left" || insidePos === "right" ? "row" : "column", position: "relative" }}
+          >
+            {insidePos === "behind" && insideImageUrl && (
+              <img src={insideImageUrl} alt="" style={{ position: "absolute", top: 0, left: 0, width: "100%", height: "100%", objectFit: "cover", opacity: 0.12, pointerEvents: "none" }} />
+            )}
+            {insidePos === "left" && insideImageUrl && (
+              <div style={{ width: "20%", flexShrink: 0, height: "100%" }}>
+                <img src={insideImageUrl} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+              </div>
+            )}
+            {insidePos === "top" && insideImageUrl && (
+              <div style={{ width: "100%", height: "15%", flexShrink: 0 }}>
+                <img src={insideImageUrl} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+              </div>
+            )}
+
+            <div className="flex flex-col justify-center items-center text-center" style={{ flex: 1, padding: insidePos === "left" || insidePos === "right" ? "1rem 0.6rem" : "1.25rem", overflow: "hidden", position: "relative", zIndex: 1, gap: sizing.gap }}>
+              {insidePos === "middle" && insideImageUrl && (
+                <div style={{ width: "100%", height: "14%", flexShrink: 0 }}>
+                  <img src={insideImageUrl} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: "0.25rem" }} />
+                </div>
+              )}
+              <p className="text-charcoal" style={{ ...msgFontStyle, fontSize: sizing.greetingSize, fontWeight: 600, lineHeight: 1.3 }}>{greeting}</p>
+              {body && (
+                <p className="text-charcoal whitespace-pre-wrap" style={{ ...msgFontStyle, fontSize: sizing.bodySize, lineHeight: 1.55 }}>{body}</p>
+              )}
+              {closing && (
+                <p className="text-warm-gray whitespace-pre-line" style={{ ...msgFontStyle, fontSize: sizing.closingSize, fontStyle: "italic", lineHeight: 1.4 }}>{closing}</p>
+              )}
+            </div>
+
+            {insidePos === "bottom" && insideImageUrl && (
+              <div style={{ width: "100%", height: "15%", flexShrink: 0 }}>
+                <img src={insideImageUrl} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+              </div>
+            )}
+            {insidePos === "right" && insideImageUrl && (
+              <div style={{ width: "20%", flexShrink: 0, height: "100%" }}>
+                <img src={insideImageUrl} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+              </div>
+            )}
+          </div>
+
+          <div className="mt-6 space-y-3">
+            {hasLetter && (
+              <p className="text-sm animate-pulse text-center" style={{ color: "var(--color-brand)" }}>A letter fell out — tap anywhere to read it</p>
+            )}
+            <p className="text-xs text-warm-gray text-center">Created with Nuuge</p>
+            <div className="flex flex-wrap items-center gap-3 justify-center">
+              <button onClick={() => setStage("front")} className="px-4 py-1.5 rounded-full text-sm text-warm-gray hover:text-charcoal transition-colors" style={{ border: "1.5px solid var(--color-sage)" }}>View front</button>
+              <button onClick={() => { setStage("envelope_front"); setFlipVisible(false); }} className="px-4 py-1.5 rounded-full text-sm text-warm-gray hover:text-charcoal transition-colors" style={{ border: "1.5px solid var(--color-sage)" }}>View again</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Letter */}
+      {stage === "letter" && (
+        <div className="card-fade-in flex flex-col flex-1 w-full min-h-0 max-w-xl">
+          <div className="letter-fall flex-1 min-h-[45vh] overflow-y-auto rounded-xl" style={{ background: "#fefcf8", border: "1px solid #e8e0d4", boxShadow: "0 2px 12px rgba(0,0,0,0.08)", position: "relative" }}>
+            <div style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, opacity: 0.03, backgroundImage: "repeating-linear-gradient(0deg, transparent, transparent 27px, #8b7d6b 28px)", pointerEvents: "none" }} />
+            <div className="flex flex-col relative" style={{ padding: "2.5rem 2.25rem", ...letterFontStyle, zIndex: 1, textAlign: "left", gap: "1.25rem" }}>
+              {letterGreeting && (
+                <p className="text-charcoal" style={{ fontSize: "1.4rem", fontWeight: 500, lineHeight: 1.3 }}>{letterGreeting}</p>
+              )}
+              {letterBody && (
+                <p className="text-charcoal whitespace-pre-wrap" style={{ fontSize: "1.25rem", lineHeight: 1.7 }}>{letterBody}</p>
+              )}
+              {letterClosing && (
+                <p className="text-charcoal whitespace-pre-line" style={{ fontSize: "1.25rem", fontStyle: "italic", lineHeight: 1.5 }}>{letterClosing}</p>
+              )}
+            </div>
+          </div>
+          <div className="flex-shrink-0 mt-6 pb-8 space-y-3">
+            <p className="text-xs text-warm-gray text-center">Created with Nuuge</p>
+            <div className="flex flex-wrap items-center gap-3 justify-center">
+              <button onClick={() => setStage("front")} className="px-4 py-1.5 rounded-full text-sm text-warm-gray hover:text-charcoal transition-colors" style={{ border: "1.5px solid var(--color-sage)" }}>View front</button>
+              <button onClick={() => setStage("inside")} className="px-4 py-1.5 rounded-full text-sm text-warm-gray hover:text-charcoal transition-colors" style={{ border: "1.5px solid var(--color-sage)" }}>View inside</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Nuuge branding */}
+      <div className="mt-8 text-center">
+        <a href="/" className="text-xs text-warm-gray hover:text-charcoal transition-colors">
+          Made with <span style={{ color: "var(--color-brand)" }}>Nuuge</span> — Cards that sound like you
+        </a>
+      </div>
+    </div>
+  );
+}

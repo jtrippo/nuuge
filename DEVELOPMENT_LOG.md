@@ -271,11 +271,153 @@ The digital card view (`/cards/view/[cardId]`) presents cards as an interactive 
 
 ---
 
+### Design System Implementation
+
+**Goal:** Establish a warm, friendly, personal, premium look and feel across the entire app.
+
+**What was done:**
+- **Typography:** Lora (headings) + Nunito (body) loaded via `next/font/google`. Additional card fonts added: Caveat (handwritten), Playfair Display (classic), Oswald (bold), Dancing Script (brush), plus Courier New (typewriter) — 7 total options, up from 3.
+- **Color palette:** All colors defined as CSS custom properties in `globals.css` — warm cream background, warm charcoal text, forest green brand, amber actions, sage green accents, plus warning/error colors. Tailwind theme extended to use these variables.
+- **Component classes:** Reusable `.btn-primary`, `.btn-brand`, `.btn-secondary`, `.btn-link`, `.card-surface`, `.tag`, `.input-field`, `.section-label` classes so the design is consistent and changeable from one place.
+- **Homepage redesign:** Landing page restructured with a two-column hero (copy + SVG card illustration + testimonial bubble), "How it works" section, storytelling section with illustration, and bottom CTA. Sections use alternating background colors (white → cream → white → sage → cream) instead of line dividers.
+- **Dashboard reorganization:** Profile/account menu moved to top-right avatar dropdown (My profile, Backup data, Seed data, Reset data). Smart contextual CTA adapts to user state (no people → "Add your first person", has people → "Create a card" + "+ Add someone"). Utility links removed from main nav.
+- **Separate front/inside fonts:** Card creation wizard now offers independent font selection for the front cover and inside message.
+
+---
+
+## Future Considerations
+
+### Prompt Visibility vs. Free Tier — IP Protection
+
+**Concern:** The card creation flow shows the AI image prompt to users so they can review and edit it. In a "free to try" model, someone could copy these prompts and use them directly in DALL-E or Midjourney, bypassing the app after learning what works.
+
+**Assessment:** The risk is real but limited. What a user copies is the *output* of the system — a single assembled prompt — not the recipe architecture behind it (mood recipes, subject recipes, style recipes, profile context weaving, progressive de-emphasis logic). That's the real IP. A raw prompt without the intelligence that built it is a one-time thing, not a repeatable capability.
+
+**What can't be replicated outside Nuuge:**
+- The iterative refinement flow (edit instruction → merge scene → regenerate)
+- Profile-aware message generation with relationship guardrails
+- Coordinated inside/outside card design
+- Print layout, e-card delivery, card history
+- The convenience of everything working together in one flow
+
+**Potential mitigations (for when pricing is defined):**
+- Show a human-readable summary instead of the full raw prompt (e.g., "Watercolor bouquet, warm and sentimental, birthday theme") — enough for trust and guidance, not a copy-paste DALL-E prompt
+- Use CSS `user-select: none` or partial obscuring for the prompt display
+- Gate prompt visibility behind a paid tier — free users see "generating your design..." while subscribers get the editable prompt
+- Rate-limit free usage (e.g., 2 cards free, then subscribe) to minimize prompt exposure
+
+**Bottom line:** The "free to try" model is good for user acquisition. Prompt visibility is good for user experience and trust. The tension is real but solvable with a tiered approach. The bigger risk today is *not* having users than losing a few prompts.
+
+---
+
+### Personal Letter Insert
+
+**Concept:** An optional extra step in the card creation flow that lets the user include a personal letter — a text-only, formatted page tucked inside the card like a handwritten note.
+
+**Design considerations:**
+- Purely text with font selection (reuse the 7 card fonts — Caveat/handwritten feels especially right here).
+- Light template structure: greeting, body, sign-off — similar to the message but with room for longer, more personal writing.
+- AI can optionally help draft it using profile context, or the user writes it themselves.
+- For print: a separate sheet at card size, inserted loose inside the fold — an additional print page.
+- For e-cards: appears as a separate "unfold" after the inside of the card, like finding a tucked-in letter.
+- Triggered by an optional prompt near the end of the flow: "Want to include a personal letter?"
+
+**Phase:** Next phase after design system rollout. Self-contained — new step in creation flow, new field on Card type, new print page.
+
+---
+
+### Usage Analytics & Cost Tracking
+
+**Concept:** Track API usage and estimated costs per call, per card, and per account to inform pricing decisions and understand cost structure.
+
+**What to capture per API call:**
+- Endpoint (generate-image, generate-card, merge-scene, suggest-designs, etc.)
+- Model used (GPT-4o, GPT-4o-mini, gpt-image-1)
+- Token count (input/output for text, image size for images)
+- Estimated cost (based on published API pricing)
+- Timestamp, associated card ID, recipient ID
+
+**What to surface:**
+- Per card: total cost breakdown (generations, refinements, message regens)
+- Per account: running total, average cost per card, most expensive card
+- Session awareness: subtle "This card: ~$0.35 so far" in the creation flow
+
+**Architecture:** Existing `usage.ts` skeleton needs to move to IndexedDB (locally) or a proper API (when backend exists). Start by logging data on every API call; build the visualization dashboard later.
+
+**Phase:** Begin logging immediately (capture data from day one). Dashboard/visualization comes later.
+
+---
+
+### E-card Envelope Redesign & Animation
+
+**Concept:** Transform the e-card viewing experience from a simple card display into an addressed-letter experience with animation.
+
+**Envelope front (what the recipient sees first):**
+- Center: recipient's name (and address if available)
+- Upper-left: sender's name / return address
+- Upper-right: decorative stamp (Nuuge seal or occasion-themed)
+
+**Animation sequence:**
+1. Envelope front (addressed) — recipient sees their name, feels anticipation
+2. Tap → flip to back (Nuuge seal) — brief 1-2 second pause (branding moment)
+3. Tap or auto-advance → envelope opens, card slides out showing front cover
+4. Tap → flip to inside with message and any inside illustration
+5. (If letter insert exists) Tap → letter unfolds
+
+**Profile fields needed (foundational — also required for mail delivery):**
+- First name / Last name (currently just `display_name`)
+- Mailing address (street, city, state, zip)
+- Email address
+
+**Phase:** Profile fields should be added soon (foundational for multiple features). Envelope redesign and animation after design system rollout. Animation is pure CSS/JS, no API work.
+
+---
+
+## Proposed Build Order
+
+| Priority | Feature | Rationale |
+|---|---|---|
+| Now | Usage logging (capture data) | Zero-cost to add, invaluable data from day one |
+| Next | Design system rollout to remaining pages | Consistent experience before adding new features |
+| Then | Profile fields (first/last name, address, email) | Foundation for mail delivery, e-card envelope, and future features |
+| Then | Letter insert | Differentiating feature, self-contained build |
+| Then | E-card envelope + animation | Polish feature, uses new profile fields |
+| Later | Analytics dashboard | Visualize the usage data collected since day one |
+
+---
+
+## AI Product Architecture — Layer Assessment
+
+A framework for understanding what Nuuge has built and where it sits as an AI-powered product. These layers describe the system's architecture in terms of how AI, personalization, and tooling work together.
+
+### Fully Implemented Layers
+
+| Layer | What It Does | How Nuuge Implements It |
+|-------|-------------|------------------------|
+| **Experience** | The user-facing workflow | Greeting card creation wizard — occasion → tone → message → design → refine → deliver. Print preview, e-card viewer, edit flow. |
+| **Context** | Inputs that shape AI output | Tone, humor style, relationship type, occasion, personality traits, interests, communication style — all captured via structured wizards and passed into every generation prompt. |
+| **Model** | AI generation capabilities | GPT-4o for text (messages, suggestions, front text, scene merging). gpt-image-1 for illustrations (generate + edit). GPT-4o-mini for lightweight tasks (merge-scene). |
+| **Guardrails** | Keeping outputs safe and on-brand | Relationship-aware tone constraints (e.g. no romantic language for family). Deterministic personalization via profile element toggles. Content safety (no explicit material, no copyrighted characters). Print-safe style stripping. |
+| **Memory (relationship)** | Persistent knowledge about people | Recipient profiles with personality, interests, humor tolerance, tone preferences, important dates, milestones, linked relationships. Sender profile with communication style and personality. This is the "relationship memory layer" — the app knows who people are across cards. |
+| **Tool (development)** | How the product is built and evolved | Cursor IDE with AI-assisted reading/writing/running code. Prompt files, development log, roadmap as living artifacts. |
+| **Artifacts** | Documented knowledge that persists across sessions | `ROADMAP.md`, `DEVELOPMENT_LOG.md`, `MVP_STATUS.md`, prompt templates in API routes, recipe system in `card-recipes.ts`. |
+
+### Partially Implemented Layers
+
+| Layer | Current State | What's Missing |
+|-------|--------------|----------------|
+| **Retrieval** | Past design themes are passed to `suggest-designs` to avoid repetition. Rejected messages are tracked within a session. Previous front text wordings are excluded on regeneration. | No cross-session retrieval of successful cards. No "what worked before" lookup. No vector search or embedding-based similarity. |
+| **Orchestration** | Workflow logic exists in the creation wizard (step sequencing, draft auto-save, resume, progressive de-emphasis on regeneration). | Not formalized as a reusable orchestration layer. Logic is embedded in page components rather than abstracted. No event-driven triggers. |
+| **Persistent memory** | Profiles and card history stored locally (localStorage + IndexedDB). Cards retain all generation metadata (tone, style, prompts, profile elements used). | Memory is per-browser, not server-side. No structured "what resonated" feedback. No cross-card learning ("last 3 anniversary cards for Alyssa used watercolor — try something different?"). |
+
+---
+
 ## What's Not Built Yet
 
 - **Supabase backend** — currently everything is client-side (localStorage + IndexedDB). The schema and types are ready for migration.
 - **Authentication** — no login yet.
 - **Mail delivery** — the "Mail it" option is in the UI but doesn't connect to a print/mail service.
-- **More fonts** — only 3 starter fonts. The architecture supports adding more.
 - **Font size and color pickers** — planned, not yet implemented.
 - **Recipe expansion** — the recipe library can grow with more scene sketches, style variants, and mood-specific motif pools as the card catalog matures.
+- **Drag-and-drop text positioning** — interactive editing of text placement on the card front.
+- **Proactive card suggestions** — Nuuge nudges about upcoming dates and curates card ideas.

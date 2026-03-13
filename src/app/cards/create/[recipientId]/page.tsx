@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, Suspense } from "react";
+import { useEffect, useState, useRef, Suspense } from "react";
 import { useRouter, useParams, useSearchParams } from "next/navigation";
 import {
   getUserProfile,
@@ -16,28 +16,24 @@ import {
   SUBJECT_RECIPES,
   STYLE_RECIPES,
   MOOD_RECIPES,
-  buildRecipePrompt,
+  buildUserFacingPrompt,
   getMoodRecipe,
   toneToMoodId,
   pickRandom,
   calculateAge,
+  getBirthdayForAge,
 } from "@/lib/card-recipes";
-
-const OCCASIONS = [
-  "Birthday",
-  "Anniversary",
-  "Thank You",
-  "Congratulations",
-  "Get Well",
-  "Thinking of You",
-  "Holiday",
-  "Just Because",
-  "Sympathy",
-  "Encouragement",
-  "New Baby",
-  "Graduation",
-  "Retirement",
-];
+import { fontCSS, FONT_OPTIONS as CARD_FONT_OPTIONS } from "@/lib/card-ui-helpers";
+import type { FontChoice } from "@/lib/card-ui-helpers";
+import { logApiCall } from "@/lib/usage-store";
+import AppHeader from "@/components/AppHeader";
+import {
+  OCCASION_CATEGORIES,
+  ALL_OCCASIONS,
+  SHARED_OCCASIONS,
+  OTHER_OCCASION_VALUE,
+  OTHER_OCCASION_LABEL,
+} from "@/lib/occasions";
 
 const TONES = [
   "Heartfelt and sincere",
@@ -64,6 +60,7 @@ interface CardMessage {
 
 type Step =
   | "occasion"
+  | "faith"
   | "tone"
   | "notes"
   | "generating"
@@ -71,10 +68,8 @@ type Step =
   | "preview"
   | "design_subject"
   | "design_style"
-  | "design_context"
   | "design_confirm_prompt"
   | "design_loading"
-  | "design_pick"
   | "design_generating"
   | "design_confirm_refinement"
   | "design_preview"
@@ -87,6 +82,7 @@ type Step =
   | "inside_confirm_refinement"
   | "front_text_loading"
   | "front_text"
+  | "letter"
   | "delivery"
   | "saved";
 
@@ -94,6 +90,105 @@ interface DesignConcept {
   title: string;
   description: string;
   image_prompt: string;
+}
+
+type Stage = "message" | "design" | "details" | "deliver";
+
+const STAGE_STEPS: Record<Stage, Step[]> = {
+  message: ["occasion", "faith", "tone", "notes", "generating", "select", "preview"],  // faith/tone kept for draft compat
+  design: [
+    "design_subject", "design_style", "design_confirm_prompt", "design_loading",
+    "design_generating", "design_confirm_refinement", "design_preview",
+  ],
+  details: [
+    "inside_design_ask", "inside_position_pick", "inside_design_loading", "inside_design_pick",
+    "inside_design_generating", "inside_design_preview", "inside_confirm_refinement",
+    "front_text_loading", "front_text", "letter",
+  ],
+  deliver: ["delivery", "saved"],
+};
+
+const STAGE_ORDER: Stage[] = ["message", "design", "details", "deliver"];
+const STAGE_LABELS: Record<Stage, string> = {
+  message: "Message",
+  design: "Design",
+  details: "Details",
+  deliver: "Deliver",
+};
+
+function getStage(step: Step): Stage {
+  if (STAGE_STEPS.message.includes(step)) return "message";
+  if (STAGE_STEPS.design.includes(step)) return "design";
+  if (STAGE_STEPS.details.includes(step)) return "details";
+  return "deliver";
+}
+
+const DRAFT_KEY_PREFIX = "nuuge_card_draft_";
+
+interface CardDraft {
+  recipientId: string;
+  step: Step;
+  occasion: string;
+  occasionCustom: string;
+  includeFaithBased: boolean;
+  tone: string;
+  notes: string;
+  sharedWith: string[];
+  coSign: boolean;
+  activeProfileElements: Record<string, boolean>;
+  selected: CardMessage | null;
+  editedMessage: CardMessage | null;
+  // design (choices only; no image URLs)
+  imageSubject: SubjectId | null;
+  subjectDetail: string;
+  artStyle: StyleId | null;
+  personalContext: string;
+  currentSceneDescription: string;
+  selectedDesignTitle: string | null;
+  selectedDesignPrompt: string | null;
+  insideImagePosition: "top" | "middle" | "bottom" | "left" | "right" | "behind";
+  imageInterests: string[];
+  frontText: string;
+  frontTextPosition: string;
+  frontTextStyle: string;
+  cardSize: "4x6" | "5x7";
+  updatedAt: number;
+}
+
+function getDraftKey(recipientId: string): string {
+  return DRAFT_KEY_PREFIX + recipientId;
+}
+
+function loadDraft(recipientId: string): CardDraft | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = localStorage.getItem(getDraftKey(recipientId));
+    if (!raw) return null;
+    const d = JSON.parse(raw) as CardDraft;
+    if (d.recipientId !== recipientId) return null;
+    return d;
+  } catch {
+    return null;
+  }
+}
+
+function saveDraft(draft: CardDraft): void {
+  if (typeof window === "undefined") return;
+  try {
+    draft.updatedAt = Date.now();
+    localStorage.setItem(getDraftKey(draft.recipientId), JSON.stringify(draft));
+  } catch {
+    // ignore
+  }
+}
+
+function clearDraft(recipientId: string): void {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.removeItem(getDraftKey(recipientId));
+  } catch {
+    // ignore
+  }
 }
 
 const IMAGE_SUBJECTS = SUBJECT_RECIPES.map((s) => ({
@@ -121,7 +216,7 @@ type StyleId = string;
 
 export default function CreateCardPageWrapper() {
   return (
-    <Suspense fallback={<div className="flex items-center justify-center h-screen"><p className="text-gray-400">Loading...</p></div>}>
+    <Suspense fallback={<div className="flex items-center justify-center h-screen"><p className="text-warm-gray">Loading...</p></div>}>
       <CreateCardPage />
     </Suspense>
   );
@@ -134,6 +229,7 @@ function CreateCardPage() {
   const recipientId = params.recipientId as string;
   const editCardId = searchParams.get("editCardId");
   const startStep = searchParams.get("startStep") as Step | null;
+  const presetOccasion = searchParams.get("occasion");
 
   const [profile, setProfile] = useState<Partial<UserProfile> | null>(null);
   const [recipient, setRecipient] = useState<Recipient | null>(null);
@@ -142,7 +238,12 @@ function CreateCardPage() {
   const [editMode, setEditMode] = useState(false);
 
   const [step, setStep] = useState<Step>("occasion");
+  const [isLoading, setIsLoading] = useState(false);
+  const toneRef = useRef<HTMLDivElement>(null);
+  const [loadingMessage, setLoadingMessage] = useState("");
   const [occasion, setOccasion] = useState("");
+  const [occasionCustom, setOccasionCustom] = useState("");
+  const [includeFaithBased, setIncludeFaithBased] = useState(false);
   const [tone, setTone] = useState("");
   const [notes, setNotes] = useState("");
   const [sharedWith, setSharedWith] = useState<string[]>([]);
@@ -157,7 +258,10 @@ function CreateCardPage() {
   const [artStyle, setArtStyle] = useState<StyleId | null>(null);
   const [activeProfileElements, setActiveProfileElements] = useState<Record<string, boolean>>({});
   const [personalContext, setPersonalContext] = useState("");
+  const [imageInterests, setImageInterests] = useState<string[]>([]);
   const [designConcepts, setDesignConcepts] = useState<DesignConcept[]>([]);
+  const [conceptsLoading, setConceptsLoading] = useState(false);
+  const [userOriginalPrompt, setUserOriginalPrompt] = useState("");
   const [selectedDesign, setSelectedDesign] = useState<DesignConcept | null>(null);
   const [generatedImageUrl, setGeneratedImageUrl] = useState<string | null>(null);
   const [previousImageUrl, setPreviousImageUrl] = useState<string | null>(null);
@@ -176,17 +280,23 @@ function CreateCardPage() {
   const [pendingInsideScene, setPendingInsideScene] = useState("");
   const [insideImagePosition, setInsideImagePosition] = useState<"top" | "middle" | "bottom" | "left" | "right" | "behind">("top");
   const [skipInsideDesign, setSkipInsideDesign] = useState(false);
-  const [frontTextSuggestion, setFrontTextSuggestion] = useState<{ wording: string; position: string } | null>(null);
+  const [frontTextSuggestions, setFrontTextSuggestions] = useState<{ wording: string; position: string }[]>([]);
   const [frontText, setFrontText] = useState("");
   const [frontTextPosition, setFrontTextPosition] = useState("bottom-right");
-  const [frontTextStyle, setFrontTextStyle] = useState<"dark_box" | "white_box" | "plain">("dark_box");
-  const [font, setFont] = useState<"sans" | "script" | "block">("sans");
+  const [frontTextStyle, setFrontTextStyle] = useState<"dark_box" | "white_box" | "plain" | "plain_white">("dark_box");
+  const [font, setFont] = useState<string>("sans");
+  const [insideFont, setInsideFont] = useState<string>("sans");
   const [cardSize, setCardSize] = useState<"4x6" | "5x7">("5x7");
+  const [letterText, setLetterText] = useState("");
+  const [letterFont, setLetterFont] = useState<string>("handwritten");
   const [deliveryMethod, setDeliveryMethod] = useState<"digital" | "print_at_home" | "mail">("digital");
   const [savedCardId, setSavedCardId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pendingChangeType, setPendingChangeType] = useState<"refine" | "redesign">("refine");
   const [pendingEditInstruction, setPendingEditInstruction] = useState("");
+  const [sessionCost, setSessionCost] = useState(0);
+  const [showResumePrompt, setShowResumePrompt] = useState(false);
+  const [pendingDraft, setPendingDraft] = useState<CardDraft | null>(null);
 
   useEffect(() => {
     setMounted(true);
@@ -201,13 +311,21 @@ function CreateCardPage() {
       if (existing) {
         hydrateCardImages(existing).then((card) => {
           setEditMode(true);
-          setOccasion(card.occasion ?? "");
+          const o = (card.occasion ?? "").trim();
+          if (o === OTHER_OCCASION_VALUE || !ALL_OCCASIONS.includes(o)) {
+            setOccasion(OTHER_OCCASION_VALUE);
+            setOccasionCustom((card.occasion_custom ?? (o === OTHER_OCCASION_VALUE ? "" : o)).trim());
+          } else {
+            setOccasion(o);
+            setOccasionCustom("");
+          }
           setTone(card.tone_used ?? "");
           setCardSize(card.card_size ?? "5x7");
-          setFont(card.font ?? "sans");
+          setFont(card.front_text_font ?? card.font ?? "sans");
+          setInsideFont(card.font ?? "sans");
           setFrontText(card.front_text ?? "");
           setFrontTextPosition(card.front_text_position ?? "bottom-right");
-          setFrontTextStyle((card.front_text_style as "dark_box" | "white_box" | "plain") ?? "dark_box");
+          setFrontTextStyle((card.front_text_style as "dark_box" | "white_box" | "plain" | "plain_white") ?? "dark_box");
           setImageSubject(card.image_subject ?? null);
           setArtStyle(card.art_style ?? null);
           if (card.image_url) setGeneratedImageUrl(card.image_url);
@@ -225,6 +343,8 @@ function CreateCardPage() {
           if (card.delivery_method) {
             setDeliveryMethod(card.delivery_method);
           }
+          if (card.letter_text) setLetterText(card.letter_text);
+          if (card.letter_font) setLetterFont(card.letter_font);
 
           const parts = card.message_text.split("\n\n");
           const g = parts[0] || "";
@@ -244,44 +364,215 @@ function CreateCardPage() {
           setStep(startStep ?? "occasion");
         });
       }
+    } else {
+      const draft = loadDraft(recipientId);
+      if (draft) {
+        setPendingDraft(draft);
+        setShowResumePrompt(true);
+      } else if (presetOccasion) {
+        const label = presetOccasion.trim();
+        const labelLower = label.toLowerCase();
+        const matched =
+          ALL_OCCASIONS.find((o) => o.toLowerCase() === labelLower) ||
+          ALL_OCCASIONS.find((o) => labelLower.includes(o.toLowerCase()) || o.toLowerCase().includes(labelLower));
+        if (matched) {
+          setOccasion(matched === OTHER_OCCASION_LABEL ? OTHER_OCCASION_VALUE : matched);
+          setOccasionCustom("");
+          setStep("occasion");
+        } else {
+          setOccasion(OTHER_OCCASION_VALUE);
+          setOccasionCustom(label);
+          setStep("occasion");
+        }
+      }
     }
-  }, [recipientId, editCardId, startStep]);
+  }, [recipientId, editCardId, startStep, presetOccasion]);
+
+  // Auto-save draft when step and message/design state change (not in edit mode, not on saved, no pending resume)
+  useEffect(() => {
+    if (!mounted || !recipientId || editMode || editCardId || showResumePrompt || pendingDraft || step === "saved") return;
+    const draft: CardDraft = {
+      recipientId,
+      step,
+      occasion,
+      occasionCustom,
+      includeFaithBased,
+      tone,
+      notes,
+      sharedWith,
+      coSign,
+      activeProfileElements,
+      selected,
+      editedMessage,
+      imageSubject,
+      subjectDetail,
+      artStyle,
+      personalContext,
+      currentSceneDescription,
+      selectedDesignTitle: selectedDesign?.title ?? null,
+      selectedDesignPrompt: selectedDesign?.image_prompt ?? null,
+      insideImagePosition,
+      imageInterests,
+      frontText,
+      frontTextPosition,
+      frontTextStyle,
+      cardSize,
+      updatedAt: 0,
+    };
+    saveDraft(draft);
+  }, [
+    mounted, recipientId, editMode, editCardId, showResumePrompt, pendingDraft, step,
+    occasion, occasionCustom, includeFaithBased, tone, notes, sharedWith, coSign, activeProfileElements,
+    selected, editedMessage, imageSubject, subjectDetail, artStyle, personalContext,
+    currentSceneDescription, selectedDesign, insideImagePosition, imageInterests, frontText, frontTextPosition, frontTextStyle, cardSize,
+  ]);
 
   if (!mounted) return null;
 
   if (!recipient) {
     return (
-      <div className="flex flex-col items-center justify-center h-screen bg-gradient-to-b from-indigo-50 to-white">
-        <p className="text-gray-500 mb-4">Person not found.</p>
+      <div className="flex flex-col items-center justify-center h-screen" style={{ background: "var(--color-cream)" }}>
+        <p className="text-warm-gray mb-4">Person not found.</p>
         <button
           onClick={() => router.push("/")}
-          className="text-indigo-600 font-medium"
+          className="btn-link"
         >
-          Back to dashboard
+          Back to Circle of People
         </button>
       </div>
     );
   }
 
-  const FONT_STYLES: Record<"sans" | "script" | "block", React.CSSProperties> = {
-    sans: { fontFamily: "'Inter', 'Helvetica Neue', Arial, sans-serif" },
-    script: { fontFamily: "'Georgia', 'Palatino', serif", fontStyle: "italic" },
-    block: { fontFamily: "'Impact', 'Arial Black', sans-serif", textTransform: "uppercase" as const, letterSpacing: "0.05em" },
-  };
+  function applyDraft(d: CardDraft) {
+    let stepToRestore = d.step;
+    if (d.step === "faith" || d.step === "tone") stepToRestore = "occasion";
+    if (d.step === "generating" || d.step === "select") stepToRestore = "notes";
+    if (d.step === "design_style") stepToRestore = "design_subject";
+    if (d.step === "design_loading") stepToRestore = "design_subject";
+    if (d.step === "design_generating") stepToRestore = "design_confirm_prompt";
+    if (d.step === "design_preview") stepToRestore = "design_confirm_prompt";
+    if (d.step === "inside_position_pick") stepToRestore = "inside_design_ask";
+    if (d.step === "inside_design_loading") stepToRestore = "inside_design_ask";
+    if (d.step === "inside_design_generating") stepToRestore = "inside_design_pick";
+    if (d.step === "inside_design_preview") stepToRestore = "inside_design_pick";
+    if (d.step === "front_text_loading") stepToRestore = "inside_design_ask";
+    setStep(stepToRestore);
+    setOccasion(d.occasion);
+    setOccasionCustom(d.occasionCustom ?? "");
+    setIncludeFaithBased(d.includeFaithBased);
+    setTone(d.tone);
+    setNotes(d.notes);
+    setSharedWith(d.sharedWith);
+    setCoSign(d.coSign);
+    setActiveProfileElements(normalizeProfileElements(d.activeProfileElements));
+    setSelected(d.selected);
+    setEditedMessage(d.editedMessage);
+    setImageSubject(d.imageSubject);
+    setSubjectDetail(d.subjectDetail);
+    setArtStyle(d.artStyle);
+    setPersonalContext(d.personalContext);
+    setCurrentSceneDescription(d.currentSceneDescription);
+    setPendingSceneDescription(d.currentSceneDescription);
+    setInsideImagePosition(d.insideImagePosition);
+    setImageInterests(d.imageInterests ?? []);
+    setFrontText(d.frontText);
+    setFrontTextPosition(d.frontTextPosition);
+    setFrontTextStyle(d.frontTextStyle as "dark_box" | "white_box" | "plain" | "plain_white");
+    setCardSize(d.cardSize);
+    if (d.step === "design_preview") setGeneratedImageUrl(null);
+    if (d.step === "inside_design_preview") setInsideImageUrl(null);
+    if (d.selectedDesignTitle && d.selectedDesignPrompt) {
+      setSelectedDesign({ title: d.selectedDesignTitle, description: "", image_prompt: d.selectedDesignPrompt });
+    }
+    setShowResumePrompt(false);
+    setPendingDraft(null);
+  }
+
+  function handleStartFresh() {
+    clearDraft(recipientId);
+    setPendingDraft(null);
+    setShowResumePrompt(false);
+    setStep("occasion");
+    setOccasion("");
+    setOccasionCustom("");
+    setIncludeFaithBased(false);
+    setTone("");
+    setNotes("");
+    setSharedWith([]);
+    setCoSign(false);
+    setMessages([]);
+    setRejectedMessages([]);
+    setRegenerationCount(0);
+    setSelected(null);
+    setEditedMessage(null);
+    setActiveProfileElements({});
+    setImageInterests([]);
+    setLetterText("");
+    setLetterFont("handwritten");
+    if (presetOccasion) {
+      const label = presetOccasion.trim();
+      const labelLower = label.toLowerCase();
+      const matched =
+        ALL_OCCASIONS.find((o) => o.toLowerCase() === labelLower) ||
+        ALL_OCCASIONS.find((o) => labelLower.includes(o.toLowerCase()) || o.toLowerCase().includes(labelLower));
+      if (matched) {
+        setOccasion(matched === OTHER_OCCASION_LABEL ? OTHER_OCCASION_VALUE : matched);
+        setOccasionCustom("");
+      } else {
+        setOccasion(OTHER_OCCASION_VALUE);
+        setOccasionCustom(label);
+      }
+      setStep("occasion");
+    }
+  }
+
+  // fontCSS() from card-ui-helpers replaces the old FONT_STYLES map
 
   function extractProfileElements(r: Recipient): Record<string, boolean> {
     const elements: Record<string, boolean> = {};
-    (r.interests || []).forEach((i) => { if (i.trim()) elements[`interest: ${i.trim()}`] = true; });
-    (r.values || []).forEach((v) => { if (v.trim()) elements[`value: ${v.trim()}`] = true; });
-    if (r.personality_notes) elements[`personality: ${r.personality_notes}`] = true;
+    (r.interests || []).forEach((i) => { if (i.trim()) elements[`interest: ${i.trim()}`] = false; });
+    (r.values || []).forEach((v) => { if (v.trim()) elements[`value: ${v.trim()}`] = false; });
+    if (r.personality_notes) {
+      r.personality_notes.split(/,\s*/).forEach((trait) => {
+        const t = trait.trim();
+        if (t) elements[`personality: ${t}`] = true;
+      });
+    }
     if (r.humor_style) elements[`humor style: ${r.humor_style}`] = true;
     if (r.humor_tolerance) elements[`humor tolerance: ${r.humor_tolerance}`] = true;
-    if (r.occupation) elements[`occupation: ${r.occupation}`] = true;
-    if (r.lifestyle) elements[`lifestyle: ${r.lifestyle}`] = true;
-    if (r.pets) elements[`pets: ${r.pets}`] = true;
-    if (r.favorite_foods) elements[`favorite foods: ${r.favorite_foods}`] = true;
-    if (r.favorite_music) elements[`favorite music: ${r.favorite_music}`] = true;
+    if (r.occupation) elements[`occupation: ${r.occupation}`] = false;
+    if (r.lifestyle) elements[`lifestyle: ${r.lifestyle}`] = false;
+    if (r.pets) elements[`pets: ${r.pets}`] = false;
+    if (r.favorite_foods) elements[`favorite foods: ${r.favorite_foods}`] = false;
+    if (r.favorite_music) elements[`favorite music: ${r.favorite_music}`] = false;
     return elements;
+  }
+
+  function normalizeProfileElements(raw: Record<string, boolean>): Record<string, boolean> {
+    const out: Record<string, boolean> = {};
+    for (const [key, val] of Object.entries(raw)) {
+      if (key.startsWith("personality: ") && key.includes(",")) {
+        const label = key.replace(/^personality: /, "");
+        label.split(/,\s*/).forEach((t) => {
+          const trimmed = t.trim();
+          if (trimmed) out[`personality: ${trimmed}`] = val;
+        });
+      } else {
+        out[key] = val;
+      }
+    }
+    return out;
+  }
+
+  /** Keys we eliminate first (interests, values, factual details). */
+  function isInterestLikeKey(key: string): boolean {
+    return key.startsWith("interest: ") || key.startsWith("value: ") ||
+      key.startsWith("occupation: ") || key.startsWith("lifestyle: ") || key.startsWith("pets: ") ||
+      key.startsWith("favorite foods: ") || key.startsWith("favorite music: ");
+  }
+  /** Keys we eliminate second (personality, humor — tone-related). */
+  function isToneLikeKey(key: string): boolean {
+    return key.startsWith("personality: ") || key.startsWith("humor style: ") || key.startsWith("humor tolerance: ");
   }
 
   function buildContextString(
@@ -292,7 +583,9 @@ function CreateCardPage() {
     const sender = p
       ? `Name: ${p.display_name || "Unknown"}
 Personality: ${p.personality || "Not specified"}
-Humor style: ${p.humor_style || "Not specified"}
+Communication style: ${p.communication_style || "Not specified"}
+Emotional energy: ${(p as { emotional_energy?: string }).emotional_energy || "Not specified"}
+Humor style (when humor applies): ${p.humor_style || "Not specified"}
 Interests: ${(p.interests || []).join(", ") || "Not specified"}
 Lifestyle: ${p.lifestyle || "Not specified"}`
       : "No sender context available.";
@@ -301,7 +594,7 @@ Lifestyle: ${p.lifestyle || "Not specified"}`
       ? Object.entries(profileElements).filter(([, v]) => v).map(([k]) => k)
       : null;
 
-    const age = calculateAge(r.birthday);
+    const age = calculateAge(getBirthdayForAge(r.birthday, r.important_dates));
     const ageLine = age != null ? `Age: ${age}` : "";
 
     let recipientCtx: string;
@@ -316,7 +609,7 @@ Relationship: ${r.relationship_type}
 ${ageLine}
 ${interests.length > 0 ? `Interests: ${interests.join(", ")}` : "Interests: Not specified"}
 ${otherDetails.join("\n")}
-Tone preference: ${r.tone_preference || "Not specified"}`.replace(/\n{2,}/g, "\n");
+`.replace(/\n{2,}/g, "\n");
     } else if (active && active.length === 0) {
       recipientCtx = `Name: ${r.name}
 Relationship: ${r.relationship_type}
@@ -328,8 +621,7 @@ Relationship: ${r.relationship_type}
 ${ageLine}
 Personality: ${r.personality_notes || "Not specified"}
 Interests: ${(r.interests || []).join(", ") || "Not specified"}
-Humor tolerance: ${r.humor_tolerance || "Not specified"}
-Tone preference: ${r.tone_preference || "Not specified"}`.replace(/\n{2,}/g, "\n");
+Humor tolerance: ${r.humor_tolerance || "Not specified"}`.replace(/\n{2,}/g, "\n");
     }
 
     return { sender, recipient: recipientCtx };
@@ -345,13 +637,23 @@ Tone preference: ${r.tone_preference || "Not specified"}`.replace(/\n{2,}/g, "\n
       nextRegenCount = regenerationCount + 1;
       setRegenerationCount(nextRegenCount);
 
-      // Progressively deactivate profile elements on each regeneration
+      // Progressively deactivate: interest-like first, then tone-like (so tone stays longer)
       if (nextRegenCount >= 2) {
-        const keys = Object.keys(activeProfileElements);
-        const activeKeys = keys.filter((k) => activeProfileElements[k]);
-        const keepCount = Math.max(0, Math.floor(activeKeys.length * (nextRegenCount === 2 ? 0.5 : 0.2)));
         const updated = { ...activeProfileElements };
-        activeKeys.slice(keepCount).forEach((k) => { updated[k] = false; });
+        const activeKeys = Object.keys(activeProfileElements).filter((k) => activeProfileElements[k]);
+        const activeInterestLike = activeKeys.filter(isInterestLikeKey);
+        const activeToneLike = activeKeys.filter(isToneLikeKey);
+
+        if (nextRegenCount === 2) {
+          // Regen 2: turn off ~50% of interest-like only; keep all tone-like
+          const interestOffCount = Math.max(0, Math.floor(activeInterestLike.length * 0.5));
+          activeInterestLike.slice(0, interestOffCount).forEach((k) => { updated[k] = false; });
+        } else {
+          // Regen 3+: turn off remaining interest-like, then tone-like (e.g. most or all)
+          activeInterestLike.forEach((k) => { updated[k] = false; });
+          const toneKeepCount = Math.max(0, Math.floor(activeToneLike.length * 0.2));
+          activeToneLike.slice(toneKeepCount).forEach((k) => { updated[k] = false; });
+        }
         setActiveProfileElements(updated);
       }
     }
@@ -362,7 +664,8 @@ Tone preference: ${r.tone_preference || "Not specified"}`.replace(/\n{2,}/g, "\n
       setActiveProfileElements(elements);
     }
 
-    setStep("generating");
+    setIsLoading(true);
+    setLoadingMessage(`Nuuge is writing your ${effectiveOccasion} card for ${recipient!.name}...`);
     setError(null);
 
     const elementsToUse = Object.keys(activeProfileElements).length > 0
@@ -382,8 +685,9 @@ Tone preference: ${r.tone_preference || "Not specified"}`.replace(/\n{2,}/g, "\n
         body: JSON.stringify({
           senderContext: ctx.sender,
           recipientContext: ctx.recipient,
-          occasion,
+          occasion: effectiveOccasion,
           tone,
+          includeFaithBased,
           additionalNotes: notes,
           cardHistory,
           coSignWith: coSign ? profile?.partner_name : null,
@@ -400,12 +704,15 @@ Tone preference: ${r.tone_preference || "Not specified"}`.replace(/\n{2,}/g, "\n
 
       const data = await res.json();
       setMessages(data.messages);
+      setIsLoading(false);
       setStep("select");
+      logApiCall("generate-card", { model: "gpt-4o", callType: "chat_completion", recipientId, cardId: editCardId || undefined });
+      setSessionCost((c) => c + 0.025);
     } catch (err: unknown) {
       const message =
         err instanceof Error ? err.message : "Something went wrong";
       setError(message);
-      setStep("notes");
+      setIsLoading(false);
     }
   }
 
@@ -424,14 +731,13 @@ Tone preference: ${r.tone_preference || "Not specified"}`.replace(/\n{2,}/g, "\n
         .filter(Boolean) as (Recipient & { linkLabel: string })[]
     : [];
 
-  const SHARED_OCCASIONS = ["Anniversary", "Holiday"];
+  const effectiveOccasion = (occasion === OTHER_OCCASION_VALUE && occasionCustom.trim()) ? occasionCustom.trim() : occasion;
   const showShareOption =
     linkedRecipients.length > 0 && SHARED_OCCASIONS.includes(occasion);
 
-  async function loadDesignSuggestions() {
+  async function loadDesignSuggestionsBackground() {
     if (!editedMessage || !recipient) return;
-    setStep("design_loading");
-    setError(null);
+    setConceptsLoading(true);
 
     const elementsForDesign = Object.keys(activeProfileElements).length > 0
       ? activeProfileElements
@@ -451,8 +757,9 @@ Tone preference: ${r.tone_preference || "Not specified"}`.replace(/\n{2,}/g, "\n
         body: JSON.stringify({
           senderContext: ctx.sender,
           recipientContext: ctx.recipient,
-          occasion,
+          occasion: effectiveOccasion,
           tone,
+          includeFaithBased,
           messageText: fullMessage,
           additionalNotes: notes,
           pastDesignThemes: pastDesignThemes.length > 0 ? pastDesignThemes : undefined,
@@ -469,11 +776,12 @@ Tone preference: ${r.tone_preference || "Not specified"}`.replace(/\n{2,}/g, "\n
 
       const data = await res.json();
       setDesignConcepts(data.designs);
-      setStep("design_pick");
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : "Something went wrong";
-      setError(message);
-      setStep("preview");
+      logApiCall("suggest-designs", { model: "gpt-4o", callType: "chat_completion", recipientId, cardId: editCardId || undefined });
+      setSessionCost((c) => c + 0.025);
+    } catch {
+      // Non-blocking — alternatives just won't appear
+    } finally {
+      setConceptsLoading(false);
     }
   }
 
@@ -488,18 +796,15 @@ Tone preference: ${r.tone_preference || "Not specified"}`.replace(/\n{2,}/g, "\n
   function buildImagePromptFromSelections(): string {
     if (!imageSubject || !artStyle) return "";
 
-    const interests = getActiveInterests();
-    const age = calculateAge(recipient?.birthday);
-    return buildRecipePrompt({
+    const interests = imageInterests.length > 0 ? imageInterests : undefined;
+    return buildUserFacingPrompt({
       subjectId: imageSubject,
       subjectDetail: subjectDetail.trim() || undefined,
       tone,
       styleId: artStyle,
       personalContext: personalContext.trim() || undefined,
-      profileInterests: interests.length > 0 ? interests : undefined,
-      occasion,
-      recipientAge: age,
-      relationshipType: recipient?.relationship_type || undefined,
+      profileInterests: interests,
+      occasion: effectiveOccasion,
     });
   }
 
@@ -509,14 +814,23 @@ Tone preference: ${r.tone_preference || "Not specified"}`.replace(/\n{2,}/g, "\n
     setStep("design_confirm_prompt");
   }
 
+  function reviewCardDesign() {
+    const prompt = buildImagePromptFromSelections();
+    setPendingSceneDescription(prompt);
+    setUserOriginalPrompt(prompt);
+    setDesignConcepts([]);
+    loadDesignSuggestionsBackground();
+    setStep("design_confirm_prompt");
+  }
+
   async function generateDesignImage(
     prompt: string,
     options?: { isInside?: boolean; editExisting?: boolean; editInstruction?: string }
   ) {
     const isInside = options?.isInside ?? false;
     const editExisting = options?.editExisting ?? false;
-    const stepToSet = isInside ? "inside_design_generating" : "design_generating";
-    setStep(stepToSet);
+    setIsLoading(true);
+    setLoadingMessage(isInside ? "Creating inside illustration..." : "Creating card artwork...");
     setError(null);
     if (!isInside) setDesignFeedback("");
 
@@ -546,6 +860,10 @@ Tone preference: ${r.tone_preference || "Not specified"}`.replace(/\n{2,}/g, "\n
       }
 
       const data = await res.json();
+      const imgCallType = editExisting ? "image_edit" : "image_generate";
+      logApiCall("generate-image", { model: "gpt-image-1", callType: imgCallType as "image_edit" | "image_generate", recipientId, cardId: editCardId || undefined });
+      setSessionCost((c) => c + 0.08);
+      setIsLoading(false);
       if (isInside) {
         setInsideImageUrl(data.imageUrl);
         setStep("inside_design_preview");
@@ -556,7 +874,7 @@ Tone preference: ${r.tone_preference || "Not specified"}`.replace(/\n{2,}/g, "\n
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Something went wrong";
       setError(message);
-      setStep(isInside ? "inside_design_pick" : "design_pick");
+      setIsLoading(false);
     }
   }
 
@@ -579,6 +897,7 @@ Tone preference: ${r.tone_preference || "Not specified"}`.replace(/\n{2,}/g, "\n
         body: JSON.stringify({
           currentScene: currentSceneDescription + styleContext,
           change: change.trim(),
+          currentInterests: imageInterests.length > 0 ? imageInterests : [],
         }),
       });
       if (!res.ok) {
@@ -590,6 +909,8 @@ Tone preference: ${r.tone_preference || "Not specified"}`.replace(/\n{2,}/g, "\n
       setPendingChangeType(data.changeType === "redesign" ? "redesign" : "refine");
       setPendingEditInstruction(data.editInstruction || "");
       setStep("design_confirm_refinement");
+      logApiCall("merge-scene", { model: "gpt-4o-mini", callType: "chat_completion", recipientId, cardId: editCardId || undefined });
+      setSessionCost((c) => c + 0.005);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Something went wrong";
       setError(message);
@@ -620,6 +941,7 @@ Tone preference: ${r.tone_preference || "Not specified"}`.replace(/\n{2,}/g, "\n
         body: JSON.stringify({
           currentScene: insideSceneDescription,
           change: change.trim(),
+          currentInterests: imageInterests.length > 0 ? imageInterests : [],
         }),
       });
       if (!res.ok) {
@@ -631,6 +953,8 @@ Tone preference: ${r.tone_preference || "Not specified"}`.replace(/\n{2,}/g, "\n
       setPendingChangeType(data.changeType === "redesign" ? "redesign" : "refine");
       setPendingEditInstruction(data.editInstruction || "");
       setStep("inside_confirm_refinement");
+      logApiCall("merge-scene", { model: "gpt-4o-mini", callType: "chat_completion", recipientId, cardId: editCardId || undefined });
+      setSessionCost((c) => c + 0.005);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Something went wrong";
       setError(message);
@@ -639,26 +963,44 @@ Tone preference: ${r.tone_preference || "Not specified"}`.replace(/\n{2,}/g, "\n
     }
   }
 
-  async function loadFrontTextSuggestion() {
-    setStep("front_text_loading");
+  async function loadFrontTextSuggestions() {
+    const previousWordings = frontTextSuggestions.map((s) => s.wording);
+    setIsLoading(true);
+    setLoadingMessage("Thinking of front text options...");
     try {
       const res = await fetch("/api/suggest-front-text", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          occasion,
+          occasion: effectiveOccasion,
           tone,
           recipientName: recipient?.name ?? "",
+          relationshipType: recipient?.relationship_type || undefined,
+          previousWordings: previousWordings.length > 0 ? previousWordings : undefined,
+          messageText: editedMessage ? `${editedMessage.greeting}\n\n${editedMessage.body}\n\n${editedMessage.closing}` : undefined,
+          artStyle: artStyle || undefined,
+          imageSubject: imageSubject || undefined,
         }),
       });
       const data = await res.json();
-      setFrontTextSuggestion(data);
-      setFrontText(data.wording ?? "");
-      setFrontTextPosition(data.position ?? "bottom-right");
+      const suggestions: { wording: string; position: string }[] = Array.isArray(data.suggestions)
+        ? data.suggestions
+        : data.wording
+          ? [{ wording: data.wording, position: data.position ?? "bottom-right" }]
+          : [];
+      setFrontTextSuggestions(suggestions);
+      if (suggestions.length > 0) {
+        setFrontText(suggestions[0].wording);
+        setFrontTextPosition(suggestions[0].position);
+      }
+      logApiCall("suggest-front-text", { model: "gpt-4o", callType: "chat_completion", recipientId, cardId: editCardId || undefined });
+      setSessionCost((c) => c + 0.025);
     } catch {
+      setFrontTextSuggestions([]);
       setFrontText("");
       setFrontTextPosition("bottom-right");
     }
+    setIsLoading(false);
     setStep("front_text");
   }
 
@@ -671,6 +1013,7 @@ Tone preference: ${r.tone_preference || "Not specified"}`.replace(/\n{2,}/g, "\n
       recipient_id: recipient.id,
       recipient_ids: [recipient.id, ...sharedWith],
       occasion,
+      occasion_custom: (occasion === OTHER_OCCASION_VALUE && occasionCustom.trim()) ? occasionCustom.trim() : null,
       message_text: fullText,
       image_url: generatedImageUrl,
       image_prompt: selectedDesign?.image_prompt || currentSceneDescription || null,
@@ -680,7 +1023,7 @@ Tone preference: ${r.tone_preference || "Not specified"}`.replace(/\n{2,}/g, "\n
       front_text_position: frontText.trim() ? frontTextPosition : null,
       front_text_style: frontTextStyle,
       front_text_font: font,
-      font,
+      font: insideFont,
       inside_image_position: insideImageUrl ? insideImagePosition : undefined,
       image_subject: imageSubject,
       art_style: artStyle,
@@ -691,6 +1034,8 @@ Tone preference: ${r.tone_preference || "Not specified"}`.replace(/\n{2,}/g, "\n
       sent: false,
       co_signed_with: coSign ? profile?.partner_name || null : null,
       card_size: cardSize,
+      letter_text: letterText.trim() || null,
+      letter_font: letterText.trim() ? letterFont : null,
     };
 
     if (editMode && editCardId) {
@@ -698,6 +1043,7 @@ Tone preference: ${r.tone_preference || "Not specified"}`.replace(/\n{2,}/g, "\n
       setSavedCardId(editCardId);
       setDeliveryMethod(method);
       if (method === "print_at_home") {
+        clearDraft(recipientId);
         router.push(`/cards/print/${editCardId}`);
         return;
       }
@@ -707,126 +1053,280 @@ Tone preference: ${r.tone_preference || "Not specified"}`.replace(/\n{2,}/g, "\n
         setSavedCardId(saved.id);
         setDeliveryMethod(method);
         if (method === "print_at_home") {
+          clearDraft(recipientId);
           router.push(`/cards/print/${saved.id}`);
           return;
         }
       }
     }
+    clearDraft(recipientId);
     setStep("saved");
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-indigo-50 to-white">
-      <header className="border-b border-gray-200 bg-white px-6 py-4">
-        <div className="max-w-2xl mx-auto flex items-center justify-between">
+    <div className="min-h-screen" style={{ background: "var(--color-cream)" }}>
+      <AppHeader>
+        {/* Row 1: back button + recipient name */}
+        <div className="relative flex items-center w-full" style={{ minHeight: "2rem" }}>
           <button
             onClick={() => editMode && editCardId
               ? router.push(`/cards/edit/${editCardId}`)
               : router.push("/")
             }
-            className="text-sm text-gray-500 hover:text-gray-700"
+            className="relative z-10 flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium transition-colors"
+            style={{ color: "var(--color-brand)", border: "1.5px solid var(--color-sage)" }}
           >
-            &larr; {editMode ? "Back to edit" : "Dashboard"}
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+            {editMode ? "Back to edit" : "Circle of People"}
           </button>
-          <span className="text-sm text-gray-500">
-            {editMode ? "Regenerating" : "Card"} for {recipient.name}
-          </span>
+          <h1
+            className="absolute inset-0 flex items-center justify-center text-lg font-semibold pointer-events-none"
+            style={{ color: "var(--color-charcoal)", fontFamily: "var(--font-heading)" }}
+          >
+            {editMode ? "Regenerating for" : (effectiveOccasion && step !== "occasion") ? `${effectiveOccasion} card for` : "Card for"} {recipient.name}
+          </h1>
+          {sessionCost > 0 && (
+            <span className="ml-auto relative z-10 text-xs text-warm-gray" title="Estimated AI cost this session">
+              ~${sessionCost.toFixed(2)}
+            </span>
+          )}
         </div>
-      </header>
 
-      <main className="max-w-2xl mx-auto px-6 py-8">
-        {/* Step: Occasion */}
-        {step === "occasion" && (
-          <div>
-            <h2 className="text-xl font-bold text-gray-900 mb-2">
-              What&apos;s the occasion?
-            </h2>
-            <p className="text-sm text-gray-500 mb-6">
-              Creating a card for {recipient.name} ({recipient.relationship_type})
+        {/* Row 2: progress steps */}
+        {!showResumePrompt && step !== "saved" && (
+          <div className="flex items-center justify-center gap-2 w-full mt-1">
+            {STAGE_ORDER.map((stage, i) => {
+              const current = getStage(step);
+              const currentIdx = STAGE_ORDER.indexOf(current);
+              const isActive = current === stage;
+              const isPast = i < currentIdx;
+              const stepNum = i + 1;
+              return (
+                <div key={stage} className="flex items-center gap-2">
+                  <div
+                    className="w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold shrink-0 transition-colors"
+                    style={{
+                      background: isActive
+                        ? "var(--color-brand)"
+                        : isPast
+                          ? "var(--color-sage)"
+                          : "var(--color-light-gray)",
+                      color: isActive || isPast ? "#fff" : "var(--color-warm-gray)",
+                    }}
+                  >
+                    {isPast ? "✓" : stepNum}
+                  </div>
+                  <span
+                    className={`text-xs whitespace-nowrap ${isActive ? "font-semibold" : ""}`}
+                    style={{ color: isActive ? "var(--color-brand)" : isPast ? "var(--color-sage)" : "var(--color-warm-gray)" }}
+                  >
+                    {STAGE_LABELS[stage]}
+                  </span>
+                  {i < STAGE_ORDER.length - 1 && (
+                    <div
+                      className="w-8 h-px"
+                      style={{ background: isPast ? "var(--color-sage)" : "var(--color-light-gray)" }}
+                    />
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </AppHeader>
+
+      <main className="max-w-2xl mx-auto px-6 py-8 relative">
+        {isLoading && (
+          <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-cream/80 backdrop-blur-sm rounded-xl" style={{ minHeight: "200px" }}>
+            <div className="animate-spin h-8 w-8 border-4 rounded-full mb-4" style={{ borderColor: "var(--color-sage-light)", borderTopColor: "var(--color-brand)" }} />
+            <p className="text-base font-medium text-charcoal">{loadingMessage}</p>
+            <p className="text-sm text-warm-gray mt-1">This may take a moment</p>
+          </div>
+        )}
+
+        {/* Resume draft prompt */}
+        {showResumePrompt && pendingDraft && (
+          <div className="rounded-xl p-6 border-2 text-center" style={{ background: "var(--color-white)", borderColor: "var(--color-sage-light)" }}>
+            <p className="text-lg font-medium text-charcoal mb-1">Resume your draft?</p>
+            <p className="text-sm text-warm-gray mb-4">
+              You have a card in progress for {recipient.name}. Pick up where you left off or start over.
             </p>
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-              {OCCASIONS.map((o) => (
-                <button
-                  key={o}
-                  onClick={() => {
-                    setOccasion(o);
-                    setStep("tone");
-                  }}
-                  className="bg-white border border-gray-200 rounded-xl px-4 py-3 text-sm
-                             text-gray-700 hover:border-indigo-400 hover:text-indigo-600
-                             transition-colors text-left"
-                >
-                  {o}
-                </button>
-              ))}
+            <div className="flex flex-wrap gap-3 justify-center">
+              <button
+                onClick={() => applyDraft(pendingDraft)}
+                className="btn-primary"
+              >
+                Resume
+              </button>
+              <button
+                onClick={handleStartFresh}
+                className="btn-secondary"
+              >
+                Start fresh
+              </button>
             </div>
           </div>
         )}
 
-        {/* Step: Tone */}
-        {step === "tone" && (
+        {!showResumePrompt && (
+        <>
+        {/* Step: Occasion */}
+        {step === "occasion" && (
           <div>
-            <h2 className="text-xl font-bold text-gray-900 mb-2">
-              What tone should this card have?
+            <h2 className="text-2xl font-bold text-charcoal mb-5">
+              What&apos;s the occasion?
             </h2>
-            <p className="text-sm text-gray-500 mb-6">
-              {occasion} card for {recipient.name}
-            </p>
-            <div className="grid gap-3">
-              {TONES.map((t) => (
-                <button
-                  key={t}
-                  onClick={() => {
-                    setTone(t);
-                    setStep("notes");
-                  }}
-                  className="bg-white border border-gray-200 rounded-xl px-5 py-3 text-sm
-                             text-gray-700 hover:border-indigo-400 hover:text-indigo-600
-                             transition-colors text-left"
-                >
-                  {t}
-                </button>
+            <div className="space-y-4">
+              {OCCASION_CATEGORIES.map((cat) => (
+                <div key={cat.label}>
+                  <p className="text-xs font-semibold text-warm-gray uppercase tracking-wide mb-2">{cat.label}</p>
+                  <div className="flex flex-wrap gap-2">
+                    {cat.occasions.map((o) => {
+                      const isSelected = o === OTHER_OCCASION_LABEL
+                        ? occasion === OTHER_OCCASION_VALUE
+                        : occasion === o;
+                      return (
+                        <button
+                          key={o}
+                          onClick={() => {
+                            if (o === OTHER_OCCASION_LABEL) {
+                              setOccasion(OTHER_OCCASION_VALUE);
+                            } else {
+                              setOccasion(o);
+                            }
+                            setTimeout(() => toneRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 100);
+                          }}
+                          className="rounded-full px-4 py-2 text-sm font-medium transition-all"
+                          style={isSelected ? {
+                            background: "var(--color-brand)",
+                            color: "#fff",
+                            boxShadow: "0 0 0 2px var(--color-brand)",
+                          } : {
+                            background: "var(--color-white)",
+                            color: "var(--color-charcoal)",
+                            border: "1.5px solid var(--color-sage-light)",
+                          }}
+                        >
+                          {o}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
               ))}
             </div>
-            <button
-              onClick={() => setStep("occasion")}
-              className="text-sm text-gray-400 hover:text-gray-600 mt-4"
-            >
-              &larr; Back
-            </button>
+            {occasion === OTHER_OCCASION_VALUE && (
+              <div className="mt-4 pt-4 border-t" style={{ borderColor: "var(--color-light-gray)" }}>
+                <label className="block text-sm font-medium text-charcoal mb-2">What&apos;s the occasion?</label>
+                <input
+                  type="text"
+                  value={occasionCustom}
+                  onChange={(e) => setOccasionCustom(e.target.value)}
+                  placeholder="e.g. Housewarming, New job"
+                  className="input-field rounded-xl w-full text-base py-3"
+                  autoFocus
+                />
+              </div>
+            )}
+
+            {/* Faith toggle + Tone — shown once an occasion is selected */}
+            {((occasion && occasion !== OTHER_OCCASION_VALUE) || (occasion === OTHER_OCCASION_VALUE && occasionCustom.trim())) && (
+              <div ref={toneRef} className="mt-8 pt-6 border-t space-y-6" style={{ borderColor: "var(--color-light-gray)" }}>
+                <div>
+                  <label className="flex items-center gap-3 cursor-pointer">
+                    <span className="text-lg font-medium text-charcoal">Include faith-based themes?</span>
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={includeFaithBased}
+                      onClick={() => {
+                        const next = !includeFaithBased;
+                        setIncludeFaithBased(next);
+                        if (next && ["Funny and playful", "Sarcastic and edgy"].includes(tone)) {
+                          setTone("");
+                        }
+                      }}
+                      className="relative inline-flex h-6 w-11 items-center rounded-full transition-colors"
+                      style={{ background: includeFaithBased ? "var(--color-brand)" : "var(--color-light-gray)" }}
+                    >
+                      <span
+                        className="inline-block h-4 w-4 rounded-full bg-white transition-transform"
+                        style={{ transform: includeFaithBased ? "translateX(1.375rem)" : "translateX(0.25rem)" }}
+                      />
+                    </button>
+                  </label>
+                  {includeFaithBased && (
+                    <p className="text-xs mt-1" style={{ color: "var(--color-brand)" }}>
+                      Message will be sincere and respectful, no humor or sarcasm.
+                    </p>
+                  )}
+                </div>
+
+                <div>
+                  <h2 className="text-2xl font-bold text-charcoal mb-4">What tone should this card have?</h2>
+                  <div className="flex flex-wrap gap-2">
+                    {((includeFaithBased || occasion === "Apology")
+                      ? TONES.filter((t) => !["Funny and playful", "Sarcastic and edgy"].includes(t))
+                      : TONES
+                    ).map((t) => (
+                      <button
+                        key={t}
+                        onClick={() => setTone(t)}
+                        className="rounded-full px-4 py-2 text-sm font-medium transition-all"
+                        style={tone === t ? {
+                          background: "var(--color-brand)",
+                          color: "#fff",
+                          boxShadow: "0 0 0 2px var(--color-brand)",
+                        } : {
+                          background: "var(--color-white)",
+                          color: "var(--color-charcoal)",
+                          border: "1.5px solid var(--color-sage-light)",
+                        }}
+                      >
+                        {t}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <button
+                  onClick={() => setStep("notes")}
+                  disabled={!tone}
+                  className="btn-primary text-base px-6 py-3 disabled:opacity-40"
+                >
+                  Next
+                </button>
+              </div>
+            )}
           </div>
         )}
 
         {/* Step: Additional notes */}
         {step === "notes" && (
           <div>
-            <h2 className="text-xl font-bold text-gray-900 mb-2">
-              Anything else Nuuge should know?
+            <h2 className="text-2xl font-bold text-charcoal mb-2">
+              Add a personal touch
             </h2>
-            <p className="text-sm text-gray-500 mb-6">
-              Optional — add any recent updates, inside jokes, or specific things
-              you want mentioned. Or leave it blank and let Nuuge work with what
-              it knows.
+            <p className="text-sm text-warm-gray mb-4">
+              Optional — give Nuuge something specific to weave into the message, or leave it blank.
             </p>
             <textarea
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
-              rows={4}
-              placeholder={`e.g. "We just got back from a trip to Italy together" or "He just got promoted at work"`}
-              className="w-full border border-gray-300 rounded-xl px-4 py-3 text-sm
-                         outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100
-                         transition-colors mb-4"
+              rows={5}
+              placeholder={"Ideas:\n• A recent trip or shared memory\n• A milestone (promotion, new home)\n• An inside joke\n• Something they said recently"}
+              className="input-field rounded-xl mb-4"
             />
             {showShareOption && (
-              <div className="bg-indigo-50 border border-indigo-100 rounded-xl p-4 mb-4">
-                <p className="text-sm font-medium text-gray-800 mb-2">
+              <div className="rounded-xl p-4 mb-4" style={{ background: "var(--color-brand-light)", border: "1.5px solid var(--color-sage)" }}>
+                <p className="text-sm font-medium text-charcoal mb-2">
                   Show this card on linked profiles too?
                 </p>
-                <p className="text-xs text-gray-500 mb-3">
+                <p className="text-xs text-warm-gray mb-3">
                   Since this is a shared occasion, you can save it to both profiles.
                 </p>
                 {linkedRecipients.map((lr) => (
-                  <label key={lr.id} className="flex items-center gap-2 text-sm text-gray-700">
+                  <label key={lr.id} className="flex items-center gap-2 text-sm text-charcoal">
                     <input
                       type="checkbox"
                       checked={sharedWith.includes(lr.id)}
@@ -837,79 +1337,121 @@ Tone preference: ${r.tone_preference || "Not specified"}`.replace(/\n{2,}/g, "\n
                           setSharedWith(sharedWith.filter((id) => id !== lr.id));
                         }
                       }}
-                      className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                      className="rounded"
+                      style={{ accentColor: "var(--color-brand)" }}
                     />
                     {lr.name}
-                    <span className="text-xs text-gray-400 capitalize">({lr.linkLabel})</span>
+                    <span className="text-xs text-warm-gray capitalize">({lr.linkLabel})</span>
                   </label>
                 ))}
               </div>
             )}
             {profile?.partner_name && (
-              <div className="bg-gray-50 border border-gray-200 rounded-xl p-4 mb-4">
-                <label className="flex items-center gap-2 text-sm text-gray-700">
-                  <input
-                    type="checkbox"
-                    checked={coSign}
-                    onChange={(e) => setCoSign(e.target.checked)}
-                    className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
-                  />
-                  Sign from both {profile.display_name} &amp; {profile.partner_name}
+              <div className="rounded-xl p-4 mb-4" style={{ background: "var(--color-faint-gray)", border: "1px solid var(--color-light-gray)" }}>
+                <label className="flex items-center gap-3 cursor-pointer">
+                  <span className="text-base text-charcoal">Co-sign with {profile.partner_name}</span>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={coSign}
+                    onClick={() => setCoSign(!coSign)}
+                    className="relative inline-flex h-6 w-11 items-center rounded-full transition-colors"
+                    style={{ background: coSign ? "var(--color-brand)" : "var(--color-light-gray)" }}
+                  >
+                    <span
+                      className="inline-block h-4 w-4 rounded-full bg-white transition-transform"
+                      style={{ transform: coSign ? "translateX(1.375rem)" : "translateX(0.25rem)" }}
+                    />
+                  </button>
                 </label>
+                {coSign && (
+                  <p className="text-xs text-warm-gray mt-1">
+                    The message will use &ldquo;we&rdquo; and &ldquo;our&rdquo; and sign from both of you.
+                  </p>
+                )}
               </div>
             )}
-            {/* Profile elements to include in message */}
+            {/* Profile topics to include — split into Interests (opt-in) and Personality (opt-out) */}
             {recipient && (() => {
-              const elements = Object.keys(activeProfileElements).length > 0
-                ? activeProfileElements
+              const raw = Object.keys(activeProfileElements).length > 0
+                ? normalizeProfileElements(activeProfileElements)
                 : extractProfileElements(recipient);
-              if (Object.keys(activeProfileElements).length === 0 && Object.keys(elements).length > 0) {
-                setTimeout(() => setActiveProfileElements(elements), 0);
+              if (Object.keys(activeProfileElements).length === 0 && Object.keys(raw).length > 0) {
+                setTimeout(() => setActiveProfileElements(raw), 0);
               }
-              const entries = Object.entries(elements);
-              return entries.length > 0 ? (
-                <div className="bg-gray-50 border border-gray-200 rounded-xl p-4 mb-4">
-                  <p className="text-sm font-medium text-gray-700 mb-2">
-                    Profile details to use in the message
-                  </p>
-                  <p className="text-xs text-gray-400 mb-3">
-                    Tap to remove any you don&apos;t want referenced. They&apos;ll stay in the profile.
-                  </p>
-                  <div className="flex flex-wrap gap-2">
-                    {entries.map(([key, active]) => (
-                      <button
-                        key={key}
-                        onClick={() => setActiveProfileElements((prev) => ({ ...prev, [key]: !prev[key] }))}
-                        className={`text-xs px-3 py-1.5 rounded-full border transition-all ${
-                          active
-                            ? "bg-indigo-50 border-indigo-300 text-indigo-700"
-                            : "bg-gray-100 border-gray-200 text-gray-400 line-through"
-                        }`}
-                      >
-                        {key.replace(/^[^:]+: /, "")}
-                      </button>
-                    ))}
-                  </div>
+              const elements = raw;
+              const allEntries = Object.entries(elements);
+              const interestEntries = allEntries.filter(([k]) => isInterestLikeKey(k));
+              const toneEntries = allEntries.filter(([k]) => isToneLikeKey(k));
+
+              const renderPills = (entries: [string, boolean][]) => (
+                <div className="flex flex-wrap gap-2">
+                  {entries.map(([key, active]) => (
+                    <button
+                      key={key}
+                      onClick={() => setActiveProfileElements((prev) => ({ ...prev, [key]: !prev[key] }))}
+                      className="text-sm px-3 py-1.5 rounded-full font-medium transition-all"
+                      style={active ? {
+                        background: "var(--color-brand-light)",
+                        border: "1.5px solid var(--color-brand)",
+                        color: "var(--color-brand)",
+                      } : {
+                        background: "var(--color-faint-gray)",
+                        border: "1.5px solid var(--color-light-gray)",
+                        color: "var(--color-warm-gray)",
+                      }}
+                    >
+                      {active ? "✓ " : ""}{key.replace(/^[^:]+: /, "")}
+                    </button>
+                  ))}
+                </div>
+              );
+
+              return allEntries.length > 0 ? (
+                <div className="space-y-4 mb-4">
+                  {interestEntries.length > 0 && (
+                    <div className="rounded-xl p-4" style={{ background: "var(--color-faint-gray)", border: "1px solid var(--color-light-gray)" }}>
+                      <p className="text-base font-medium text-charcoal mb-1">
+                        Interests &amp; details
+                      </p>
+                      <p className="text-sm text-warm-gray mb-3">
+                        Select any of {recipient.name}&apos;s interests you&apos;d like referenced in the message.
+                      </p>
+                      {renderPills(interestEntries)}
+                    </div>
+                  )}
+                  {toneEntries.length > 0 && (
+                    <div className="rounded-xl p-4" style={{ background: "var(--color-faint-gray)", border: "1px solid var(--color-light-gray)" }}>
+                      <p className="text-base font-medium text-charcoal mb-1">
+                        Personality &amp; style
+                      </p>
+                      <p className="text-sm text-warm-gray mb-3">
+                        These shape the tone of the message. Deselect any that don&apos;t fit.
+                      </p>
+                      {renderPills(toneEntries)}
+                    </div>
+                  )}
                 </div>
               ) : null;
             })()}
 
             {error && (
-              <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700 mb-4">
+              <div className="p-3 rounded-lg text-sm mb-4" style={{ background: "var(--color-error-light)", border: "1px solid var(--color-error)", color: "var(--color-error)" }}>
                 {error}
               </div>
             )}
-            <div className="flex gap-3">
+            <div className="flex items-center gap-3">
               <button
-                onClick={() => setStep("tone")}
-                className="text-sm text-gray-400 hover:text-gray-600 px-4 py-2"
+                onClick={() => setStep("occasion")}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium transition-colors"
+                style={{ color: "var(--color-brand)", border: "1.5px solid var(--color-sage)" }}
               >
-                &larr; Back
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+                Back
               </button>
               <button
                 onClick={generateMessages}
-                className="bg-indigo-600 text-white px-8 py-3 rounded-xl font-medium
-                           hover:bg-indigo-700 transition-colors flex-1"
+                className="btn-primary"
               >
                 Generate card messages
               </button>
@@ -917,29 +1459,15 @@ Tone preference: ${r.tone_preference || "Not specified"}`.replace(/\n{2,}/g, "\n
           </div>
         )}
 
-        {/* Step: Generating */}
-        {step === "generating" && (
-          <div className="text-center py-20">
-            <div className="flex justify-center gap-1 mb-4">
-              <span className="w-2.5 h-2.5 bg-indigo-400 rounded-full animate-bounce" />
-              <span className="w-2.5 h-2.5 bg-indigo-400 rounded-full animate-bounce [animation-delay:0.1s]" />
-              <span className="w-2.5 h-2.5 bg-indigo-400 rounded-full animate-bounce [animation-delay:0.2s]" />
-            </div>
-            <p className="text-gray-500">
-              Nuuge is writing your {occasion.toLowerCase()} card for{" "}
-              {recipient.name}...
-            </p>
-          </div>
-        )}
 
         {/* Step: Select from options */}
         {step === "select" && (
           <div>
-            <h2 className="text-xl font-bold text-gray-900 mb-2">
+            <h2 className="text-xl font-bold text-charcoal mb-2">
               Pick your favorite
             </h2>
-            <p className="text-sm text-gray-500 mb-6">
-              Here are 3 options for {recipient.name}&apos;s {occasion.toLowerCase()} card.
+            <p className="text-sm text-warm-gray mb-6">
+              Here are 3 options for {recipient.name}&apos;s {effectiveOccasion.toLowerCase()} card.
               Click one to preview and edit.
             </p>
             <div className="space-y-4">
@@ -947,42 +1475,43 @@ Tone preference: ${r.tone_preference || "Not specified"}`.replace(/\n{2,}/g, "\n
                 <button
                   key={i}
                   onClick={() => selectMessage(msg)}
-                  className="w-full bg-white border border-gray-200 rounded-xl p-5 text-left
-                             hover:border-indigo-400 transition-colors"
+                  className="w-full card-surface card-surface-clickable p-5 text-left"
                 >
-                  <span className="text-xs font-medium text-indigo-600 uppercase tracking-wide">
+                  <span className="text-xs font-medium text-brand uppercase tracking-wide">
                     {msg.label}
                   </span>
-                  <p className="text-sm text-gray-800 mt-2 font-medium">
+                  <p className="text-sm text-charcoal mt-2 font-medium">
                     {msg.greeting}
                   </p>
-                  <p className="text-sm text-gray-600 mt-1">{msg.body}</p>
-                  <p className="text-sm text-gray-600 mt-1 italic">
+                  <p className="text-sm text-warm-gray mt-1">{msg.body}</p>
+                  <p className="text-sm text-warm-gray mt-1 italic whitespace-pre-line">
                     {msg.closing}
                   </p>
                 </button>
               ))}
             </div>
             {/* Profile element toggles for regeneration */}
-            {Object.keys(activeProfileElements).length > 0 && (
-              <div className="bg-gray-50 border border-gray-200 rounded-xl p-4 mt-4">
-                <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">
+            {Object.keys(activeProfileElements).length > 0 && (() => {
+              const normalized = normalizeProfileElements(activeProfileElements);
+              return (
+              <div className="rounded-xl p-4 mt-4" style={{ background: "var(--color-faint-gray)", border: "1px solid var(--color-light-gray)" }}>
+                <p className="text-xs font-medium text-warm-gray uppercase tracking-wide mb-2">
                   Profile details used
                   {regenerationCount > 0 && (
-                    <span className="text-gray-400 normal-case ml-1">
+                    <span className="text-warm-gray normal-case ml-1">
                       — toggle off what you don&apos;t want
                     </span>
                   )}
                 </p>
                 <div className="flex flex-wrap gap-2">
-                  {Object.entries(activeProfileElements).map(([key, active]) => (
+                  {Object.entries(normalized).map(([key, active]) => (
                     <button
                       key={key}
                       onClick={() => setActiveProfileElements((prev) => ({ ...prev, [key]: !prev[key] }))}
                       className={`text-xs px-3 py-1.5 rounded-full border transition-all ${
                         active
-                          ? "bg-indigo-50 border-indigo-300 text-indigo-700"
-                          : "bg-gray-100 border-gray-200 text-gray-400 line-through"
+                          ? "bg-brand-light border-sage text-brand"
+                          : "bg-faint-gray border-light-gray text-warm-gray line-through"
                       }`}
                     >
                       {key.replace(/^[^:]+: /, "")}
@@ -990,18 +1519,22 @@ Tone preference: ${r.tone_preference || "Not specified"}`.replace(/\n{2,}/g, "\n
                   ))}
                 </div>
               </div>
-            )}
+              );
+            })()}
 
-            <div className="flex gap-3 mt-4">
+            <div className="flex items-center gap-3 mt-4">
               <button
                 onClick={() => setStep("notes")}
-                className="text-sm text-gray-400 hover:text-gray-600 px-4 py-2"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium transition-colors"
+                style={{ color: "var(--color-brand)", border: "1.5px solid var(--color-sage)" }}
               >
-                &larr; Back
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+                Back
               </button>
               <button
                 onClick={generateMessages}
-                className="text-sm text-indigo-600 font-medium hover:text-indigo-800 px-4 py-2"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium transition-colors"
+                style={{ color: "var(--color-brand)", border: "1.5px solid var(--color-sage)" }}
               >
                 Regenerate all
               </button>
@@ -1012,15 +1545,15 @@ Tone preference: ${r.tone_preference || "Not specified"}`.replace(/\n{2,}/g, "\n
         {/* Step: Preview & Edit */}
         {step === "preview" && editedMessage && (
           <div>
-            <h2 className="text-xl font-bold text-gray-900 mb-2">
+            <h2 className="text-xl font-bold text-charcoal mb-2">
               Preview &amp; edit
             </h2>
-            <p className="text-sm text-gray-500 mb-6">
+            <p className="text-sm text-warm-gray mb-6">
               Adjust anything you want, then save.
             </p>
-            <div className="bg-white border border-gray-200 rounded-xl p-6 space-y-4">
+            <div className="card-surface p-6 space-y-4">
               <div>
-                <label className="block text-xs font-medium text-gray-400 uppercase tracking-wide mb-1">
+                <label className="block text-xs font-medium text-warm-gray uppercase tracking-wide mb-1">
                   Greeting
                 </label>
                 <input
@@ -1028,12 +1561,11 @@ Tone preference: ${r.tone_preference || "Not specified"}`.replace(/\n{2,}/g, "\n
                   onChange={(e) =>
                     setEditedMessage({ ...editedMessage, greeting: e.target.value })
                   }
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm
-                             outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
+                  className="input-field"
                 />
               </div>
               <div>
-                <label className="block text-xs font-medium text-gray-400 uppercase tracking-wide mb-1">
+                <label className="block text-xs font-medium text-warm-gray uppercase tracking-wide mb-1">
                   Message
                 </label>
                 <textarea
@@ -1042,65 +1574,66 @@ Tone preference: ${r.tone_preference || "Not specified"}`.replace(/\n{2,}/g, "\n
                     setEditedMessage({ ...editedMessage, body: e.target.value })
                   }
                   rows={4}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm
-                             outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
+                  className="input-field"
                 />
               </div>
               <div>
-                <label className="block text-xs font-medium text-gray-400 uppercase tracking-wide mb-1">
+                <label className="block text-xs font-medium text-warm-gray uppercase tracking-wide mb-1">
                   Closing
                 </label>
-                <input
+                <textarea
                   value={editedMessage.closing}
                   onChange={(e) =>
                     setEditedMessage({ ...editedMessage, closing: e.target.value })
                   }
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm
-                             outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
+                  rows={2}
+                  placeholder="e.g. Love,&#10;Your name"
+                  className="input-field resize-none"
                 />
+                <p className="text-xs text-warm-gray mt-0.5">Put your name(s) on a new line below the phrase.</p>
               </div>
             </div>
 
             {/* Card visual preview */}
-            <div className="mt-6 bg-white border border-gray-200 rounded-xl p-8 text-center">
-              <p className="text-xs text-gray-400 uppercase tracking-wide mb-4">
+            <div className="mt-6 card-surface p-8 text-center">
+              <p className="text-xs text-warm-gray uppercase tracking-wide mb-4">
                 Card preview
               </p>
-              <div className="max-w-sm mx-auto bg-gradient-to-br from-indigo-50 to-purple-50 rounded-xl p-8 border border-indigo-100">
-                <p className="text-lg font-medium text-gray-800 mb-3">
+              <div className="max-w-sm mx-auto rounded-xl p-8" style={{ background: "var(--color-brand-light)", border: "1.5px solid var(--color-sage)" }}>
+                <p className="text-lg font-medium text-charcoal mb-3">
                   {editedMessage.greeting}
                 </p>
-                <p className="text-sm text-gray-700 leading-relaxed mb-3 whitespace-pre-wrap">
+                <p className="text-sm text-charcoal leading-relaxed mb-3 whitespace-pre-wrap">
                   {editedMessage.body}
                 </p>
-                <p className="text-sm text-gray-600 italic">
+                <p className="text-sm text-warm-gray italic whitespace-pre-line">
                   {editedMessage.closing}
                 </p>
               </div>
             </div>
 
-            <div className="flex gap-3 mt-6">
+            <div className="flex items-center gap-3 mt-6">
               <button
                 onClick={() => setStep("select")}
-                className="text-sm text-gray-400 hover:text-gray-600 px-4 py-2"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium transition-colors"
+                style={{ color: "var(--color-brand)", border: "1.5px solid var(--color-sage)" }}
               >
-                &larr; Pick a different one
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+                Pick a different one
               </button>
               {editMode && generatedImageUrl && (
                 <button
                   onClick={() => {
                     handleSave({ deliveryMethodOverride: deliveryMethod });
                   }}
-                  className="bg-green-600 text-white px-6 py-3 rounded-xl font-medium
-                             hover:bg-green-700 transition-colors"
+                  className="btn-brand"
                 >
                   Save &amp; finish
                 </button>
               )}
               <button
                 onClick={() => setStep("design_subject")}
-                className="bg-indigo-600 text-white px-8 py-3 rounded-xl font-medium
-                           hover:bg-indigo-700 transition-colors flex-1"
+                className="btn-primary"
               >
                 {editMode && generatedImageUrl ? "Continue: Redesign image" : "Next: Design the card"}
               </button>
@@ -1118,18 +1651,13 @@ Tone preference: ${r.tone_preference || "Not specified"}`.replace(/\n{2,}/g, "\n
 
           return (
           <div>
-            <div className="flex items-center gap-2 mb-1">
-              <span className="text-xs font-medium text-indigo-500 bg-indigo-50 px-2 py-0.5 rounded-full">
-                Step 1 of 3
-              </span>
-            </div>
-            <h2 className="text-xl font-bold text-gray-900 mb-1">
-              What should the picture show?
+            <h2 className="text-xl font-bold text-charcoal mb-1">
+              Design your card
             </h2>
-            <p className="text-sm text-gray-500 mb-6">
+            <p className="text-base text-warm-gray mb-6">
               Pick the main subject for your card&apos;s front image.
               {recommended.length > 0 && (
-                <span className="text-indigo-500"> Stars mark subjects that pair well with &ldquo;{tone.toLowerCase()}&rdquo;.</span>
+                <span className="text-brand"> Stars mark subjects that pair well with &ldquo;{tone.toLowerCase()}&rdquo;.</span>
               )}
             </p>
 
@@ -1142,18 +1670,18 @@ Tone preference: ${r.tone_preference || "Not specified"}`.replace(/\n{2,}/g, "\n
                   onClick={() => setImageSubject(subj.id)}
                   className={`flex flex-col items-center justify-center p-5 rounded-xl border-2 transition-all relative
                     ${imageSubject === subj.id
-                      ? "border-indigo-500 bg-indigo-50 shadow-md"
+                      ? "border-brand bg-brand-light shadow-md"
                       : isRecommended
-                        ? "border-indigo-200 bg-indigo-50/30 hover:border-indigo-400 hover:shadow-sm"
-                        : "border-gray-200 bg-white hover:border-indigo-300 hover:shadow-sm"
+                        ? "border-sage-light bg-brand-light/30 hover:border-sage hover:shadow-sm"
+                        : "border-light-gray bg-white hover:border-sage hover:shadow-sm"
                     }`}
                 >
                   {isRecommended && (
-                    <span className="absolute top-1.5 right-2 text-indigo-400 text-xs" title="Recommended for this tone">★</span>
+                    <span className="absolute top-1.5 right-2 text-sage text-sm" title="Recommended for this tone">★</span>
                   )}
                   <span className="text-3xl mb-2">{subj.emoji}</span>
-                  <span className="text-sm font-semibold text-gray-900">{subj.label}</span>
-                  <span className="text-xs text-gray-400 mt-1 text-center">{subj.examples}</span>
+                  <span className="text-base font-semibold text-charcoal">{subj.label}</span>
+                  <span className="text-sm text-warm-gray mt-1 text-center">{subj.examples}</span>
                 </button>
                 );
               })}
@@ -1162,8 +1690,8 @@ Tone preference: ${r.tone_preference || "Not specified"}`.replace(/\n{2,}/g, "\n
             {imageSubject && (
               <>
                 {sceneSketches.length > 0 && (
-                  <div className="mb-4 p-4 bg-gradient-to-r from-indigo-50 to-purple-50 rounded-xl border border-indigo-100">
-                    <p className="text-xs font-medium text-indigo-600 uppercase tracking-wide mb-2">
+                  <div className="mb-4 p-4 rounded-xl" style={{ background: "var(--color-brand-light)", border: "1.5px solid var(--color-sage)" }}>
+                    <p className="text-sm font-medium text-brand uppercase tracking-wide mb-2">
                       Scene ideas for {selectedSubjectRecipe?.label} + {tone.toLowerCase()}
                     </p>
                     <div className="space-y-1.5">
@@ -1171,301 +1699,252 @@ Tone preference: ${r.tone_preference || "Not specified"}`.replace(/\n{2,}/g, "\n
                         <button
                           key={i}
                           onClick={() => setSubjectDetail(sketch)}
-                          className={`block w-full text-left text-sm px-3 py-2 rounded-lg transition-colors
+                          className={`block w-full text-left text-base px-3 py-2.5 rounded-lg transition-colors
                             ${subjectDetail === sketch
-                              ? "bg-indigo-100 text-indigo-800 font-medium"
-                              : "text-gray-700 hover:bg-white/60"
+                              ? "bg-brand-light text-brand-hover font-medium"
+                              : "text-charcoal hover:bg-white/60"
                             }`}
                         >
                           &ldquo;{sketch}&rdquo;
                         </button>
                       ))}
                     </div>
-                    <p className="text-xs text-gray-400 mt-2">
+                    <p className="text-sm text-warm-gray mt-2">
                       Tap to use a scene idea, or type your own below.
                     </p>
                   </div>
                 )}
 
                 <div className="mb-6">
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                  <label className="block text-base font-medium text-charcoal mb-1">
                     Get more specific (optional)
                   </label>
                   <input
                     value={subjectDetail}
                     onChange={(e) => setSubjectDetail(e.target.value)}
                     placeholder={`e.g. ${IMAGE_SUBJECTS.find((s) => s.id === imageSubject)?.examples || "describe what you want"}`}
-                    className="w-full border border-gray-300 rounded-xl px-4 py-3 text-sm
-                               outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
+                    className="input-field rounded-xl"
                   />
                 </div>
               </>
             )}
 
-            <div className="flex gap-3 mt-4">
+            {/* Art style section — shown once a subject is selected */}
+            {imageSubject && (
+              <div className="mt-8 pt-6 border-t" style={{ borderColor: "var(--color-light-gray)" }}>
+                <h3 className="text-lg font-bold text-charcoal mb-1">
+                  Choose the artistic style
+                </h3>
+                <p className="text-base text-warm-gray mb-4">
+                  This sets the visual look and feel of your card.
+                </p>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                  {ART_STYLES.map((style) => (
+                    <button
+                      key={style.id}
+                      onClick={() => setArtStyle(style.id)}
+                      className={`flex flex-col items-start p-4 rounded-xl border-2 transition-all text-left
+                        ${artStyle === style.id
+                          ? "border-brand bg-brand-light shadow-md"
+                          : "border-light-gray bg-white hover:border-sage hover:shadow-sm"
+                        }`}
+                    >
+                      <span className="text-base font-semibold text-charcoal">{style.label}</span>
+                      <span className="text-sm text-warm-gray mt-1">{style.desc}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Personal touch section — shown once both subject and style are selected */}
+            {imageSubject && artStyle && (
+              <div className="mt-8 pt-6 border-t" style={{ borderColor: "var(--color-light-gray)" }}>
+                <h3 className="text-lg font-bold text-charcoal mb-1">
+                  Add a personal touch
+                </h3>
+                <p className="text-base text-warm-gray mb-4">
+                  Optional details to make the image more personal.
+                </p>
+
+                {(() => {
+                  const available = getActiveInterests();
+                  if (available.length === 0) return null;
+                  return (
+                    <div className="mb-4">
+                      <p className="text-sm font-medium text-charcoal mb-2">
+                        Which interests should influence the image?
+                      </p>
+                      <div className="flex flex-wrap gap-2">
+                        {available.map((interest) => {
+                          const active = imageInterests.includes(interest);
+                          return (
+                            <button
+                              key={interest}
+                              onClick={() => {
+                                if (active) {
+                                  setImageInterests(imageInterests.filter((i) => i !== interest));
+                                } else if (imageInterests.length < 3) {
+                                  setImageInterests([...imageInterests, interest]);
+                                }
+                              }}
+                              className={`px-3 py-1.5 rounded-full text-sm font-medium border transition-colors ${
+                                active
+                                  ? "border-brand bg-brand-light text-brand"
+                                  : "border-light-gray text-warm-gray hover:border-warm-gray"
+                              } ${!active && imageInterests.length >= 3 ? "opacity-40 cursor-not-allowed" : ""}`}
+                            >
+                              {interest}
+                            </button>
+                          );
+                        })}
+                      </div>
+                      <p className="text-sm text-warm-gray mt-1">
+                        Pick up to 3 that fit this card&apos;s image.
+                      </p>
+                    </div>
+                  );
+                })()}
+
+                <div className="mb-2">
+                  <p className="text-sm font-medium text-charcoal mb-1">
+                    Anything else for the image?
+                  </p>
+                  <textarea
+                    value={personalContext}
+                    onChange={(e) => setPersonalContext(e.target.value)}
+                    rows={3}
+                    placeholder="e.g. She loves sunflowers and her golden retriever Bailey. Maybe show a garden scene with a dog?"
+                    className="input-field rounded-xl resize-none"
+                  />
+                  <p className="text-sm text-warm-gray mt-1">
+                    Describe specific details you&apos;d like Nuuge to include.
+                  </p>
+                </div>
+              </div>
+            )}
+
+            <div className="flex items-center gap-3 mt-6">
               <button
                 onClick={() => setStep("preview")}
-                className="text-sm text-gray-400 hover:text-gray-600 px-4 py-2"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium transition-colors"
+                style={{ color: "var(--color-brand)", border: "1.5px solid var(--color-sage)" }}
               >
-                &larr; Back
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+                Back
               </button>
               <button
-                onClick={() => setStep("design_style")}
-                disabled={!imageSubject}
-                className="bg-indigo-600 text-white px-8 py-3 rounded-xl font-medium
-                           hover:bg-indigo-700 transition-colors flex-1
-                           disabled:opacity-40 disabled:cursor-not-allowed"
+                onClick={reviewCardDesign}
+                disabled={!imageSubject || !artStyle}
+                className="btn-primary disabled:opacity-40 disabled:cursor-not-allowed"
               >
-                Next: Choose a style
+                Review card design
               </button>
             </div>
           </div>
           );
         })()}
 
-        {/* Step: Art Style (4-step builder — Step 2) */}
-        {step === "design_style" && (
+        {/* Step: Unified review — user prompt + Nuuge alternatives */}
+        {step === "design_confirm_prompt" && (
           <div>
-            <div className="flex items-center gap-2 mb-1">
-              <span className="text-xs font-medium text-indigo-500 bg-indigo-50 px-2 py-0.5 rounded-full">
-                Step 2 of 3
-              </span>
-            </div>
-            <h2 className="text-xl font-bold text-gray-900 mb-1">
-              Choose the artistic style
+            <h2 className="text-xl font-bold text-charcoal mb-2">
+              Review your card design
             </h2>
-            <p className="text-sm text-gray-500 mb-6">
-              This sets the visual look and feel of your card.
+            <p className="text-base text-warm-gray mb-4">
+              Your design is loaded and ready to generate. Nuuge also created a few alternative ideas below — tap any to try it, or go with yours.
             </p>
 
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-6">
-              {ART_STYLES.map((style) => (
-                <button
-                  key={style.id}
-                  onClick={() => setArtStyle(style.id)}
-                  className={`flex flex-col items-start p-4 rounded-xl border-2 transition-all text-left
-                    ${artStyle === style.id
-                      ? "border-indigo-500 bg-indigo-50 shadow-md"
-                      : "border-gray-200 bg-white hover:border-indigo-300 hover:shadow-sm"
-                    }`}
-                >
-                  <span className="text-sm font-semibold text-gray-900">{style.label}</span>
-                  <span className="text-xs text-gray-500 mt-1">{style.desc}</span>
-                </button>
-              ))}
-            </div>
-
-            <div className="flex gap-3 mt-4">
+            {/* My design card */}
+            <div className="mb-2">
+              <p className="text-sm font-medium text-charcoal mb-2">My design</p>
               <button
-                onClick={() => setStep("design_subject")}
-                className="text-sm text-gray-400 hover:text-gray-600 px-4 py-2"
+                onClick={() => setPendingSceneDescription(userOriginalPrompt)}
+                className={`w-full p-4 rounded-xl border-2 text-left transition-all ${
+                  pendingSceneDescription === userOriginalPrompt
+                    ? "border-brand bg-brand-light shadow-md"
+                    : "border-light-gray bg-white hover:border-sage hover:shadow-sm"
+                }`}
               >
-                &larr; Back
-              </button>
-              <button
-                onClick={() => {
-                  if (!personalContext.trim()) {
-                    const defaultContext = `Recipient: ${recipient!.name} (${recipient!.relationship_type}). ${
-                      recipient!.interests?.length ? `Interests: ${recipient!.interests.join(", ")}.` : ""
-                    } ${recipient!.personality_notes ? `Personality: ${recipient!.personality_notes}.` : ""}`;
-                    setPersonalContext(defaultContext);
-                  }
-                  setStep("design_context");
-                }}
-                disabled={!artStyle}
-                className="bg-indigo-600 text-white px-8 py-3 rounded-xl font-medium
-                           hover:bg-indigo-700 transition-colors flex-1
-                           disabled:opacity-40 disabled:cursor-not-allowed"
-              >
-                Next: Add personal touch
+                <span className="text-base font-semibold text-charcoal">
+                  {IMAGE_SUBJECTS.find((s) => s.id === imageSubject)?.label || "Custom"}
+                  {subjectDetail && ` — ${subjectDetail}`}
+                </span>
+                <p className="text-sm text-warm-gray mt-1">
+                  {ART_STYLES.find((s) => s.id === artStyle)?.label || ""} &middot; {tone}
+                </p>
               </button>
             </div>
-          </div>
-        )}
 
-        {/* Step: Personal Context (3-step builder — Step 3) */}
-        {step === "design_context" && (() => {
-          const moodRec = getMoodRecipe(tone);
-          const palettePreview = moodRec ? pickRandom(moodRec.palette, 3).join(", ") : "";
-          const lightingPreview = moodRec ? pickRandom(moodRec.lighting, 1)[0] : "";
-
-          return (
-          <div>
-            <div className="flex items-center gap-2 mb-1">
-              <span className="text-xs font-medium text-indigo-500 bg-indigo-50 px-2 py-0.5 rounded-full">
-                Step 3 of 3
-              </span>
-            </div>
-            <h2 className="text-xl font-bold text-gray-900 mb-1">
-              Add a personal touch
-            </h2>
-            <p className="text-sm text-gray-500 mb-4">
-              Tell the AI what makes this card special. We&apos;ve pre-filled it from {recipient!.name}&apos;s
-              profile, but you can edit or add anything.
-            </p>
-
+            {/* Nuuge alternatives section */}
             <div className="mb-4">
-              <div className="flex items-center gap-3 text-sm text-gray-600 bg-gray-50 rounded-xl p-4 mb-4">
-                <div className="grid grid-cols-3 gap-3 w-full text-center">
-                  <div>
-                    <span className="block text-xs text-gray-400">Subject</span>
-                    <span className="font-medium text-gray-800">
-                      {IMAGE_SUBJECTS.find((s) => s.id === imageSubject)?.label}
-                      {subjectDetail && ` — ${subjectDetail}`}
-                    </span>
-                  </div>
-                  <div>
-                    <span className="block text-xs text-gray-400">Style</span>
-                    <span className="font-medium text-gray-800">
-                      {ART_STYLES.find((s) => s.id === artStyle)?.label}
-                    </span>
-                  </div>
-                  <div>
-                    <span className="block text-xs text-gray-400">Tone</span>
-                    <span className="font-medium text-gray-800">
-                      {tone}
-                    </span>
-                  </div>
-                </div>
-              </div>
+              <p className="text-sm font-medium text-charcoal mb-2 mt-4">Design ideas from Nuuge</p>
 
-              {moodRec && (
-                <div className="mb-4 p-3 bg-gradient-to-r from-purple-50 to-pink-50 rounded-lg border border-purple-100">
-                  <p className="text-xs font-medium text-purple-600 uppercase tracking-wide mb-1">
-                    Recipe preview — what the AI will aim for
-                  </p>
-                  <p className="text-xs text-gray-600">
-                    <strong>Lighting:</strong> {lightingPreview} &middot;{" "}
-                    <strong>Palette:</strong> {palettePreview}
-                  </p>
+              {conceptsLoading && (
+                <div className="flex items-center gap-3 py-6 justify-center">
+                  <div className="w-5 h-5 border-2 rounded-full animate-spin" style={{ borderColor: "var(--color-light-gray)", borderTopColor: "var(--color-brand)" }} />
+                  <span className="text-sm text-warm-gray">Nuuge is brainstorming alternatives&hellip;</span>
                 </div>
               )}
 
-              <textarea
-                value={personalContext}
-                onChange={(e) => setPersonalContext(e.target.value)}
-                rows={4}
-                placeholder="e.g. She loves sunflowers and her golden retriever Bailey. Maybe show a garden scene with a dog?"
-                className="w-full border border-gray-300 rounded-xl px-4 py-3 text-sm
-                           outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 resize-none"
-              />
-              <p className="text-xs text-gray-400 mt-1">
-                Optional — but the more you tell Nuuge, the more personal the card feels.
-              </p>
-            </div>
-
-            <div className="mb-6">
-              <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">
-                Card size
-              </p>
-              <div className="flex gap-3">
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input
-                    type="radio"
-                    name="cardSizeBuilder"
-                    checked={cardSize === "4x6"}
-                    onChange={() => setCardSize("4x6")}
-                    className="text-indigo-600"
-                  />
-                  <span className="text-sm text-gray-700">4&quot; × 6&quot;</span>
-                </label>
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input
-                    type="radio"
-                    name="cardSizeBuilder"
-                    checked={cardSize === "5x7"}
-                    onChange={() => setCardSize("5x7")}
-                    className="text-indigo-600"
-                  />
-                  <span className="text-sm text-gray-700">5&quot; × 7&quot;</span>
-                </label>
-              </div>
-            </div>
-
-            <div className="flex gap-3 mt-4">
-              <button
-                onClick={() => setStep("design_style")}
-                className="text-sm text-gray-400 hover:text-gray-600 px-4 py-2"
-              >
-                &larr; Back
-              </button>
-              <button
-                onClick={generateFromSelections}
-                className="bg-indigo-600 text-white px-8 py-3 rounded-xl font-medium
-                           hover:bg-indigo-700 transition-colors flex-1"
-              >
-                Generate my card
-              </button>
-              <button
-                onClick={loadDesignSuggestions}
-                className="bg-white text-indigo-600 border border-indigo-200 px-5 py-3 rounded-xl text-sm font-medium
-                           hover:bg-indigo-50 transition-colors"
-              >
-                Let Nuuge suggest instead
-              </button>
-            </div>
-          </div>
-          );
-        })()}
-
-        {/* Step: Review prompt before first generation */}
-        {step === "design_confirm_prompt" && (
-          <div>
-            <h2 className="text-xl font-bold text-gray-900 mb-2">
-              Review your image prompt
-            </h2>
-            <p className="text-sm text-gray-500 mb-4">
-              This is what we&apos;ll send to the AI. Feel free to tweak it before generating.
-            </p>
-
-            <div className="bg-white border border-gray-200 rounded-xl p-4 mb-4">
-              <div className="flex items-center gap-3 text-sm text-gray-600 bg-gray-50 rounded-lg p-3 mb-3">
-                <div className="grid grid-cols-3 gap-3 w-full text-center">
-                  <div>
-                    <span className="block text-xs text-gray-400">Subject</span>
-                    <span className="font-medium text-gray-800">
-                      {IMAGE_SUBJECTS.find((s) => s.id === imageSubject)?.label}
-                    </span>
-                  </div>
-                  <div>
-                    <span className="block text-xs text-gray-400">Style</span>
-                    <span className="font-medium text-gray-800">
-                      {ART_STYLES.find((s) => s.id === artStyle)?.label}
-                    </span>
-                  </div>
-                  <div>
-                    <span className="block text-xs text-gray-400">Tone</span>
-                    <span className="font-medium text-gray-800">
-                      {tone}
-                    </span>
-                  </div>
+              {!conceptsLoading && designConcepts.length > 0 && (
+                <div className="space-y-3">
+                  {designConcepts.map((concept, i) => {
+                    const isActive = pendingSceneDescription === concept.image_prompt;
+                    return (
+                      <button
+                        key={i}
+                        onClick={() => setPendingSceneDescription(concept.image_prompt)}
+                        className={`w-full p-4 rounded-xl border-2 text-left transition-all ${
+                          isActive
+                            ? "border-brand bg-brand-light shadow-md"
+                            : "border-light-gray bg-white hover:border-sage hover:shadow-sm"
+                        }`}
+                      >
+                        <span className="text-base font-semibold text-charcoal">
+                          {concept.title}
+                        </span>
+                        <p className="text-sm text-warm-gray mt-1">{concept.description}</p>
+                      </button>
+                    );
+                  })}
                 </div>
-              </div>
+              )}
 
-              <label className="text-xs text-gray-500 uppercase tracking-wide mb-2 block">
-                Image prompt
+              {!conceptsLoading && designConcepts.length === 0 && (
+                <p className="text-sm text-warm-gray py-4">
+                  Couldn&apos;t load design alternatives. You can still generate from your prompt below.
+                </p>
+              )}
+            </div>
+
+            {/* Active prompt editor */}
+            <div className="border-t pt-4 mt-4" style={{ borderColor: "var(--color-light-gray)" }}>
+              <label className="text-sm font-medium text-charcoal mb-2 block">
+                Image prompt (editable)
               </label>
               <textarea
                 value={pendingSceneDescription}
                 onChange={(e) => setPendingSceneDescription(e.target.value)}
                 rows={6}
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm
-                           outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 resize-y"
+                className="input-field resize-y mb-4"
               />
             </div>
 
             {error && (
-              <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700 mb-4">
+              <div className="p-3 rounded-lg text-sm mb-4" style={{ background: "var(--color-error-light)", border: "1px solid var(--color-error)", color: "var(--color-error)" }}>
                 {error}
               </div>
             )}
 
-            <div className="flex gap-3">
+            <div className="flex items-center gap-3">
               <button
-                onClick={() => setStep("design_context")}
-                className="text-sm text-gray-400 hover:text-gray-600 px-4 py-2"
+                onClick={() => setStep("design_subject")}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium transition-colors"
+                style={{ color: "var(--color-brand)", border: "1.5px solid var(--color-sage)" }}
               >
-                &larr; Back
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+                Back
               </button>
               <button
                 onClick={() => {
@@ -1480,192 +1959,53 @@ Tone preference: ${r.tone_preference || "Not specified"}`.replace(/\n{2,}/g, "\n
                   generateDesignImage(prompt);
                 }}
                 disabled={!pendingSceneDescription.trim()}
-                className="bg-indigo-600 text-white px-8 py-3 rounded-xl font-medium
-                           hover:bg-indigo-700 transition-colors flex-1"
+                className="btn-primary"
               >
-                Looks good — generate image
+                Generate image
               </button>
             </div>
           </div>
         )}
 
-        {/* Step: Design loading */}
-        {step === "design_loading" && (
-          <div className="text-center py-20">
-            <div className="flex justify-center gap-1 mb-4">
-              <span className="w-2.5 h-2.5 bg-indigo-400 rounded-full animate-bounce" />
-              <span className="w-2.5 h-2.5 bg-indigo-400 rounded-full animate-bounce [animation-delay:0.1s]" />
-              <span className="w-2.5 h-2.5 bg-indigo-400 rounded-full animate-bounce [animation-delay:0.2s]" />
-            </div>
-            <p className="text-gray-500">
-              Nuuge is dreaming up card designs for {recipient.name}...
-            </p>
-          </div>
-        )}
-
-        {/* Step: Pick a design concept */}
-        {step === "design_pick" && (
-          <div>
-            <h2 className="text-xl font-bold text-gray-900 mb-2">
-              Choose a card design direction
-            </h2>
-            <p className="text-sm text-gray-500 mb-4">
-              Pick a concept and Nuuge will create the artwork. You can refine it after.
-            </p>
-            <div className="mb-6">
-              <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">
-                Card size (for print)
-              </p>
-              <div className="flex gap-3">
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input
-                    type="radio"
-                    name="cardSize"
-                    checked={cardSize === "4x6"}
-                    onChange={() => setCardSize("4x6")}
-                    className="text-indigo-600"
-                  />
-                  <span className="text-sm text-gray-700">4&quot; × 6&quot;</span>
-                </label>
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input
-                    type="radio"
-                    name="cardSize"
-                    checked={cardSize === "5x7"}
-                    onChange={() => setCardSize("5x7")}
-                    className="text-indigo-600"
-                  />
-                  <span className="text-sm text-gray-700">5&quot; × 7&quot;</span>
-                </label>
-              </div>
-            </div>
-            <div className="space-y-3">
-              {designConcepts.map((concept, i) => (
-                <button
-                  key={i}
-                  onClick={() => {
-                    setSelectedDesign(concept);
-                    setCurrentSceneDescription(concept.image_prompt);
-                    generateDesignImage(concept.image_prompt);
-                  }}
-                  className="w-full bg-white border border-gray-200 rounded-xl p-5 text-left
-                             hover:border-indigo-400 transition-colors"
-                >
-                  <span className="text-sm font-semibold text-gray-900">
-                    {concept.title}
-                  </span>
-                  <p className="text-sm text-gray-600 mt-1">{concept.description}</p>
-                </button>
-              ))}
-            </div>
-            <div className="mt-6">
-              <p className="text-sm text-gray-500 mb-2">
-                Or describe your own idea:
-              </p>
-              <div className="flex gap-2">
-                <input
-                  value={designFeedback}
-                  onChange={(e) => setDesignFeedback(e.target.value)}
-                  placeholder="e.g. Two birds in a nest with baby birds..."
-                  className="flex-1 border border-gray-300 rounded-xl px-4 py-3 text-sm
-                             outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
-                />
-                <button
-                  onClick={() => {
-                    if (!designFeedback.trim()) return;
-                    const custom: DesignConcept = {
-                      title: "Custom",
-                      description: designFeedback,
-                      image_prompt: `Greeting card illustration: ${designFeedback}. Clean composition, no text, visually appealing, suitable for a ${occasion.toLowerCase()} card with a ${tone.toLowerCase()} tone.`,
-                    };
-                    setSelectedDesign(custom);
-                    setCurrentSceneDescription(custom.image_prompt);
-                    generateDesignImage(custom.image_prompt);
-                  }}
-                  disabled={!designFeedback.trim()}
-                  className="bg-indigo-600 text-white px-5 py-3 rounded-xl text-sm font-medium
-                             hover:bg-indigo-700 transition-colors disabled:bg-gray-300"
-                >
-                  Generate
-                </button>
-              </div>
-            </div>
-            <button
-              onClick={() => setStep("design_context")}
-              className="text-sm text-gray-400 hover:text-gray-600 mt-4"
-            >
-              &larr; Back to design builder
-            </button>
-          </div>
-        )}
-
-        {/* Step: Design generating */}
-        {step === "design_generating" && (
-          <div className="text-center py-20">
-            <div className="flex justify-center gap-1 mb-4">
-              <span className="w-2.5 h-2.5 bg-purple-400 rounded-full animate-bounce" />
-              <span className="w-2.5 h-2.5 bg-purple-400 rounded-full animate-bounce [animation-delay:0.1s]" />
-              <span className="w-2.5 h-2.5 bg-purple-400 rounded-full animate-bounce [animation-delay:0.2s]" />
-            </div>
-            <p className="text-gray-500">
-              {previousImageUrl ? "Editing your card artwork..." : "Creating your card artwork..."}
-            </p>
-            <p className="text-xs text-gray-400 mt-2">
-              This usually takes 10-15 seconds
-            </p>
-          </div>
-        )}
 
         {/* Step: Confirm refinement before generating */}
         {step === "design_confirm_refinement" && (
           <div>
-            <h2 className="text-xl font-bold text-gray-900 mb-2">
-              {pendingChangeType === "redesign" ? "New image will be generated" : "Confirm the updated scene"}
+            <h2 className="text-xl font-bold text-charcoal mb-2">
+              Generate from updated description
             </h2>
-            <p className="text-sm text-gray-500 mb-4">
-              {pendingChangeType === "redesign"
-                ? "Your change requires a completely new image. The current image will be replaced (you can revert after)."
-                : "We merged your change into the full description. Edit it if anything looks off, then generate."}
+            <p className="text-sm text-warm-gray mb-4">
+              Your addition is merged into the scene below. We&apos;ll generate a new image from this full description (no edit of the current image). You can revert if you prefer the previous version.
             </p>
 
-            {pendingChangeType === "redesign" && (
-              <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-lg">
-                <p className="text-sm text-amber-800">
-                  This is a major style or subject change. A fresh image will be generated from scratch instead of editing the current one.
-                </p>
-              </div>
-            )}
-
             {pendingChangeType === "refine" && pendingEditInstruction && (
-              <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-4 mb-4">
-                <label className="text-xs text-indigo-600 uppercase tracking-wide mb-2 block font-medium">
+              <div className="rounded-xl p-4 mb-4" style={{ background: "var(--color-brand-light)", border: "1px solid var(--color-sage)" }}>
+                <label className="text-xs text-brand uppercase tracking-wide mb-2 block font-medium">
                   What will change
                 </label>
                 <textarea
                   value={pendingEditInstruction}
                   onChange={(e) => setPendingEditInstruction(e.target.value)}
                   rows={2}
-                  className="w-full border border-indigo-300 rounded-lg px-3 py-2 text-sm
-                             outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 resize-y"
+                  className="input-field resize-y" style={{ borderColor: "var(--color-brand)" }}
                 />
               </div>
             )}
 
-            <div className="bg-white border border-gray-200 rounded-xl p-4 mb-6">
-              <label className="text-xs text-gray-500 uppercase tracking-wide mb-2 block">
+            <div className="card-surface p-4 mb-6">
+              <label className="text-xs text-warm-gray uppercase tracking-wide mb-2 block">
                 Full scene description
               </label>
               <textarea
                 value={pendingSceneDescription}
                 onChange={(e) => setPendingSceneDescription(e.target.value)}
                 rows={4}
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm
-                           outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 resize-y"
+                className="input-field resize-y"
               />
             </div>
 
             {error && (
-              <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700 mb-4">
+              <div className="p-3 rounded-lg text-sm mb-4" style={{ background: "var(--color-error-light)", border: "1px solid var(--color-error)", color: "var(--color-error)" }}>
                 {error}
               </div>
             )}
@@ -1675,7 +2015,7 @@ Tone preference: ${r.tone_preference || "Not specified"}`.replace(/\n{2,}/g, "\n
                 onClick={() => {
                   setStep("design_preview");
                 }}
-                className="text-sm text-gray-400 hover:text-gray-600 px-4 py-2"
+                className="text-sm text-warm-gray hover:text-charcoal px-4 py-2"
               >
                 &larr; Cancel
               </button>
@@ -1684,20 +2024,13 @@ Tone preference: ${r.tone_preference || "Not specified"}`.replace(/\n{2,}/g, "\n
                   setPreviousImageUrl(generatedImageUrl);
                   setPreviousSceneDescription(currentSceneDescription);
                   setCurrentSceneDescription(pendingSceneDescription);
-                  if (pendingChangeType === "redesign") {
-                    generateDesignImage(pendingSceneDescription, { editExisting: false });
-                  } else {
-                    generateDesignImage(pendingSceneDescription, { editExisting: true, editInstruction: pendingEditInstruction });
-                  }
+                  // Always generate from the full scene description (original + added instructions). No image edit — avoids muddling until we have in-region edits.
+                  generateDesignImage(pendingSceneDescription, { editExisting: false });
                 }}
                 disabled={!pendingSceneDescription.trim()}
-                className={`px-8 py-3 rounded-xl font-medium transition-colors flex-1 text-white ${
-                  pendingChangeType === "redesign"
-                    ? "bg-amber-600 hover:bg-amber-700"
-                    : "bg-indigo-600 hover:bg-indigo-700"
-                }`}
+                className="flex-1 btn-primary"
               >
-                {pendingChangeType === "redesign" ? "Generate new image" : "Looks good \u2014 edit image"}
+                Generate new image
               </button>
             </div>
           </div>
@@ -1706,16 +2039,16 @@ Tone preference: ${r.tone_preference || "Not specified"}`.replace(/\n{2,}/g, "\n
         {/* Step: Design preview & iterate */}
         {step === "design_preview" && generatedImageUrl && (
           <div>
-            <h2 className="text-xl font-bold text-gray-900 mb-2">
+            <h2 className="text-xl font-bold text-charcoal mb-2">
               Your card design
             </h2>
-            <p className="text-sm text-gray-500 mb-6">
-              {selectedDesign?.title} — refine it or move on to delivery.
+            <p className="text-sm text-warm-gray mb-6">
+              {selectedDesign?.title} — request a change or move on to delivery.
             </p>
 
             {/* Card front */}
-            <div className="bg-white border border-gray-200 rounded-xl p-4 mb-4">
-              <p className="text-xs text-gray-400 uppercase tracking-wide mb-3 text-center">
+            <div className="card-surface p-4 mb-4">
+              <p className="text-xs text-warm-gray uppercase tracking-wide mb-3 text-center">
                 Card front
               </p>
               <img
@@ -1727,18 +2060,18 @@ Tone preference: ${r.tone_preference || "Not specified"}`.replace(/\n{2,}/g, "\n
 
             {/* Card inside preview */}
             {editedMessage && (
-              <div className="bg-white border border-gray-200 rounded-xl p-4 mb-6">
-                <p className="text-xs text-gray-400 uppercase tracking-wide mb-3 text-center">
+              <div className="card-surface p-4 mb-6">
+                <p className="text-xs text-warm-gray uppercase tracking-wide mb-3 text-center">
                   Card inside
                 </p>
-                <div className="max-w-sm mx-auto bg-gradient-to-br from-indigo-50 to-purple-50 rounded-xl p-6 border border-indigo-100" style={FONT_STYLES[font]}>
-                  <p className="text-base font-medium text-gray-800 mb-2">
+                <div className="max-w-sm mx-auto rounded-xl p-6" style={{ background: "var(--color-brand-light)", border: "1px solid var(--color-sage-light)", ...fontCSS(insideFont as FontChoice) }}>
+                  <p className="text-base font-medium text-charcoal mb-2">
                     {editedMessage.greeting}
                   </p>
-                  <p className="text-sm text-gray-700 leading-relaxed mb-2 whitespace-pre-wrap">
+                  <p className="text-sm text-charcoal leading-relaxed mb-2 whitespace-pre-wrap">
                     {editedMessage.body}
                   </p>
-                  <p className="text-sm text-gray-600">
+                  <p className="text-sm text-warm-gray whitespace-pre-line">
                     {editedMessage.closing}
                   </p>
                 </div>
@@ -1746,29 +2079,26 @@ Tone preference: ${r.tone_preference || "Not specified"}`.replace(/\n{2,}/g, "\n
             )}
 
             {/* Refinement input */}
-            <div className="bg-white border border-gray-200 rounded-xl p-4 mb-6">
-              <p className="text-sm text-gray-700 mb-2">
-                Want to adjust the design?
+            <div className="card-surface p-4 mb-6">
+              <p className="text-sm text-charcoal mb-2">
+                Want to change something?
               </p>
-              <p className="text-xs text-gray-500 mb-2">
-                Just describe what to change — the app will build the full description for you to review before generating.
+              <p className="text-xs text-warm-gray mb-2">
+                Describe what to add or change. Nuuge will re-create the whole image with your edit — small tweaks (e.g. add an element, adjust a color) tend to work best; the rest of the scene may shift slightly.
               </p>
               <div className="flex gap-2">
                 <input
                   value={designFeedback}
                   onChange={(e) => setDesignFeedback(e.target.value)}
-                  placeholder="e.g. Remove the people, add two birds with musical notes..."
-                  className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm
-                             outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
+                  placeholder="e.g. Add a fire ring with smoke in the center, make the sky warmer..."
+                  className="input-field flex-1"
                 />
                 <button
                   onClick={() => requestRefinement(designFeedback)}
                   disabled={!designFeedback.trim() || merging}
-                  className="bg-white border border-indigo-200 text-indigo-600 px-4 py-2 rounded-lg text-sm
-                             font-medium hover:bg-indigo-50 transition-colors disabled:text-gray-300
-                             disabled:border-gray-200"
+                  className="btn-secondary text-sm disabled:opacity-50"
                 >
-                  {merging ? "Merging..." : "Refine"}
+                  {merging ? "Merging..." : "Request change"}
                 </button>
               </div>
               {previousImageUrl && (
@@ -1781,7 +2111,7 @@ Tone preference: ${r.tone_preference || "Not specified"}`.replace(/\n{2,}/g, "\n
                     setPreviousSceneDescription(null);
                     setDesignFeedback("");
                   }}
-                  className="mt-3 text-sm text-gray-500 hover:text-gray-800 underline"
+                  className="mt-3 text-sm text-warm-gray hover:text-charcoal underline"
                 >
                   ← Revert to previous image
                 </button>
@@ -1789,7 +2119,7 @@ Tone preference: ${r.tone_preference || "Not specified"}`.replace(/\n{2,}/g, "\n
             </div>
 
             {error && (
-              <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700 mb-4">
+              <div className="p-3 rounded-lg text-sm mb-4" style={{ background: "var(--color-error-light)", border: "1px solid var(--color-error)", color: "var(--color-error)" }}>
                 {error}
               </div>
             )}
@@ -1801,27 +2131,27 @@ Tone preference: ${r.tone_preference || "Not specified"}`.replace(/\n{2,}/g, "\n
                   setCurrentSceneDescription("");
                   setPreviousImageUrl(null);
                   setPreviousSceneDescription(null);
-                  setStep(designConcepts.length > 0 ? "design_pick" : "design_context");
+                  setStep("design_confirm_prompt");
                 }}
-                className="text-sm text-gray-400 hover:text-gray-600 px-4 py-2"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium transition-colors"
+                style={{ color: "var(--color-brand)", border: "1.5px solid var(--color-sage)" }}
               >
-                &larr; {designConcepts.length > 0 ? "Pick different design" : "Back to design builder"}
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+                {designConcepts.length > 0 ? "Pick different design" : "Back to design builder"}
               </button>
               {editMode && (
                 <button
                   onClick={() => {
                     handleSave({ deliveryMethodOverride: deliveryMethod });
                   }}
-                  className="bg-green-600 text-white px-6 py-3 rounded-xl font-medium
-                             hover:bg-green-700 transition-colors"
+                  className="btn-brand"
                 >
                   Save &amp; finish
                 </button>
               )}
               <button
                 onClick={() => setStep("inside_design_ask")}
-                className="bg-indigo-600 text-white px-8 py-3 rounded-xl font-medium
-                           hover:bg-indigo-700 transition-colors flex-1"
+                className="btn-primary"
               >
                 {editMode ? "Continue: Inside & front text" : "Next: Inside & front text"}
               </button>
@@ -1832,105 +2162,70 @@ Tone preference: ${r.tone_preference || "Not specified"}`.replace(/\n{2,}/g, "\n
         {/* Step: Inside design — add illustration? */}
         {step === "inside_design_ask" && (
           <div>
-            <h2 className="text-xl font-bold text-gray-900 mb-2">
+            <h2 className="text-xl font-bold text-charcoal mb-2">
               Add an inside illustration?
             </h2>
-            <p className="text-sm text-gray-500 mb-6">
-              Carry the front theme to the inside — a matching decorative element
-              that makes the card feel cohesive.
-            </p>
-            <div className="flex gap-3">
-              <button
-                onClick={() => setStep("inside_position_pick")}
-                className="bg-indigo-600 text-white px-8 py-3 rounded-xl font-medium hover:bg-indigo-700 transition-colors flex-1"
-              >
-                Yes, choose placement
-              </button>
-              <button
-                onClick={() => {
-                  if (editMode) {
-                    handleSave({ deliveryMethodOverride: deliveryMethod });
-                  } else {
-                    loadFrontTextSuggestion();
-                  }
-                }}
-                className="bg-white border border-gray-200 text-gray-700 px-8 py-3 rounded-xl font-medium hover:bg-gray-50 flex-1"
-              >
-                {editMode ? "No, save & finish" : "No, skip"}
-              </button>
-            </div>
-            <button
-              onClick={() => setStep("design_preview")}
-              className="text-sm text-gray-400 hover:text-gray-600 mt-4"
-            >
-              &larr; Back to design
-            </button>
-          </div>
-        )}
-
-        {/* Step: Pick inside image position */}
-        {step === "inside_position_pick" && (
-          <div>
-            <h2 className="text-xl font-bold text-gray-900 mb-1">
-              Where should the illustration go?
-            </h2>
-            <p className="text-sm text-gray-500 mb-6">
-              Choose placement and size. Your message text will flow around the illustration.
+            <p className="text-sm text-warm-gray mb-4">
+              Carry the front theme to the inside — a matching decorative element.
+              Pick a placement below, or skip this step.
             </p>
 
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-6">
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-4">
               {INSIDE_POSITIONS.map((pos) => (
                 <button
                   key={pos.id}
                   onClick={() => setInsideImagePosition(pos.id)}
                   className={`flex flex-col items-center justify-center p-4 rounded-xl border-2 transition-all
                     ${insideImagePosition === pos.id
-                      ? "border-indigo-500 bg-indigo-50 shadow-md"
-                      : "border-gray-200 bg-white hover:border-indigo-300 hover:shadow-sm"
+                      ? "border-brand bg-brand-light shadow-md"
+                      : "border-light-gray bg-white hover:border-sage hover:shadow-sm"
                     }`}
                 >
-                  {/* Visual diagram of position */}
-                  <div className="w-16 h-20 border border-gray-300 rounded bg-white relative mb-2 flex items-center justify-center overflow-hidden">
-                    {pos.id === "top" && <div className="absolute top-0 left-0 right-0 h-4 bg-indigo-200 rounded-t" />}
-                    {pos.id === "middle" && <div className="absolute left-0 right-0 h-4 bg-indigo-200" style={{ top: "40%" }} />}
-                    {pos.id === "bottom" && <div className="absolute bottom-0 left-0 right-0 h-4 bg-indigo-200 rounded-b" />}
-                    {pos.id === "left" && <div className="absolute top-0 bottom-0 left-0 w-4 bg-indigo-200 rounded-l" />}
-                    {pos.id === "right" && <div className="absolute top-0 bottom-0 right-0 w-4 bg-indigo-200 rounded-r" />}
-                    {pos.id === "behind" && <div className="absolute inset-2 bg-indigo-100 rounded opacity-40" />}
-                    {/* Text lines */}
+                  <div className="w-16 h-20 border border-light-gray rounded bg-white relative mb-2 flex items-center justify-center overflow-hidden">
+                    {pos.id === "top" && <div className="absolute top-0 left-0 right-0 h-4 bg-sage-light rounded-t" />}
+                    {pos.id === "middle" && <div className="absolute left-0 right-0 h-4 bg-sage-light" style={{ top: "40%" }} />}
+                    {pos.id === "bottom" && <div className="absolute bottom-0 left-0 right-0 h-4 bg-sage-light rounded-b" />}
+                    {pos.id === "left" && <div className="absolute top-0 bottom-0 left-0 w-4 bg-sage-light rounded-l" />}
+                    {pos.id === "right" && <div className="absolute top-0 bottom-0 right-0 w-4 bg-sage-light rounded-r" />}
+                    {pos.id === "behind" && <div className="absolute inset-2 bg-brand-light rounded opacity-40" />}
                     {pos.id !== "behind" && (
                       <div className="flex flex-col gap-0.5 px-1" style={{ fontSize: 3 }}>
                         {[1, 2, 3].map((l) => (
-                          <div key={l} className="h-0.5 bg-gray-300 rounded" style={{ width: pos.id === "left" || pos.id === "right" ? 8 : 12 }} />
+                          <div key={l} className="h-0.5 bg-light-gray rounded" style={{ width: pos.id === "left" || pos.id === "right" ? 8 : 12 }} />
                         ))}
                       </div>
                     )}
                   </div>
-                  <span className="text-sm font-semibold text-gray-900">{pos.label}</span>
-                  <span className="text-xs text-gray-400 mt-0.5 text-center">{pos.desc}</span>
+                  <span className="text-sm font-semibold text-charcoal">{pos.label}</span>
+                  <span className="text-xs text-warm-gray mt-0.5 text-center">{pos.desc}</span>
                 </button>
               ))}
             </div>
 
-            <div className="bg-gray-50 rounded-xl p-3 mb-4 text-sm text-gray-600">
-              {insideImagePosition === "top" || insideImagePosition === "middle" || insideImagePosition === "bottom"
-                ? `Horizontal banner — approximately ${cardSize === "4x6" ? "4\"" : "5\""} wide × 1" tall`
-                : insideImagePosition === "left" || insideImagePosition === "right"
-                  ? `Vertical strip — approximately 1" wide × ${cardSize === "4x6" ? "6\"" : "7\""} tall`
-                  : "Faded watermark behind the message text"
-              }
-            </div>
+            {insideImagePosition && (
+              <div className="bg-faint-gray rounded-xl p-3 mb-4 text-sm text-warm-gray">
+                {insideImagePosition === "top" || insideImagePosition === "middle" || insideImagePosition === "bottom"
+                  ? `Horizontal banner — approximately ${cardSize === "4x6" ? "4\"" : "5\""} wide × 1" tall`
+                  : insideImagePosition === "left" || insideImagePosition === "right"
+                    ? `Vertical strip — approximately 1" wide × ${cardSize === "4x6" ? "6\"" : "7\""} tall`
+                    : "Faded watermark behind the message text"
+                }
+              </div>
+            )}
 
-            <div className="flex gap-3 mt-4">
+            <div className="flex items-center gap-3 mt-4">
               <button
-                onClick={() => setStep("inside_design_ask")}
-                className="text-sm text-gray-400 hover:text-gray-600 px-4 py-2"
+                onClick={() => setStep("design_preview")}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium transition-colors"
+                style={{ color: "var(--color-brand)", border: "1.5px solid var(--color-sage)" }}
               >
-                &larr; Back
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+                Back
               </button>
               <button
                 onClick={async () => {
-                  setStep("inside_design_loading");
+                  setIsLoading(true);
+                  setLoadingMessage("Suggesting inside illustrations...");
                   if (!selectedDesign) return;
                   const orientation = insideImageOrientation();
                   try {
@@ -1941,7 +2236,7 @@ Tone preference: ${r.tone_preference || "Not specified"}`.replace(/\n{2,}/g, "\n
                         frontTitle: selectedDesign.title,
                         frontDescription: selectedDesign.description,
                         frontImagePrompt: selectedDesign.image_prompt,
-                        occasion,
+                        occasion: effectiveOccasion,
                         tone,
                         position: insideImagePosition,
                         orientation,
@@ -1951,41 +2246,47 @@ Tone preference: ${r.tone_preference || "Not specified"}`.replace(/\n{2,}/g, "\n
                     if (!res.ok) throw new Error("Failed to load");
                     const data = await res.json();
                     setInsideConcepts(data.designs ?? []);
+                    setIsLoading(false);
                     setStep("inside_design_pick");
+                    logApiCall("suggest-inside-designs", { model: "gpt-4o", callType: "chat_completion", recipientId, cardId: editCardId || undefined });
+                    setSessionCost((c) => c + 0.025);
                   } catch {
-                    loadFrontTextSuggestion();
+                    setIsLoading(false);
+                    loadFrontTextSuggestions();
                   }
                 }}
-                className="bg-indigo-600 text-white px-8 py-3 rounded-xl font-medium hover:bg-indigo-700 transition-colors flex-1"
+                disabled={!insideImagePosition}
+                className="btn-primary disabled:opacity-40"
               >
                 Suggest illustrations
+              </button>
+              <button
+                onClick={() => {
+                  if (editMode) {
+                    handleSave({ deliveryMethodOverride: deliveryMethod });
+                  } else {
+                    loadFrontTextSuggestions();
+                  }
+                }}
+                className="btn-secondary"
+              >
+                {editMode ? "Save & finish" : "Skip"}
               </button>
             </div>
           </div>
         )}
 
-        {/* Step: Inside design loading */}
-        {step === "inside_design_loading" && (
-          <div className="text-center py-20">
-            <div className="flex justify-center gap-1 mb-4">
-              <span className="w-2.5 h-2.5 bg-indigo-400 rounded-full animate-bounce" />
-              <span className="w-2.5 h-2.5 bg-indigo-400 rounded-full animate-bounce [animation-delay:0.1s]" />
-              <span className="w-2.5 h-2.5 bg-indigo-400 rounded-full animate-bounce [animation-delay:0.2s]" />
-            </div>
-            <p className="text-gray-500">Suggesting inside illustrations that match your front design...</p>
-          </div>
-        )}
 
         {/* Step: Inside design pick */}
         {step === "inside_design_pick" && insideConcepts.length > 0 && (
           <div>
-            <h2 className="text-xl font-bold text-gray-900 mb-2">
+            <h2 className="text-xl font-bold text-charcoal mb-2">
               Choose an inside decoration
             </h2>
-            <p className="text-sm text-gray-500 mb-2">
-              Each option uses elements from your front cover. You can refine after.
+            <p className="text-sm text-warm-gray mb-2">
+              Each option uses elements from your front cover. You can request changes after (the image will be re-created with your edit).
             </p>
-            <p className="text-xs text-gray-400 mb-4">
+            <p className="text-xs text-warm-gray mb-4">
               Position: <strong>{INSIDE_POSITIONS.find((p) => p.id === insideImagePosition)?.label}</strong>
             </p>
             <div className="space-y-4">
@@ -2008,14 +2309,14 @@ Tone preference: ${r.tone_preference || "Not specified"}`.replace(/\n{2,}/g, "\n
                     setInsideSceneDescription(concept.image_prompt);
                     generateDesignImage(concept.image_prompt, { isInside: true });
                   }}
-                  className="w-full bg-white border border-gray-200 rounded-xl p-4 text-left hover:border-indigo-400 transition-colors"
+                  className="w-full card-surface card-surface-clickable p-4 text-left"
                 >
                   <div className="flex gap-4 items-start">
                     {/* Decoration strip preview — shows a unique crop of the front image */}
                     {generatedImageUrl && (
                       <div className="flex-shrink-0 flex flex-col items-center gap-1.5">
                         <div
-                          className="rounded-lg overflow-hidden border border-gray-200 shadow-sm"
+                          className="rounded-lg overflow-hidden border border-light-gray shadow-sm"
                           style={{ width: stripWidth, height: stripHeight }}
                         >
                           {insideImagePosition === "behind" ? (
@@ -2039,7 +2340,7 @@ Tone preference: ${r.tone_preference || "Not specified"}`.replace(/\n{2,}/g, "\n
                             />
                           )}
                         </div>
-                        <span className="text-[10px] text-gray-400">
+                        <span className="text-[10px] text-warm-gray">
                           {INSIDE_POSITIONS.find((p) => p.id === insideImagePosition)?.label} preview
                         </span>
                       </div>
@@ -2047,8 +2348,8 @@ Tone preference: ${r.tone_preference || "Not specified"}`.replace(/\n{2,}/g, "\n
 
                     {/* Text description */}
                     <div className="flex-1 min-w-0 py-1">
-                      <span className="text-sm font-semibold text-gray-900">{concept.title}</span>
-                      <p className="text-sm text-gray-600 mt-1">{concept.description}</p>
+                      <span className="text-sm font-semibold text-charcoal">{concept.title}</span>
+                      <p className="text-sm text-warm-gray mt-1">{concept.description}</p>
                     </div>
                   </div>
                 </button>
@@ -2057,14 +2358,16 @@ Tone preference: ${r.tone_preference || "Not specified"}`.replace(/\n{2,}/g, "\n
             </div>
             <div className="flex gap-3 mt-4">
               <button
-                onClick={() => setStep("inside_position_pick")}
-                className="text-sm text-gray-400 hover:text-gray-600"
+                onClick={() => setStep("inside_design_ask")}
+                className="text-sm px-4 py-2 rounded-full text-warm-gray hover:text-charcoal"
+                style={{ border: "1.5px solid var(--color-sage)" }}
               >
                 &larr; Change position
               </button>
               <button
-                onClick={() => loadFrontTextSuggestion()}
-                className="text-sm text-gray-400 hover:text-gray-600 ml-auto"
+                onClick={() => loadFrontTextSuggestions()}
+                className="text-sm px-4 py-2 rounded-full text-warm-gray hover:text-charcoal ml-auto"
+                style={{ border: "1.5px solid var(--color-sage)" }}
               >
                 Skip inside illustration
               </button>
@@ -2072,68 +2375,45 @@ Tone preference: ${r.tone_preference || "Not specified"}`.replace(/\n{2,}/g, "\n
           </div>
         )}
 
-        {/* Step: Inside design generating */}
-        {step === "inside_design_generating" && (
-          <div className="text-center py-20">
-            <div className="flex justify-center gap-1 mb-4">
-              <span className="w-2.5 h-2.5 bg-purple-400 rounded-full animate-bounce" />
-              <span className="w-2.5 h-2.5 bg-purple-400 rounded-full animate-bounce [animation-delay:0.1s]" />
-              <span className="w-2.5 h-2.5 bg-purple-400 rounded-full animate-bounce [animation-delay:0.2s]" />
-            </div>
-            <p className="text-gray-500">Creating inside illustration...</p>
-          </div>
-        )}
 
         {/* Step: Confirm inside refinement */}
         {step === "inside_confirm_refinement" && (
           <div>
-            <h2 className="text-xl font-bold text-gray-900 mb-2">
-              {pendingChangeType === "redesign" ? "New illustration will be generated" : "Confirm the updated illustration"}
+            <h2 className="text-xl font-bold text-charcoal mb-2">
+              Generate from updated description
             </h2>
-            <p className="text-sm text-gray-500 mb-4">
-              {pendingChangeType === "redesign"
-                ? "Your change requires a completely new illustration. The current one will be replaced (you can revert after)."
-                : "We merged your change. Edit if anything looks off, then generate."}
+            <p className="text-sm text-warm-gray mb-4">
+              Your addition is merged into the scene below. We&apos;ll generate a new illustration from this full description. You can revert if you prefer the previous version.
             </p>
 
-            {pendingChangeType === "redesign" && (
-              <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-lg">
-                <p className="text-sm text-amber-800">
-                  This is a major change. A fresh illustration will be generated from scratch.
-                </p>
-              </div>
-            )}
-
             {pendingChangeType === "refine" && pendingEditInstruction && (
-              <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-4 mb-4">
-                <label className="text-xs text-indigo-600 uppercase tracking-wide mb-2 block font-medium">
+              <div className="rounded-xl p-4 mb-4" style={{ background: "var(--color-brand-light)", border: "1px solid var(--color-sage)" }}>
+                <label className="text-xs text-brand uppercase tracking-wide mb-2 block font-medium">
                   What will change
                 </label>
                 <textarea
                   value={pendingEditInstruction}
                   onChange={(e) => setPendingEditInstruction(e.target.value)}
                   rows={2}
-                  className="w-full border border-indigo-300 rounded-lg px-3 py-2 text-sm
-                             outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 resize-y"
+                  className="input-field resize-y" style={{ borderColor: "var(--color-brand)" }}
                 />
               </div>
             )}
 
-            <div className="bg-white border border-gray-200 rounded-xl p-4 mb-6">
-              <label className="text-xs text-gray-500 uppercase tracking-wide mb-2 block">
+            <div className="card-surface p-4 mb-6">
+              <label className="text-xs text-warm-gray uppercase tracking-wide mb-2 block">
                 Full scene description
               </label>
               <textarea
                 value={pendingInsideScene}
                 onChange={(e) => setPendingInsideScene(e.target.value)}
                 rows={4}
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm
-                           outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 resize-y"
+                className="input-field resize-y"
               />
             </div>
 
             {error && (
-              <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700 mb-4">
+              <div className="p-3 rounded-lg text-sm mb-4" style={{ background: "var(--color-error-light)", border: "1px solid var(--color-error)", color: "var(--color-error)" }}>
                 {error}
               </div>
             )}
@@ -2144,7 +2424,7 @@ Tone preference: ${r.tone_preference || "Not specified"}`.replace(/\n{2,}/g, "\n
                   setPendingInsideScene("");
                   setStep("inside_design_preview");
                 }}
-                className="text-sm text-gray-400 hover:text-gray-600 px-4 py-2"
+                className="text-sm text-warm-gray hover:text-charcoal px-4 py-2"
               >
                 &larr; Cancel
               </button>
@@ -2152,20 +2432,13 @@ Tone preference: ${r.tone_preference || "Not specified"}`.replace(/\n{2,}/g, "\n
                 onClick={() => {
                   setPreviousInsideImageUrl(insideImageUrl);
                   setInsideSceneDescription(pendingInsideScene);
-                  if (pendingChangeType === "redesign") {
-                    generateDesignImage(pendingInsideScene, { isInside: true, editExisting: false });
-                  } else {
-                    generateDesignImage(pendingInsideScene, { isInside: true, editExisting: true, editInstruction: pendingEditInstruction });
-                  }
+                  // Always generate from the full scene description (original + added instructions). No image edit.
+                  generateDesignImage(pendingInsideScene, { isInside: true, editExisting: false });
                 }}
                 disabled={!pendingInsideScene.trim()}
-                className={`px-8 py-3 rounded-xl font-medium transition-colors flex-1 text-white ${
-                  pendingChangeType === "redesign"
-                    ? "bg-amber-600 hover:bg-amber-700"
-                    : "bg-indigo-600 hover:bg-indigo-700"
-                }`}
+                className="flex-1 btn-primary"
               >
-                {pendingChangeType === "redesign" ? "Generate new illustration" : "Looks good \u2014 edit image"}
+                Generate new illustration
               </button>
             </div>
           </div>
@@ -2174,15 +2447,15 @@ Tone preference: ${r.tone_preference || "Not specified"}`.replace(/\n{2,}/g, "\n
         {/* Step: Inside design preview & refine */}
         {step === "inside_design_preview" && insideImageUrl && (
           <div>
-            <h2 className="text-xl font-bold text-gray-900 mb-2">
+            <h2 className="text-xl font-bold text-charcoal mb-2">
               Inside illustration
             </h2>
-            <p className="text-xs text-gray-400 mb-4">
+            <p className="text-sm text-warm-gray mb-4">
               Position: <strong>{INSIDE_POSITIONS.find((p) => p.id === insideImagePosition)?.label}</strong>
             </p>
 
-            <div className="bg-white border border-gray-200 rounded-xl p-4 mb-4">
-              <p className="text-xs text-gray-400 uppercase tracking-wide mb-3 text-center">
+            <div className="card-surface p-4 mb-4">
+              <p className="text-sm text-warm-gray uppercase tracking-wide mb-3 text-center">
                 Preview
               </p>
               <div className="flex justify-center">
@@ -2201,29 +2474,26 @@ Tone preference: ${r.tone_preference || "Not specified"}`.replace(/\n{2,}/g, "\n
             </div>
 
             {/* Refinement input */}
-            <div className="bg-white border border-gray-200 rounded-xl p-4 mb-6">
-              <p className="text-sm text-gray-700 mb-2">
-                Want to adjust the illustration?
+            <div className="card-surface p-4 mb-6">
+              <p className="text-base text-charcoal mb-2">
+                Want to change something?
               </p>
-              <p className="text-xs text-gray-500 mb-2">
-                Describe what to change — the app will build the full description for you.
+              <p className="text-sm text-warm-gray mb-2">
+                Describe what to add or change. The illustration will be re-created with your edit — small tweaks work best; the rest may shift slightly.
               </p>
               <div className="flex gap-2">
                 <input
                   value={insideDesignFeedback}
                   onChange={(e) => setInsideDesignFeedback(e.target.value)}
-                  placeholder="e.g. Make the flowers warmer colors, add a small butterfly..."
-                  className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm
-                             outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
+                  placeholder="e.g. Warmer flower colors, add a small butterfly..."
+                  className="input-field flex-1"
                 />
                 <button
                   onClick={() => requestInsideRefinement(insideDesignFeedback)}
                   disabled={!insideDesignFeedback.trim() || insideMerging}
-                  className="bg-white border border-indigo-200 text-indigo-600 px-4 py-2 rounded-lg text-sm
-                             font-medium hover:bg-indigo-50 transition-colors disabled:text-gray-300
-                             disabled:border-gray-200"
+                  className="btn-secondary text-sm disabled:opacity-50"
                 >
-                  {insideMerging ? "Merging..." : "Refine"}
+                  {insideMerging ? "Merging..." : "Request change"}
                 </button>
               </div>
               {previousInsideImageUrl && (
@@ -2234,7 +2504,7 @@ Tone preference: ${r.tone_preference || "Not specified"}`.replace(/\n{2,}/g, "\n
                     setPreviousInsideImageUrl(null);
                     setInsideDesignFeedback("");
                   }}
-                  className="mt-3 text-sm text-gray-500 hover:text-gray-800 underline"
+                  className="mt-3 text-sm text-warm-gray hover:text-charcoal underline"
                 >
                   &larr; Revert to previous image
                 </button>
@@ -2242,7 +2512,7 @@ Tone preference: ${r.tone_preference || "Not specified"}`.replace(/\n{2,}/g, "\n
             </div>
 
             {error && (
-              <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700 mb-4">
+              <div className="p-3 rounded-lg text-sm mb-4" style={{ background: "var(--color-error-light)", border: "1px solid var(--color-error)", color: "var(--color-error)" }}>
                 {error}
               </div>
             )}
@@ -2250,7 +2520,8 @@ Tone preference: ${r.tone_preference || "Not specified"}`.replace(/\n{2,}/g, "\n
             <div className="flex gap-3">
               <button
                 onClick={() => setStep("inside_design_pick")}
-                className="text-sm text-gray-400 hover:text-gray-600 px-4 py-2"
+                className="text-sm text-warm-gray hover:text-charcoal px-4 py-2 rounded-full"
+                style={{ border: "1.5px solid var(--color-sage)" }}
               >
                 &larr; Pick different
               </button>
@@ -2259,18 +2530,16 @@ Tone preference: ${r.tone_preference || "Not specified"}`.replace(/\n{2,}/g, "\n
                   onClick={() => {
                     handleSave({ deliveryMethodOverride: deliveryMethod });
                   }}
-                  className="bg-green-600 text-white px-6 py-3 rounded-xl font-medium
-                             hover:bg-green-700 transition-colors"
+                  className="btn-brand"
                 >
                   Save &amp; finish
                 </button>
               )}
               <button
                 onClick={() => {
-                  setStep("front_text_loading");
-                  loadFrontTextSuggestion();
+                  loadFrontTextSuggestions();
                 }}
-                className="bg-indigo-600 text-white px-8 py-3 rounded-xl font-medium hover:bg-indigo-700 transition-colors flex-1"
+                className="btn-primary"
               >
                 {editMode ? "Continue: Front text" : "Next: Front text"}
               </button>
@@ -2278,44 +2547,70 @@ Tone preference: ${r.tone_preference || "Not specified"}`.replace(/\n{2,}/g, "\n
           </div>
         )}
 
-        {/* Step: Front text loading */}
-        {step === "front_text_loading" && (
-          <div className="text-center py-20">
-            <div className="flex justify-center gap-1 mb-4">
-              <span className="w-2.5 h-2.5 bg-indigo-400 rounded-full animate-bounce" />
-              <span className="w-2.5 h-2.5 bg-indigo-400 rounded-full animate-bounce [animation-delay:0.1s]" />
-              <span className="w-2.5 h-2.5 bg-indigo-400 rounded-full animate-bounce [animation-delay:0.2s]" />
-            </div>
-            <p className="text-gray-500">Suggesting front text...</p>
-          </div>
-        )}
 
         {/* Step: Front text — suggestion to add wording on front */}
         {step === "front_text" && (
           <div>
-            <h2 className="text-xl font-bold text-gray-900 mb-2">
+            <h2 className="text-xl font-bold text-charcoal mb-2">
               Front text &amp; font style
             </h2>
-            <p className="text-sm text-gray-500 mb-6">
-              Add words on the front (optional) and choose a font for the card.
+            <p className="text-sm text-warm-gray mb-6">
+              Pick a suggestion, edit your own, or skip. Choose a font for the card.
             </p>
-            <div className="bg-white border border-gray-200 rounded-xl p-4 mb-4">
-              <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">
+
+            {/* Suggestion cards */}
+            {frontTextSuggestions.length > 0 && (
+              <div className="mb-4">
+                <label className="block text-xs font-medium text-warm-gray uppercase tracking-wide mb-2">
+                  Suggestions
+                </label>
+                <div className="grid gap-2">
+                  {frontTextSuggestions.map((s, idx) => (
+                    <button
+                      key={idx}
+                      onClick={() => {
+                        setFrontText(s.wording);
+                        setFrontTextPosition(s.position);
+                      }}
+                      className={`text-left rounded-lg border p-3 transition-colors ${
+                        frontText === s.wording
+                          ? "border-brand bg-brand-light"
+                          : "border-light-gray hover:border-warm-gray"
+                      }`}
+                    >
+                      <span className="text-base font-medium text-charcoal">&ldquo;{s.wording}&rdquo;</span>
+                      <span className="block text-xs text-warm-gray mt-0.5">{s.position.replace("-", " ")}</span>
+                    </button>
+                  ))}
+                </div>
+                <button
+                  onClick={() => loadFrontTextSuggestions()}
+                  className="mt-2 text-sm text-brand hover:underline"
+                >
+                  Suggest new options
+                </button>
+              </div>
+            )}
+
+            <div className="card-surface p-4 mb-4">
+              <label className="block text-xs font-medium text-warm-gray uppercase tracking-wide mb-2">
                 Wording
               </label>
-              <input
+              <p className="text-xs text-warm-gray mb-1">Edit or type your own. Use Enter for line breaks.</p>
+              <textarea
                 value={frontText}
                 onChange={(e) => setFrontText(e.target.value)}
                 placeholder="e.g. Happy Birthday!"
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none focus:border-indigo-500"
+                rows={3}
+                className="input-field resize-y"
               />
-              <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mt-3 mb-2">
+              <label className="block text-xs font-medium text-warm-gray uppercase tracking-wide mt-3 mb-2">
                 Position
               </label>
               <select
                 value={frontTextPosition}
                 onChange={(e) => setFrontTextPosition(e.target.value)}
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none focus:border-indigo-500"
+                className="input-field"
               >
                 <option value="center">Center</option>
                 <option value="bottom-right">Bottom right</option>
@@ -2325,13 +2620,14 @@ Tone preference: ${r.tone_preference || "Not specified"}`.replace(/\n{2,}/g, "\n
                 <option value="top-right">Top right</option>
                 <option value="bottom-left">Bottom left</option>
               </select>
-              <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mt-3 mb-2">
+              <label className="block text-xs font-medium text-warm-gray uppercase tracking-wide mt-3 mb-2">
                 Text style
               </label>
               <div className="flex gap-2">
                 {([
-                  { value: "plain" as const, label: "Plain black" },
-                  { value: "white_box" as const, label: "Black on white" },
+                  { value: "white_box" as const, label: "Plain black" },
+                  { value: "plain" as const, label: "Black on white" },
+                  { value: "plain_white" as const, label: "Plain white" },
                   { value: "dark_box" as const, label: "White on dark" },
                 ]).map((opt) => (
                   <button
@@ -2339,8 +2635,8 @@ Tone preference: ${r.tone_preference || "Not specified"}`.replace(/\n{2,}/g, "\n
                     onClick={() => setFrontTextStyle(opt.value)}
                     className={`flex-1 py-2 px-3 rounded-lg text-sm font-medium border transition-colors ${
                       frontTextStyle === opt.value
-                        ? "border-indigo-500 bg-indigo-50 text-indigo-700"
-                        : "border-gray-200 text-gray-600 hover:border-gray-300"
+                        ? "border-brand bg-brand-light text-brand"
+                        : "border-light-gray text-warm-gray hover:border-light-gray"
                     }`}
                   >
                     {opt.label}
@@ -2349,26 +2645,29 @@ Tone preference: ${r.tone_preference || "Not specified"}`.replace(/\n{2,}/g, "\n
               </div>
               {/* Text style preview */}
               {frontText.trim() && (
-                <div className="mt-3 rounded-lg overflow-hidden" style={{ background: "linear-gradient(135deg, #6366f1 0%, #a855f7 100%)", padding: "1.5rem", position: "relative" }}>
+                <div className="mt-3 rounded-lg overflow-hidden" style={{ background: "linear-gradient(135deg, var(--color-brand) 0%, var(--color-sage) 100%)", padding: "1.5rem", position: "relative" }}>
                   <div style={{
-                    ...FONT_STYLES[font],
+                    ...fontCSS(font as FontChoice),
                     fontSize: "1.1rem",
                     display: "inline-block",
                     ...(frontTextStyle === "dark_box" ? {
                       color: "#fff",
-                      backgroundColor: "rgba(0,0,0,0.3)",
+                      backgroundColor: "rgba(0,0,0,0.45)",
                       borderRadius: "0.375rem",
                       padding: "0.4rem 0.75rem",
-                      textShadow: "0 2px 8px rgba(0,0,0,0.6)",
-                    } : frontTextStyle === "white_box" ? {
+                    } : frontTextStyle === "plain" ? {
                       color: "#111",
                       backgroundColor: "rgba(255,255,255,0.7)",
                       borderRadius: "0.375rem",
                       padding: "0.4rem 0.75rem",
+                    } : frontTextStyle === "plain_white" ? {
+                      color: "#fff",
+                      textShadow: "0 1px 4px rgba(0,0,0,0.7)",
                     } : {
                       color: "#111",
                       textShadow: "0 1px 3px rgba(255,255,255,0.5)",
                     }),
+                    whiteSpace: "pre-line",
                   }}>
                     {frontText}
                   </div>
@@ -2376,29 +2675,50 @@ Tone preference: ${r.tone_preference || "Not specified"}`.replace(/\n{2,}/g, "\n
               )}
             </div>
 
-            {/* Font selection */}
-            <div className="bg-white border border-gray-200 rounded-xl p-4 mb-4">
-              <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-3">
-                Font style (front text &amp; inside message)
+            {/* Font selection — front cover */}
+            <div className="card-surface p-4 mb-4">
+              <label className="block text-xs font-medium text-warm-gray uppercase tracking-wide mb-3">
+                Front cover font
               </label>
-              <div className="space-y-2">
-                {([
-                  { value: "sans" as const, label: "Clean", sample: "Happy Birthday, Sarah!" },
-                  { value: "script" as const, label: "Elegant", sample: "Happy Birthday, Sarah!" },
-                  { value: "block" as const, label: "Bold", sample: "Happy Birthday, Sarah!" },
-                ]).map((opt) => (
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                {CARD_FONT_OPTIONS.map((opt) => (
                   <button
-                    key={opt.value}
-                    onClick={() => setFont(opt.value)}
-                    className={`w-full text-left rounded-lg border p-3 transition-colors ${
-                      font === opt.value
-                        ? "border-indigo-500 bg-indigo-50"
-                        : "border-gray-200 hover:border-gray-300"
+                    key={opt.id}
+                    onClick={() => setFont(opt.id)}
+                    className={`text-left rounded-lg border p-3 transition-colors ${
+                      font === opt.id
+                        ? "border-brand bg-brand-light"
+                        : "border-light-gray hover:border-light-gray"
                     }`}
                   >
-                    <span className="text-xs font-medium text-gray-500 uppercase">{opt.label}</span>
-                    <p className="text-lg text-gray-800 mt-1" style={FONT_STYLES[opt.value]}>
-                      {opt.sample}
+                    <span className="text-[0.65rem] font-medium text-warm-gray uppercase">{opt.label}</span>
+                    <p className="text-base text-charcoal mt-1" style={fontCSS(opt.id)}>
+                      {frontText || "Happy Birthday!"}
+                    </p>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Font selection — inside message */}
+            <div className="card-surface p-4 mb-4">
+              <label className="block text-xs font-medium text-warm-gray uppercase tracking-wide mb-3">
+                Inside message font
+              </label>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                {CARD_FONT_OPTIONS.map((opt) => (
+                  <button
+                    key={opt.id}
+                    onClick={() => setInsideFont(opt.id)}
+                    className={`text-left rounded-lg border p-3 transition-colors ${
+                      insideFont === opt.id
+                        ? "border-brand bg-brand-light"
+                        : "border-light-gray hover:border-light-gray"
+                    }`}
+                  >
+                    <span className="text-[0.65rem] font-medium text-warm-gray uppercase">{opt.label}</span>
+                    <p className="text-sm text-charcoal mt-1 leading-snug" style={fontCSS(opt.id)}>
+                      Wishing you all the best
                     </p>
                   </button>
                 ))}
@@ -2411,10 +2731,11 @@ Tone preference: ${r.tone_preference || "Not specified"}`.replace(/\n{2,}/g, "\n
                   if (editMode) {
                     handleSave({ deliveryMethodOverride: deliveryMethod });
                   } else {
-                    setStep("delivery");
+                    setStep("letter");
                   }
                 }}
-                className="text-sm text-gray-400 hover:text-gray-600 px-4 py-2"
+                className="text-sm text-warm-gray hover:text-charcoal px-4 py-2 rounded-full"
+                style={{ border: "1.5px solid var(--color-sage)" }}
               >
                 Skip
               </button>
@@ -2423,18 +2744,118 @@ Tone preference: ${r.tone_preference || "Not specified"}`.replace(/\n{2,}/g, "\n
                   onClick={() => {
                     handleSave({ deliveryMethodOverride: deliveryMethod });
                   }}
-                  className="bg-green-600 text-white px-8 py-3 rounded-xl font-medium hover:bg-green-700 transition-colors flex-1"
+                  className="btn-brand flex-1"
                 >
                   Save &amp; finish
                 </button>
               ) : (
                 <button
-                  onClick={() => setStep("delivery")}
-                  className="bg-indigo-600 text-white px-8 py-3 rounded-xl font-medium hover:bg-indigo-700 transition-colors flex-1"
+                  onClick={() => setStep("letter")}
+                  className="btn-primary"
                 >
-                  Next: Choose delivery
+                  Next
                 </button>
               )}
+            </div>
+          </div>
+        )}
+
+        {/* Step: Letter insert */}
+        {step === "letter" && (
+          <div>
+            <h2 className="text-xl font-bold text-charcoal mb-2">
+              Include a personal letter?
+            </h2>
+            <p className="text-sm text-warm-gray mb-6">
+              A handwritten-style note tucked inside the card — more personal than the printed message.
+              You can also add or edit this later.
+            </p>
+
+            {letterText.trim() ? (
+              <div className="card-surface p-5 mb-4">
+                <div className="space-y-3">
+                  <div>
+                    <label className="block text-xs font-medium text-warm-gray uppercase tracking-wide mb-2">
+                      Your letter
+                    </label>
+                    <p className="text-xs text-warm-gray mb-1">
+                      Use blank lines to separate greeting, body, and closing — just like writing a real letter.
+                    </p>
+                    <textarea
+                      value={letterText}
+                      onChange={(e) => setLetterText(e.target.value)}
+                      rows={8}
+                      placeholder={"Dear " + (recipient?.first_name || recipient?.name || "friend") + ",\n\nI wanted to write you a personal note...\n\nWith love,\n" + (profile?.first_name || "Me")}
+                      style={fontCSS(letterFont)}
+                      className="w-full input-field rounded-lg px-3 py-2 text-sm resize-y"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-warm-gray mb-1">Font</label>
+                    <select
+                      value={letterFont}
+                      onChange={(e) => setLetterFont(e.target.value)}
+                      className="input-field rounded-lg px-2 py-1.5 text-sm"
+                      style={{ maxWidth: 200 }}
+                    >
+                      {CARD_FONT_OPTIONS.map((f) => (
+                        <option key={f.id} value={f.id}>{f.label}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="card-surface p-5 mb-4">
+                <textarea
+                  value={letterText}
+                  onChange={(e) => setLetterText(e.target.value)}
+                  rows={8}
+                  placeholder={"Dear " + (recipient?.first_name || recipient?.name || "friend") + ",\n\nI wanted to write you a personal note...\n\nWith love,\n" + (profile?.first_name || "Me")}
+                  style={fontCSS(letterFont)}
+                  className="w-full input-field rounded-lg px-3 py-2 text-sm resize-y"
+                />
+                <div className="mt-2">
+                  <label className="block text-xs text-warm-gray mb-1">Font</label>
+                  <select
+                    value={letterFont}
+                    onChange={(e) => setLetterFont(e.target.value)}
+                    className="input-field rounded-lg px-2 py-1.5 text-sm"
+                    style={{ maxWidth: 200 }}
+                  >
+                    {CARD_FONT_OPTIONS.map((f) => (
+                      <option key={f.id} value={f.id}>{f.label}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            )}
+
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() => setStep("front_text")}
+                className="flex items-center gap-1.5 px-4 py-2 rounded-full text-sm text-warm-gray hover:text-charcoal transition-colors"
+                style={{ border: "1.5px solid var(--color-sage)" }}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+                Back to front text
+              </button>
+              <button
+                onClick={() => {
+                  setLetterText("");
+                  setStep("delivery");
+                }}
+                className="text-sm text-warm-gray hover:text-charcoal px-4 py-2 rounded-full"
+                style={{ border: "1.5px solid var(--color-sage)" }}
+              >
+                Skip
+              </button>
+              <button
+                onClick={() => setStep("delivery")}
+                className="btn-primary ml-auto"
+              >
+                {letterText.trim() ? "Next: Choose delivery" : "Next"}
+              </button>
             </div>
           </div>
         )}
@@ -2442,55 +2863,54 @@ Tone preference: ${r.tone_preference || "Not specified"}`.replace(/\n{2,}/g, "\n
         {/* Step: Delivery */}
         {step === "delivery" && (
           <div>
-            <h2 className="text-xl font-bold text-gray-900 mb-2">
+            <h2 className="text-xl font-bold text-charcoal mb-2">
               How should this card be delivered?
             </h2>
-            <p className="text-sm text-gray-500 mb-6">
-              {occasion} card for {recipient.name}
+            <p className="text-sm text-warm-gray mb-6">
+              {effectiveOccasion} card for {recipient.name}
             </p>
             <div className="space-y-3">
               <button
                 onClick={() => handleSave({ deliveryMethodOverride: "digital" })}
-                className="w-full bg-white border border-gray-200 rounded-xl p-5 text-left
-                           hover:border-indigo-400 transition-colors"
+                className="w-full card-surface card-surface-clickable p-5 text-left"
               >
-                <span className="text-sm font-semibold text-gray-900">
+                <span className="text-sm font-semibold text-charcoal">
                   Send digitally
                 </span>
-                <p className="text-sm text-gray-500 mt-1">
+                <p className="text-sm text-warm-gray mt-1">
                   Delivered via a link with an animated envelope opening experience
                 </p>
               </button>
               <button
                 onClick={() => handleSave({ deliveryMethodOverride: "print_at_home" })}
-                className="w-full bg-white border border-gray-200 rounded-xl p-5 text-left
-                           hover:border-indigo-400 transition-colors"
+                className="w-full card-surface card-surface-clickable p-5 text-left"
               >
-                <span className="text-sm font-semibold text-gray-900">
+                <span className="text-sm font-semibold text-charcoal">
                   Print at home
                 </span>
-                <p className="text-sm text-gray-500 mt-1">
+                <p className="text-sm text-warm-gray mt-1">
                   Download a print-ready PDF to fold and give in person
                 </p>
               </button>
               <button
                 onClick={() => handleSave({ deliveryMethodOverride: "mail" })}
-                className="w-full bg-white border border-gray-200 rounded-xl p-5 text-left
-                           hover:border-indigo-400 transition-colors"
+                className="w-full card-surface card-surface-clickable p-5 text-left"
               >
-                <span className="text-sm font-semibold text-gray-900">
+                <span className="text-sm font-semibold text-charcoal">
                   Mail it
                 </span>
-                <p className="text-sm text-gray-500 mt-1">
+                <p className="text-sm text-warm-gray mt-1">
                   Nuuge prints and mails a physical card (requires recipient address)
                 </p>
               </button>
             </div>
             <button
-              onClick={() => setStep("front_text")}
-              className="text-sm text-gray-400 hover:text-gray-600 mt-4"
+              onClick={() => setStep("letter")}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium transition-colors mt-4"
+              style={{ color: "var(--color-brand)", border: "1.5px solid var(--color-sage)" }}
             >
-              &larr; Back to front text
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+              Back
             </button>
           </div>
         )}
@@ -2499,11 +2919,11 @@ Tone preference: ${r.tone_preference || "Not specified"}`.replace(/\n{2,}/g, "\n
         {step === "saved" && (
           <div className="text-center py-16">
             <div className="text-5xl mb-4">&#127881;</div>
-            <h2 className="text-2xl font-bold text-gray-900 mb-3">
+            <h2 className="text-2xl font-bold text-charcoal mb-3">
               Card {editMode ? "updated" : "saved"}!
             </h2>
-            <p className="text-gray-500 mb-8">
-              Your {occasion.toLowerCase()} card for {recipient.name} is ready
+            <p className="text-warm-gray mb-8">
+              Your {effectiveOccasion.toLowerCase()} card for {recipient.name} is ready
               {deliveryMethod === "digital" && " to send"}
               {deliveryMethod === "print_at_home" && " to print"}
               {deliveryMethod === "mail" && " — mailing coming soon"}.
@@ -2513,8 +2933,7 @@ Tone preference: ${r.tone_preference || "Not specified"}`.replace(/\n{2,}/g, "\n
             {deliveryMethod === "digital" && savedCardId && (
               <button
                 onClick={() => router.push(`/cards/view/${savedCardId}`)}
-                className="bg-indigo-600 text-white px-8 py-3 rounded-xl font-medium
-                           hover:bg-indigo-700 transition-colors mb-4 block mx-auto"
+                className="btn-primary mb-4 block mx-auto"
               >
                 Preview &amp; share
               </button>
@@ -2523,8 +2942,7 @@ Tone preference: ${r.tone_preference || "Not specified"}`.replace(/\n{2,}/g, "\n
             {deliveryMethod === "print_at_home" && savedCardId && (
               <button
                 onClick={() => router.push(`/cards/print/${savedCardId}`)}
-                className="bg-indigo-600 text-white px-8 py-3 rounded-xl font-medium
-                           hover:bg-indigo-700 transition-colors mb-4 block mx-auto"
+                className="btn-primary mb-4 block mx-auto"
               >
                 Print your card
               </button>
@@ -2541,7 +2959,7 @@ Tone preference: ${r.tone_preference || "Not specified"}`.replace(/\n{2,}/g, "\n
                 {savedCardId && (
                   <button
                     onClick={() => router.push(`/cards/print/${savedCardId}`)}
-                    className="mt-3 text-sm text-indigo-600 font-medium hover:text-indigo-800"
+                    className="btn-link text-sm mt-3"
                   >
                     Print at home instead &rarr;
                   </button>
@@ -2553,8 +2971,7 @@ Tone preference: ${r.tone_preference || "Not specified"}`.replace(/\n{2,}/g, "\n
               {editMode && savedCardId && (
                 <button
                   onClick={() => router.push(`/cards/edit/${savedCardId}`)}
-                  className="bg-indigo-600 text-white px-6 py-3 rounded-xl font-medium
-                             hover:bg-indigo-700 transition-colors"
+                  className="btn-primary"
                 >
                   Back to edit
                 </button>
@@ -2562,8 +2979,11 @@ Tone preference: ${r.tone_preference || "Not specified"}`.replace(/\n{2,}/g, "\n
               {!editMode && (
                 <button
                   onClick={() => {
+                    clearDraft(recipientId);
                     setStep("occasion");
                     setOccasion("");
+                    setOccasionCustom("");
+                    setIncludeFaithBased(false);
                     setTone("");
                     setNotes("");
                     setMessages([]);
@@ -2593,28 +3013,29 @@ Tone preference: ${r.tone_preference || "Not specified"}`.replace(/\n{2,}/g, "\n
                     setPendingInsideScene("");
                     setInsideImagePosition("top");
                     setFont("sans");
-                    setFrontTextSuggestion(null);
+                    setInsideFont("sans");
+                    setFrontTextSuggestions([]);
                     setFrontText("");
                     setFrontTextPosition("bottom-right");
                     setFrontTextStyle("dark_box");
                     setCardSize("5x7");
                     setSavedCardId(null);
                   }}
-                  className="bg-white text-indigo-600 border border-indigo-200 px-6 py-3 rounded-xl
-                             font-medium hover:bg-indigo-50 transition-colors"
+                  className="btn-secondary"
                 >
                   Create another card
                 </button>
               )}
               <button
                 onClick={() => router.push("/")}
-                className="bg-white text-indigo-600 border border-indigo-200 px-6 py-3 rounded-xl
-                           font-medium hover:bg-indigo-50 transition-colors"
+                className="btn-secondary"
               >
-                Back to dashboard
+                Back to Circle of People
               </button>
             </div>
           </div>
+        )}
+        </>
         )}
       </main>
     </div>

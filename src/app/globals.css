@@ -1,57 +1,279 @@
 @import "tailwindcss";
 
+/* ─── Nuuge Design System ──────────────────────────────────────────────
+   All colors, fonts, spacing, and component styles defined here.
+   Change a value once → the entire app updates.
+   ──────────────────────────────────────────────────────────────────── */
+
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  /* ── Colors ── */
+  --color-cream:          #F8F6F3;   /* Warm cream — page backgrounds */
+  --color-white:          #FFFFFF;   /* White — card surfaces, inputs */
+  --color-charcoal:       #2D2A26;   /* Warm charcoal — primary text */
+  --color-warm-gray:      #7A756E;   /* Warm gray — secondary text */
+  --color-light-gray:     #E8E4DF;   /* Light warm gray — borders */
+  --color-faint-gray:     #F5F2EE;   /* Faint warm gray — hover bg */
+
+  --color-brand:          #3A7D5C;   /* Forest green — Nuuge brand */
+  --color-brand-hover:    #2E6349;   /* Deep forest green — hover */
+  --color-brand-light:    #F0F7F2;   /* Pale sage — selected, success */
+
+  --color-amber:          #C4841D;   /* Amber — primary action buttons */
+  --color-amber-hover:    #A66D15;   /* Dark amber — button hover */
+  --color-amber-light:    #FFF8EE;   /* Pale amber — highlight bg */
+
+  --color-sage:           #7B9E87;   /* Sage green — tags, icons */
+  --color-sage-light:     #EDF4EF;   /* Pale sage — tag bg */
+
+  --color-warning:        #E8A84C;   /* Warm gold — warnings */
+  --color-warning-light:  #FFF8EE;   /* Pale gold — warning bg */
+  --color-error:          #C4513D;   /* Terracotta red — errors */
+  --color-error-light:    #FEF2F0;   /* Pale terracotta — error bg */
+
+  /* ── Typography ── */
+  --font-heading: "Lora", Georgia, "Times New Roman", serif;
+  --font-body:    "Nunito", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+
+  /* ── Spacing & Radius ── */
+  --radius-sm:  0.5rem;
+  --radius-md:  0.75rem;
+  --radius-lg:  1rem;
+  --radius-xl:  1.25rem;
+
+  /* ── Shadows ── */
+  --shadow-card:    0 1px 3px rgba(45, 42, 38, 0.06), 0 1px 2px rgba(45, 42, 38, 0.04);
+  --shadow-raised:  0 4px 12px rgba(45, 42, 38, 0.08), 0 1px 3px rgba(45, 42, 38, 0.06);
+  --shadow-button:  0 2px 6px rgba(45, 42, 38, 0.10);
 }
 
+/* ── Tailwind theme extension ── */
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-cream:        var(--color-cream);
+  --color-charcoal:     var(--color-charcoal);
+  --color-warm-gray:    var(--color-warm-gray);
+  --color-light-gray:   var(--color-light-gray);
+  --color-faint-gray:   var(--color-faint-gray);
+
+  --color-brand:        var(--color-brand);
+  --color-brand-hover:  var(--color-brand-hover);
+  --color-brand-light:  var(--color-brand-light);
+
+  --color-amber:        var(--color-amber);
+  --color-amber-hover:  var(--color-amber-hover);
+  --color-amber-light:  var(--color-amber-light);
+
+  --color-sage:         var(--color-sage);
+  --color-sage-light:   var(--color-sage-light);
+
+  --color-warning:      var(--color-warning);
+  --color-warning-light: var(--color-warning-light);
+  --color-error:        var(--color-error);
+  --color-error-light:  var(--color-error-light);
+
+  --font-heading: var(--font-heading);
+  --font-body:    var(--font-body);
 }
+
+/* ─── Base Styles ──────────────────────────────────────────────────── */
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: var(--font-sans), Arial, Helvetica, sans-serif;
+  background: var(--color-cream);
+  color: var(--color-charcoal);
+  font-family: var(--font-body);
+  line-height: 1.6;
 }
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--font-heading);
+  line-height: 1.3;
+  color: var(--color-charcoal);
+}
+
+/* ─── Reusable Component Classes ───────────────────────────────────── */
+
+/* Primary action button (amber) */
+.btn-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  background: var(--color-amber);
+  color: var(--color-white);
+  font-family: var(--font-body);
+  font-weight: 700;
+  font-size: 0.9375rem;
+  padding: 0.625rem 1.25rem;
+  border-radius: var(--radius-lg);
+  border: none;
+  cursor: pointer;
+  box-shadow: var(--shadow-button);
+  transition: background 0.2s, box-shadow 0.2s, transform 0.1s;
+}
+.btn-primary:hover {
+  background: var(--color-amber-hover);
+  box-shadow: var(--shadow-raised);
+}
+.btn-primary:active { transform: translateY(1px); }
+.btn-primary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+}
+
+/* Brand/green button */
+.btn-brand {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  background: var(--color-brand);
+  color: var(--color-white);
+  font-family: var(--font-body);
+  font-weight: 700;
+  font-size: 0.9375rem;
+  padding: 0.625rem 1.25rem;
+  border-radius: var(--radius-lg);
+  border: none;
+  cursor: pointer;
+  box-shadow: var(--shadow-button);
+  transition: background 0.2s, box-shadow 0.2s, transform 0.1s;
+}
+.btn-brand:hover {
+  background: var(--color-brand-hover);
+  box-shadow: var(--shadow-raised);
+}
+.btn-brand:active { transform: translateY(1px); }
+.btn-brand:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+
+/* Secondary / outline button */
+.btn-secondary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  background: var(--color-white);
+  color: var(--color-charcoal);
+  font-family: var(--font-body);
+  font-weight: 700;
+  font-size: 0.875rem;
+  padding: 0.625rem 1.25rem;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--color-light-gray);
+  cursor: pointer;
+  transition: background 0.2s, border-color 0.2s;
+}
+.btn-secondary:hover {
+  background: var(--color-faint-gray);
+  border-color: var(--color-warm-gray);
+}
+
+/* Text link button */
+.btn-link {
+  background: none;
+  border: none;
+  color: var(--color-brand);
+  font-family: var(--font-body);
+  font-weight: 700;
+  font-size: 0.875rem;
+  cursor: pointer;
+  padding: 0;
+  transition: color 0.2s;
+}
+.btn-link:hover { color: var(--color-brand-hover); }
+
+/* Card surface */
+.card-surface {
+  background: var(--color-white);
+  border: 1.5px solid var(--color-sage-light);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-card);
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+.card-surface:hover {
+  border-color: var(--color-sage);
+}
+.card-surface-clickable {
+  cursor: pointer;
+}
+.card-surface-clickable:hover {
+  box-shadow: var(--shadow-raised);
+}
+.card-surface.card-surface-selected {
+  border-color: var(--color-brand);
+  background: var(--color-brand-light);
+  box-shadow: 0 0 0 2px var(--color-brand);
+}
+
+/* Tag / chip */
+.tag {
+  display: inline-flex;
+  align-items: center;
+  font-family: var(--font-body);
+  font-size: 0.75rem;
+  font-weight: 500;
+  padding: 0.25rem 0.625rem;
+  border-radius: 9999px;
+  background: var(--color-sage-light);
+  color: var(--color-brand);
+}
+.tag-amber {
+  background: var(--color-amber-light);
+  color: var(--color-amber);
+}
+
+/* Input field — standard readable size for all form inputs */
+.input-field {
+  width: 100%;
+  font-family: var(--font-body);
+  font-size: 1.125rem;
+  color: var(--color-charcoal);
+  background: var(--color-white);
+  border: 1px solid var(--color-light-gray);
+  border-radius: var(--radius-md);
+  padding: 0.75rem 1rem;
+  outline: none;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+.input-field:focus {
+  border-color: var(--color-brand);
+  box-shadow: 0 0 0 3px var(--color-brand-light);
+}
+.input-field::placeholder {
+  color: var(--color-warm-gray);
+}
+
+/* Section label */
+.section-label {
+  font-family: var(--font-body);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--color-warm-gray);
+}
+
+/* ─── Utilities ────────────────────────────────────────────────────── */
 
 /* Smooth scrolling for chat */
 .overflow-y-auto {
   scroll-behavior: smooth;
 }
 
-/* Hide scrollbar for cleaner chat look */
-.overflow-y-auto::-webkit-scrollbar {
-  width: 6px;
-}
-
-.overflow-y-auto::-webkit-scrollbar-track {
-  background: transparent;
-}
-
+.overflow-y-auto::-webkit-scrollbar { width: 6px; }
+.overflow-y-auto::-webkit-scrollbar-track { background: transparent; }
 .overflow-y-auto::-webkit-scrollbar-thumb {
-  background: #d1d5db;
+  background: var(--color-light-gray);
   border-radius: 3px;
 }
-
 .overflow-y-auto::-webkit-scrollbar-thumb:hover {
-  background: #9ca3af;
+  background: var(--color-warm-gray);
 }
 
 @keyframes fade-in {
-  from {
-    opacity: 0;
-    transform: translateY(20px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0); }
 }
 
 .animate-fade-in {
-  animation: fade-in 0.6s ease-out;
+  animation: fade-in 0.5s ease-out;
 }

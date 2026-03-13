@@ -1,5 +1,6 @@
 import type { UserProfile, Recipient, Card, ConversationMessage } from "@/types/database";
 import { saveImage, getImage, getAllImages, isLargeDataUrl } from "./image-store";
+import { getAllUsage, putUsageEvent, type UsageEvent } from "./usage-store";
 
 /**
  * Local storage-based state management for MVP.
@@ -40,8 +41,17 @@ export function getRecipients(): Recipient[] {
 export function saveRecipient(recipient: Partial<Recipient>) {
   if (!isBrowser()) return;
   const existing = getRecipients();
+  // Sync birthday from Important dates when birthday field is empty (single source of truth)
+  let birthday = (recipient.birthday ?? "").trim() || null;
+  if (!birthday && (recipient.important_dates?.length ?? 0) > 0) {
+    const entry = recipient.important_dates!.find(
+      (d) => (d.label ?? "").toLowerCase().trim() === "birthday"
+    );
+    if (entry?.date?.trim()) birthday = entry.date.trim();
+  }
   const withId = {
     ...recipient,
+    birthday: birthday ?? recipient.birthday,
     id: recipient.id || crypto.randomUUID(),
     created_at: recipient.created_at || new Date().toISOString(),
     updated_at: new Date().toISOString(),
@@ -164,6 +174,15 @@ export function updateCard(cardId: string, updates: Partial<Card>) {
   return updated;
 }
 
+export function deleteCard(cardId: string): boolean {
+  if (!isBrowser()) return false;
+  const existing = getCards();
+  const filtered = existing.filter((c) => c.id !== cardId);
+  if (filtered.length === existing.length) return false;
+  localStorage.setItem(KEYS.CARDS, JSON.stringify(filtered));
+  return true;
+}
+
 export function getCardById(cardId: string): Card | null {
   return getCards().find((c) => c.id === cardId) ?? null;
 }
@@ -259,10 +278,12 @@ export interface NuugeBackup {
   cards: Card[];
   onboardingHistory: ConversationMessage[];
   images: Record<string, string>;
+  usageEvents?: UsageEvent[];
 }
 
 export async function exportAllData(): Promise<NuugeBackup> {
   const images = await getAllImages();
+  const usageEvents = await getAllUsage();
   return {
     version: 1,
     exportedAt: new Date().toISOString(),
@@ -271,6 +292,7 @@ export async function exportAllData(): Promise<NuugeBackup> {
     cards: getCards(),
     onboardingHistory: getOnboardingHistory(),
     images,
+    usageEvents,
   };
 }
 
@@ -293,6 +315,11 @@ export async function importAllData(backup: NuugeBackup): Promise<void> {
   if (backup.images) {
     for (const [key, value] of Object.entries(backup.images)) {
       await saveImage(key, value);
+    }
+  }
+  if (backup.usageEvents) {
+    for (const event of backup.usageEvents) {
+      await putUsageEvent(event);
     }
   }
 }

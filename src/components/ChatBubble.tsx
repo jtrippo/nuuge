@@ -13,12 +13,13 @@ export default function ChatBubble({ role, content }: ChatBubbleProps) {
       <div
         className={`max-w-[80%] rounded-2xl px-5 py-3 ${
           isUser
-            ? "bg-indigo-600 text-white rounded-br-md"
-            : "bg-gray-100 text-gray-800 rounded-bl-md"
+            ? "text-white rounded-br-md"
+            : "bg-faint-gray text-charcoal rounded-bl-md"
         }`}
+        style={isUser ? { background: "var(--color-brand)" } : undefined}
       >
         {!isUser && (
-          <span className="text-xs font-semibold text-indigo-600 block mb-1">
+          <span className="text-xs font-semibold text-brand block mb-1">
             Nuuge
           </span>
         )}

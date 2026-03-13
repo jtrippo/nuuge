@@ -5,6 +5,7 @@ import ChatBubble from "./ChatBubble";
 import ChatInput from "./ChatInput";
 import { ONBOARDING_OPENER, RECIPIENT_OPENER } from "@/lib/ai/prompts";
 import type { ConversationMessage } from "@/types/database";
+import { logApiCall } from "@/lib/usage-store";
 
 interface ConversationFlowProps {
   mode: "onboarding" | "recipient";
@@ -65,6 +66,7 @@ export default function ConversationFlow({
         }
 
         const data = await res.json();
+        logApiCall("chat", { model: "gpt-4o", callType: "chat_completion" });
 
         setMessages((prev) => [
           ...prev,
@@ -101,7 +103,7 @@ export default function ConversationFlow({
         {loading && (
           <div className="flex justify-start mb-4">
             <div className="bg-gray-100 rounded-2xl rounded-bl-md px-5 py-3">
-              <span className="text-xs font-semibold text-indigo-600 block mb-1">
+              <span className="text-xs font-semibold text-brand block mb-1">
                 Nuuge
               </span>
               <div className="flex gap-1">

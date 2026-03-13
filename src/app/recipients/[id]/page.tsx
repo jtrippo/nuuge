@@ -1,15 +1,17 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter, useParams } from "next/navigation";
+import { useRouter, useParams, useSearchParams } from "next/navigation";
 import { getRecipients, saveRecipient, deleteRecipient, getCards, getCardsForRecipient, saveCard, getCardExpandedState, setCardExpanded, linkRecipients, unlinkRecipients, hydrateCardImages } from "@/lib/store";
+import { getDisplayOccasion } from "@/lib/occasions";
+import AppHeader from "@/components/AppHeader";
 import ProfileEditor from "@/components/ProfileEditor";
+import { getBirthdayForAge } from "@/lib/card-recipes";
 import type { Recipient, ImportantDate, Card, PersonProfile } from "@/types/database";
 
 interface RecipientFields {
   relationship_type: string;
   humor_tolerance: string;
-  tone_preference: string;
   important_dates: ImportantDate[];
   milestones: string;
 }
@@ -17,10 +19,11 @@ interface RecipientFields {
 export default function RecipientDetailPage() {
   const router = useRouter();
   const params = useParams();
+  const searchParams = useSearchParams();
   const id = params.id as string;
 
   const [recipient, setRecipient] = useState<Recipient | null>(null);
-  const [editing, setEditing] = useState(false);
+  const [editing, setEditing] = useState(searchParams.get("edit") === "1");
   const [profileData, setProfileData] = useState<Partial<PersonProfile>>({});
   const [recipientFields, setRecipientFields] = useState<RecipientFields | null>(null);
   const [cards, setCards] = useState<Card[]>([]);
@@ -34,6 +37,7 @@ export default function RecipientDetailPage() {
   const [reuseTargetRecipientId, setReuseTargetRecipientId] = useState("");
   const [mounted, setMounted] = useState(false);
   const [hydratedImages, setHydratedImages] = useState<Record<string, string>>({});
+  const [profileExpanded, setProfileExpanded] = useState(false);
 
   const refreshCards = () => setCards(getCardsForRecipient(id));
 
@@ -78,13 +82,13 @@ export default function RecipientDetailPage() {
 
   if (!recipient || !recipientFields) {
     return (
-      <div className="flex flex-col items-center justify-center h-screen bg-gradient-to-b from-indigo-50 to-white">
-        <p className="text-gray-500 mb-4">Person not found.</p>
+      <div className="flex flex-col items-center justify-center h-screen" style={{ background: "var(--color-cream)" }}>
+        <p className="text-warm-gray mb-4">Person not found.</p>
         <button
           onClick={() => router.push("/")}
-          className="text-indigo-600 font-medium hover:text-indigo-800"
+          className="font-medium" style={{ color: "var(--color-brand)" }}
         >
-          Back to dashboard
+          Back to Circle of People
         </button>
       </div>
     );
@@ -99,7 +103,12 @@ export default function RecipientDetailPage() {
   function initProfileData(r: Recipient): Partial<PersonProfile> {
     return {
       display_name: r.name,
-      birthday: r.birthday || null,
+      first_name: r.first_name ?? null,
+      last_name: r.last_name ?? null,
+      nickname: r.nickname ?? null,
+      mailing_address: r.mailing_address ?? null,
+      email: r.email ?? null,
+      birthday: getBirthdayForAge(r.birthday, r.important_dates) || null,
       personality: r.personality_notes,
       humor_style: r.humor_style || null,
       interests: r.interests || [],
@@ -115,6 +124,7 @@ export default function RecipientDetailPage() {
       favorite_books: r.favorite_books || null,
       dislikes: r.dislikes || null,
       communication_style: r.communication_style || null,
+      emotional_energy: (r as PersonProfile).emotional_energy ?? null,
       notes: r.notes || null,
     };
   }
@@ -123,7 +133,6 @@ export default function RecipientDetailPage() {
     return {
       relationship_type: r.relationship_type,
       humor_tolerance: r.humor_tolerance || "",
-      tone_preference: r.tone_preference || "",
       important_dates: r.important_dates || [],
       milestones: (r.milestones || []).join(", "),
     };
@@ -139,16 +148,28 @@ export default function RecipientDetailPage() {
 
   function handleSave() {
     if (!recipientFields || !recipient) return;
+    if (hasDuplicateLabels) return;
+    const nameForSave =
+      (profileData.nickname as string)?.trim() ||
+      [profileData.first_name, profileData.last_name].filter(Boolean).map(String).join(" ").trim() ||
+      (profileData.display_name as string) ||
+      recipient.name;
     const updated: Partial<Recipient> = {
       id: recipient.id,
-      name: (profileData.display_name as string) || recipient.name,
+      name: nameForSave || recipient.name,
+      display_name: nameForSave || recipient.name,
+      first_name: (profileData.first_name as string)?.trim() || null,
+      last_name: (profileData.last_name as string)?.trim() || null,
+      nickname: (profileData.nickname as string)?.trim() || null,
+      mailing_address: (profileData.mailing_address as string)?.trim() || null,
+      email: (profileData.email as string)?.trim() || null,
       relationship_type: recipientFields.relationship_type,
       personality_notes: (profileData.personality as string) || null,
       interests: toTags(profileData.interests),
       values: toTags(profileData.values),
       humor_style: profileData.humor_style || null,
       humor_tolerance: recipientFields.humor_tolerance,
-      tone_preference: recipientFields.tone_preference,
+      tone_preference: "",
       important_dates: recipientFields.important_dates,
       milestones: recipientFields.milestones.split(",").map((s) => s.trim()).filter(Boolean),
       birthday: profileData.birthday || null,
@@ -205,112 +226,155 @@ export default function RecipientDetailPage() {
     setRecipientFields({ ...recipientFields!, important_dates: updated });
   }
 
+  function isDuplicateLabel(dates: ImportantDate[], index: number): boolean {
+    const label = (dates[index]?.label ?? "").trim().toLowerCase();
+    if (!label || label === "other") return false;
+    return dates.some(
+      (d, j) => j !== index && (d.label ?? "").trim().toLowerCase() === label
+    );
+  }
+
+  const hasDuplicateLabels =
+    recipientFields?.important_dates?.some((_, i) => isDuplicateLabel(recipientFields.important_dates, i)) ?? false;
+
   return (
-    <div className="min-h-screen bg-gradient-to-b from-indigo-50 to-white">
-      <header className="border-b border-gray-200 bg-white px-6 py-4">
-        <div className="max-w-2xl mx-auto flex items-center justify-between">
-          <button
-            onClick={() => router.push("/")}
-            className="text-sm text-gray-500 hover:text-gray-700"
-          >
-            &larr; Dashboard
-          </button>
-          <div className="flex gap-2">
-            {editing ? (
-              <>
+    <div className="min-h-screen" style={{ background: "var(--color-cream)" }}>
+      <AppHeader>
+        <button
+          onClick={() => router.push("/")}
+          className="flex items-center gap-1.5 px-4 py-1.5 rounded-full text-sm text-warm-gray hover:text-charcoal transition-colors"
+          style={{ border: "1.5px solid var(--color-sage)" }}
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+          Circle of People
+        </button>
+        <span className="font-medium text-charcoal text-sm">{recipient.name}</span>
+        {editing ? (
+          <>
+            <span className="flex-1" />
+            <button
+              onClick={handleCancel}
+              className="px-4 py-1.5 rounded-full text-sm text-warm-gray hover:text-charcoal transition-colors"
+              style={{ border: "1.5px solid var(--color-sage)" }}
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleSave}
+              disabled={hasDuplicateLabels}
+              title={hasDuplicateLabels ? "Fix duplicate labels in Important dates" : undefined}
+              className="btn-primary px-5 py-1.5 rounded-full text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Save
+            </button>
+          </>
+        ) : (
+          <>
+            <span className="flex-1" />
+            <button
+              onClick={() => router.push(`/cards/create/${recipient.id}`)}
+              className="btn-primary px-5 py-1.5 rounded-full text-sm"
+            >
+              Create card
+            </button>
+          </>
+        )}
+      </AppHeader>
+
+      <main className="max-w-2xl mx-auto px-6 py-8">
+        <div className="card-surface p-6">
+          {!editing && (
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h1 className="text-2xl font-bold text-charcoal">{recipient.name}</h1>
+                <p className="text-warm-gray capitalize">{recipient.relationship_type}</p>
+              </div>
+              <div className="flex items-center gap-2">
                 <button
-                  onClick={handleCancel}
-                  className="text-sm text-gray-500 hover:text-gray-700 px-3 py-1.5"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={handleSave}
-                  className="text-sm bg-indigo-600 text-white px-4 py-1.5 rounded-lg
-                             hover:bg-indigo-700 transition-colors"
-                >
-                  Save
-                </button>
-              </>
-            ) : (
-              <>
-                <button
-                  onClick={() => router.push(`/cards/create/${recipient.id}`)}
-                  className="text-sm bg-indigo-600 text-white px-4 py-1.5 rounded-lg
-                             hover:bg-indigo-700 transition-colors"
-                >
-                  Create card
-                </button>
-                <button
-                  onClick={() => setEditing(true)}
-                  className="text-sm text-indigo-600 font-medium hover:text-indigo-800 px-3 py-1.5"
+                  onClick={() => { setEditing(true); setProfileExpanded(true); }}
+                  className="px-4 py-1.5 rounded-full text-sm text-warm-gray hover:text-charcoal transition-colors"
+                  style={{ border: "1.5px solid var(--color-sage)" }}
                 >
                   Edit
                 </button>
                 <button
                   onClick={handleDelete}
-                  className="text-sm text-red-500 hover:text-red-700 px-3 py-1.5"
+                  className="px-4 py-1.5 rounded-full text-sm transition-colors hover:opacity-80"
+                  style={{ color: "var(--color-error)", border: "1.5px solid var(--color-error)" }}
                 >
                   Remove
                 </button>
-              </>
-            )}
-          </div>
-        </div>
-      </header>
-
-      <main className="max-w-2xl mx-auto px-6 py-8">
-        <div className="bg-white border border-gray-200 rounded-xl p-6">
-          {!editing && (
-            <div className="mb-6">
-              <h1 className="text-2xl font-bold text-gray-900">{recipient.name}</h1>
-              <p className="text-gray-500 capitalize">{recipient.relationship_type}</p>
+                <button
+                  onClick={() => setProfileExpanded(!profileExpanded)}
+                  className="px-4 py-1.5 rounded-full text-sm text-warm-gray hover:text-charcoal transition-colors"
+                  style={{ border: "1.5px solid var(--color-sage)" }}
+                >
+                  {profileExpanded ? "Hide details" : "Show details"}
+                </button>
+              </div>
             </div>
           )}
 
           {/* Recipient-specific fields */}
           {editing ? (
-            <div className="space-y-4 mb-6 pb-6 border-b border-gray-200">
+            <div className="space-y-4 mb-6 pb-6 border-b" style={{ borderColor: "var(--color-light-gray)" }}>
               <Field label="Relationship">
                 <input
                   value={recipientFields.relationship_type}
                   onChange={(e) => setRecipientFields({ ...recipientFields, relationship_type: e.target.value })}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 transition-colors"
+                  className="w-full input-field rounded-lg px-3 py-2 text-sm"
                 />
               </Field>
               <Field label="Humor tolerance">
                 <input
                   value={recipientFields.humor_tolerance}
                   onChange={(e) => setRecipientFields({ ...recipientFields, humor_tolerance: e.target.value })}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 transition-colors"
+                  className="w-full input-field rounded-lg px-3 py-2 text-sm"
                 />
               </Field>
-              <Field label="Tone preference">
-                <input
-                  value={recipientFields.tone_preference}
-                  onChange={(e) => setRecipientFields({ ...recipientFields, tone_preference: e.target.value })}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 transition-colors"
-                />
-              </Field>
-              <Field label="Important dates">
+              <Field label="Important dates" hint="Recurring = every year (e.g. birthday); one-time = single occurrence (e.g. graduation). Each label can only be used once except &quot;Other&quot;.">
+                {hasDuplicateLabels && (
+                  <p className="text-sm mb-2" style={{ color: "var(--color-error)" }}>
+                    Each label can only be used once (except &quot;Other&quot;). Change or remove the duplicate.
+                  </p>
+                )}
                 <div className="space-y-2">
                   {recipientFields.important_dates.map((d, i) => (
-                    <div key={i} className="flex gap-2 items-center">
-                      <input
-                        value={d.label}
-                        onChange={(e) => updateDate(i, "label", e.target.value)}
-                        placeholder="Label (e.g. Birthday)"
-                        className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 transition-colors"
-                      />
+                    <div key={i} className="flex flex-wrap gap-2 items-start">
+                      <div className="flex-1 min-w-[120px]">
+                        <input
+                          value={d.label}
+                          onChange={(e) => updateDate(i, "label", e.target.value)}
+                          placeholder="Label (e.g. Birthday)"
+                          className={`w-full input-field rounded-lg px-3 py-2 ${isDuplicateLabel(recipientFields.important_dates, i) ? "border-red-400" : ""}`}
+                          aria-invalid={isDuplicateLabel(recipientFields.important_dates, i)}
+                        />
+                        {isDuplicateLabel(recipientFields.important_dates, i) && (
+                          <p className="text-xs mt-0.5" style={{ color: "var(--color-error)" }}>
+                            This label is already used
+                          </p>
+                        )}
+                      </div>
                       <input
                         value={d.date}
                         onChange={(e) => updateDate(i, "date", e.target.value)}
-                        placeholder="MM-DD"
-                        className="w-28 border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 transition-colors"
+                        placeholder="YYYY-MM-DD"
+                        className="w-36 input-field rounded-lg px-3 py-2"
                       />
+                      <label className="flex items-center gap-1.5 cursor-pointer whitespace-nowrap">
+                        <input
+                          type="checkbox"
+                          checked={d.recurring}
+                          onChange={() => updateDate(i, "recurring", !d.recurring)}
+                          className="rounded border-light-gray"
+                        />
+                        <span className="text-sm text-charcoal">Yearly</span>
+                      </label>
                       <button
                         onClick={() => removeDate(i)}
-                        className="text-red-400 hover:text-red-600 text-sm px-1"
+                        className="text-sm px-1 hover:opacity-80"
+                        style={{ color: "var(--color-error)" }}
+                        aria-label="Remove date"
                       >
                         &times;
                       </button>
@@ -318,7 +382,8 @@ export default function RecipientDetailPage() {
                   ))}
                   <button
                     onClick={addDate}
-                    className="text-sm text-indigo-600 hover:text-indigo-800"
+                    className="text-sm font-medium"
+                    style={{ color: "var(--color-brand)" }}
                   >
                     + Add date
                   </button>
@@ -328,26 +393,34 @@ export default function RecipientDetailPage() {
                 <input
                   value={recipientFields.milestones}
                   onChange={(e) => setRecipientFields({ ...recipientFields, milestones: e.target.value })}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 transition-colors"
+                  className="w-full input-field rounded-lg px-3 py-2 text-sm"
                 />
               </Field>
             </div>
-          ) : (
-            <div className="space-y-4 mb-6 pb-6 border-b border-gray-200">
+          ) : profileExpanded ? (
+            <div className="space-y-4 mb-6 pb-6 border-b" style={{ borderColor: "var(--color-light-gray)" }}>
               <DetailRow label="Humor tolerance" value={recipient.humor_tolerance} />
-              <DetailRow label="Tone preference" value={recipient.tone_preference} />
               <DetailRow
                 label="Important dates"
                 value={
                   recipient.important_dates && recipient.important_dates.length > 0 ? (
                     <div className="space-y-1">
                       {recipient.important_dates.map((d, i) => (
-                        <p key={i} className="text-sm text-gray-700">
-                          {d.label}: {d.date}
-                          {d.recurring && (
-                            <span className="text-gray-400 ml-1">(yearly)</span>
-                          )}
-                        </p>
+                        <div key={i} className="flex items-center justify-between gap-2">
+                          <p className="text-sm text-charcoal">
+                            {d.label}: {d.date}
+                            {d.recurring && (
+                              <span className="text-warm-gray ml-1">(yearly)</span>
+                            )}
+                          </p>
+                          <button
+                            onClick={() => router.push(`/cards/create/${recipient.id}?occasion=${encodeURIComponent(d.label)}`)}
+                            className="text-xs whitespace-nowrap px-3 py-1 rounded-full transition-colors"
+                            style={{ color: "var(--color-brand)", border: "1.5px solid var(--color-sage)" }}
+                          >
+                            Create card
+                          </button>
+                        </div>
                       ))}
                     </div>
                   ) : null
@@ -362,31 +435,34 @@ export default function RecipientDetailPage() {
                 }
               />
             </div>
-          )}
+          ) : null}
 
           {/* Shared profile fields */}
-          <ProfileEditor
-            profile={profileData}
-            editing={editing}
-            onChange={setProfileData}
-            excludeFields={["display_name"]}
-          />
+          {(editing || profileExpanded) && (
+            <ProfileEditor
+              profile={profileData}
+              editing={editing}
+              onChange={setProfileData}
+              excludeFields={["display_name"]}
+            />
+          )}
         </div>
 
         {/* Linked People */}
         <div className="mt-8">
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-semibold text-gray-900">Linked people</h2>
+            <h2 className="text-lg font-semibold text-charcoal">Linked people</h2>
             <button
               onClick={() => setShowLinkModal(true)}
-              className="text-sm font-medium text-indigo-600 hover:text-indigo-800"
+              className="text-sm font-medium px-4 py-1.5 rounded-full transition-colors hover:opacity-80"
+              style={{ color: "var(--color-brand)", border: "1.5px solid var(--color-sage)" }}
             >
               + Link someone
             </button>
           </div>
 
           {(!recipient.links || recipient.links.length === 0) ? (
-            <p className="text-sm text-gray-400 mb-2">
+            <p className="text-sm text-warm-gray mb-2">
               No linked relationships yet. Link {recipient.name} to a spouse, child, parent, etc.
             </p>
           ) : (
@@ -397,16 +473,16 @@ export default function RecipientDetailPage() {
                 return (
                   <div
                     key={link.recipient_id}
-                    className="flex items-center justify-between bg-white border border-gray-200 rounded-xl px-4 py-3"
+                    className="flex items-center justify-between card-surface px-4 py-3"
                   >
                     <div className="flex items-center gap-3">
                       <span
-                        className="text-sm font-medium text-indigo-600 cursor-pointer hover:text-indigo-800"
+                        className="text-sm font-medium cursor-pointer" style={{ color: "var(--color-brand)" }}
                         onClick={() => router.push(`/recipients/${linked.id}`)}
                       >
                         {linked.name}
                       </span>
-                      <span className="text-xs text-gray-400 capitalize">{link.label}</span>
+                      <span className="text-xs text-warm-gray capitalize">{link.label}</span>
                     </div>
                     <button
                       onClick={() => {
@@ -416,7 +492,8 @@ export default function RecipientDetailPage() {
                         const updated = refreshed.find((r) => r.id === id);
                         if (updated) setRecipient(updated);
                       }}
-                      className="text-xs text-red-400 hover:text-red-600"
+                      className="text-xs px-3 py-1 rounded-full transition-colors hover:opacity-80"
+                      style={{ color: "var(--color-error)", border: "1.5px solid var(--color-error)" }}
                     >
                       Unlink
                     </button>
@@ -430,20 +507,19 @@ export default function RecipientDetailPage() {
         {/* Link Modal */}
         {showLinkModal && (
           <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50 px-4">
-            <div className="bg-white rounded-2xl p-6 max-w-sm w-full">
-              <h3 className="text-lg font-semibold text-gray-900 mb-4">
+            <div className="card-surface rounded-2xl p-6 max-w-sm w-full">
+              <h3 className="text-lg font-semibold text-charcoal mb-4">
                 Link {recipient.name} to someone
               </h3>
               <div className="space-y-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                  <label className="block text-sm font-medium text-charcoal mb-1">
                     Person
                   </label>
                   <select
                     value={linkTarget}
                     onChange={(e) => setLinkTarget(e.target.value)}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm
-                               outline-none focus:border-indigo-500"
+                    className="w-full input-field rounded-lg px-3 py-2 text-sm"
                   >
                     <option value="">Select a person...</option>
                     {allRecipients
@@ -462,14 +538,13 @@ export default function RecipientDetailPage() {
                   </select>
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                  <label className="block text-sm font-medium text-charcoal mb-1">
                     {recipient.name}&apos;s relationship to them
                   </label>
                   <select
                     value={linkLabel}
                     onChange={(e) => setLinkLabel(e.target.value)}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm
-                               outline-none focus:border-indigo-500"
+                    className="w-full input-field rounded-lg px-3 py-2 text-sm"
                   >
                     <option value="spouse">Spouse</option>
                     <option value="partner">Partner</option>
@@ -480,14 +555,13 @@ export default function RecipientDetailPage() {
                   </select>
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                  <label className="block text-sm font-medium text-charcoal mb-1">
                     Their relationship to {recipient.name}
                   </label>
                   <select
                     value={linkReverseLabel}
                     onChange={(e) => setLinkReverseLabel(e.target.value)}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm
-                               outline-none focus:border-indigo-500"
+                    className="w-full input-field rounded-lg px-3 py-2 text-sm"
                   >
                     <option value="spouse">Spouse</option>
                     <option value="partner">Partner</option>
@@ -504,7 +578,7 @@ export default function RecipientDetailPage() {
                     setShowLinkModal(false);
                     setLinkTarget("");
                   }}
-                  className="flex-1 text-sm text-gray-500 hover:text-gray-700 py-2"
+                  className="flex-1 text-sm text-warm-gray hover:text-charcoal py-2"
                 >
                   Cancel
                 </button>
@@ -520,8 +594,7 @@ export default function RecipientDetailPage() {
                     setLinkTarget("");
                   }}
                   disabled={!linkTarget}
-                  className="flex-1 bg-indigo-600 text-white py-2 rounded-lg text-sm font-medium
-                             hover:bg-indigo-700 transition-colors disabled:bg-gray-300"
+                  className="flex-1 btn-primary py-2 rounded-lg text-sm font-medium disabled:opacity-50"
                 >
                   Link
                 </button>
@@ -533,24 +606,24 @@ export default function RecipientDetailPage() {
         {/* Card History */}
         <div className="mt-8">
           <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
-            <h2 className="text-lg font-semibold text-gray-900">Card history</h2>
+            <h2 className="text-lg font-semibold text-charcoal">Card history</h2>
             <button
               onClick={() => router.push(`/cards/create/${recipient.id}`)}
-              className="text-sm font-medium text-indigo-600 hover:text-indigo-800"
+              className="text-sm font-medium px-4 py-1.5 rounded-full transition-colors hover:opacity-80"
+              style={{ color: "var(--color-brand)", border: "1.5px solid var(--color-sage)" }}
             >
               + Create card
             </button>
           </div>
 
           {cards.length === 0 ? (
-            <div className="text-center py-10 bg-white border border-dashed border-gray-300 rounded-xl">
-              <p className="text-gray-500 mb-4">
+            <div className="text-center py-10 rounded-xl" style={{ background: "var(--color-faint-gray)", border: "1px dashed var(--color-light-gray)" }}>
+              <p className="text-warm-gray mb-4">
                 No cards created for {recipient.name} yet.
               </p>
               <button
                 onClick={() => router.push(`/cards/create/${recipient.id}`)}
-                className="bg-indigo-600 text-white px-6 py-2.5 rounded-xl text-sm font-medium
-                           hover:bg-indigo-700 transition-colors"
+                className="btn-primary px-6 py-2.5 rounded-xl text-sm font-medium"
               >
                 Create first card
               </button>
@@ -566,30 +639,30 @@ export default function RecipientDetailPage() {
                   return (
                     <div
                       key={card.id}
-                      className="bg-white border border-gray-200 rounded-xl overflow-hidden"
+                      className="card-surface overflow-hidden"
                     >
                       <button
                         type="button"
                         onClick={() => toggleCardExpanded(card.id)}
-                        className="w-full flex items-center justify-between gap-2 p-4 text-left hover:bg-gray-50 transition-colors"
+                        className="w-full flex items-center justify-between gap-2 p-4 text-left hover:bg-faint-gray transition-colors"
                       >
-                        <span className="text-sm font-medium text-gray-900">
-                          {card.occasion}
+                        <span className="text-sm font-medium text-charcoal">
+                          {getDisplayOccasion(card)}
                           {card.tone_used && (
-                            <span className="text-gray-400 font-normal ml-1">· {card.tone_used}</span>
+                            <span className="text-warm-gray font-normal ml-1">· {card.tone_used}</span>
                           )}
                         </span>
-                        <span className="text-xs text-gray-400">
+                        <span className="text-xs text-warm-gray">
                           {new Date(card.created_at).toLocaleDateString()}
                         </span>
-                        <span className="text-gray-400 text-sm flex-shrink-0">
+                        <span className="text-warm-gray text-sm flex-shrink-0">
                           {expanded ? "▲ Show less" : "▼ Show more"}
                         </span>
                       </button>
                       {expanded && (
-                        <div className="flex flex-col sm:flex-row sm:items-stretch border-t border-gray-100">
+                        <div className="flex flex-col sm:flex-row sm:items-stretch border-t">
                           {(hydratedImages[card.id] || (card.image_url && !card.image_url.startsWith("idb:"))) && (
-                            <div className="sm:w-36 flex-shrink-0 bg-gray-100">
+                            <div className="sm:w-36 flex-shrink-0 bg-faint-gray">
                               <img
                                 src={hydratedImages[card.id] || card.image_url!}
                                 alt=""
@@ -598,31 +671,35 @@ export default function RecipientDetailPage() {
                             </div>
                           )}
                           <div className="flex-1 p-4">
-                            <p className="text-sm text-gray-700 line-clamp-2 mb-3">
+                            <p className="text-sm text-charcoal line-clamp-2 mb-3">
                               {preview}
                             </p>
                             <div className="flex flex-wrap gap-2">
                               <button
                                 onClick={(e) => { e.stopPropagation(); router.push(`/cards/view/${card.id}`); }}
-                                className="text-xs font-medium text-indigo-600 hover:text-indigo-800"
+                                className="text-xs font-medium px-3 py-1 rounded-full transition-colors hover:opacity-80"
+                                style={{ color: "var(--color-brand)", border: "1.5px solid var(--color-sage)" }}
                               >
                                 View
                               </button>
                               <button
                                 onClick={(e) => { e.stopPropagation(); router.push(`/cards/print/${card.id}`); }}
-                                className="text-xs font-medium text-indigo-600 hover:text-indigo-800"
+                                className="text-xs font-medium px-3 py-1 rounded-full transition-colors hover:opacity-80"
+                                style={{ color: "var(--color-brand)", border: "1.5px solid var(--color-sage)" }}
                               >
                                 Reprint
                               </button>
                               <button
                                 onClick={(e) => { e.stopPropagation(); router.push(`/cards/edit/${card.id}`); }}
-                                className="text-xs font-medium text-indigo-600 hover:text-indigo-800"
+                                className="text-xs font-medium px-3 py-1 rounded-full transition-colors hover:opacity-80"
+                                style={{ color: "var(--color-brand)", border: "1.5px solid var(--color-sage)" }}
                               >
                                 Edit
                               </button>
                               <button
                                 onClick={(e) => { e.stopPropagation(); setReuseCardId(card.id); setReuseTargetRecipientId(""); }}
-                                className="text-xs font-medium text-indigo-600 hover:text-indigo-800"
+                                className="text-xs font-medium px-3 py-1 rounded-full transition-colors hover:opacity-80"
+                                style={{ color: "var(--color-brand)", border: "1.5px solid var(--color-sage)" }}
                               >
                                 Reuse for someone else
                               </button>
@@ -640,15 +717,15 @@ export default function RecipientDetailPage() {
         {/* Reuse card modal */}
         {reuseCardId && (
           <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-            <div className="bg-white rounded-xl shadow-xl max-w-md w-full p-6">
-              <h3 className="text-lg font-semibold text-gray-900 mb-2">Reuse this card</h3>
-              <p className="text-sm text-gray-500 mb-4">
+            <div className="card-surface rounded-xl shadow-xl max-w-md w-full p-6">
+              <h3 className="text-lg font-semibold text-charcoal mb-2">Reuse this card</h3>
+              <p className="text-sm text-warm-gray mb-4">
                 Save a copy for another recipient. Same design and message.
               </p>
               <select
                 value={reuseTargetRecipientId}
                 onChange={(e) => setReuseTargetRecipientId(e.target.value)}
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mb-4"
+                className="w-full input-field rounded-lg px-3 py-2 text-sm mb-4"
               >
                 <option value="">Choose recipient…</option>
                 {allRecipients
@@ -660,7 +737,7 @@ export default function RecipientDetailPage() {
               <div className="flex gap-2 justify-end">
                 <button
                   onClick={() => { setReuseCardId(null); setReuseTargetRecipientId(""); }}
-                  className="px-4 py-2 text-sm text-gray-600 hover:text-gray-800"
+                  className="px-4 py-2 text-sm text-warm-gray hover:text-charcoal"
                 >
                   Cancel
                 </button>
@@ -673,6 +750,7 @@ export default function RecipientDetailPage() {
                         recipient_id: reuseTargetRecipientId,
                         recipient_ids: [reuseTargetRecipientId],
                         occasion: card.occasion,
+                        occasion_custom: card.occasion_custom ?? null,
                         message_text: card.message_text,
                         image_url: card.image_url,
                         image_prompt: card.image_prompt,
@@ -692,7 +770,7 @@ export default function RecipientDetailPage() {
                     }
                   }}
                   disabled={!reuseTargetRecipientId}
-                  className="bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-indigo-700 disabled:opacity-50"
+                  className="btn-primary px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-50"
                 >
                   Save copy
                 </button>
@@ -717,9 +795,9 @@ function Field({
 }) {
   return (
     <div>
-      <label className="block text-sm font-medium text-gray-700 mb-1">
+      <label className="block text-sm font-medium text-charcoal mb-1">
         {label}
-        {hint && <span className="text-gray-400 font-normal ml-1">({hint})</span>}
+        {hint && <span className="text-warm-gray font-normal ml-1">({hint})</span>}
       </label>
       {children}
     </div>
@@ -736,11 +814,11 @@ function DetailRow({
   if (!value) return null;
   return (
     <div>
-      <p className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-1">
+      <p className="section-label mb-1">
         {label}
       </p>
       {typeof value === "string" ? (
-        <p className="text-sm text-gray-700">{value}</p>
+        <p className="text-sm text-charcoal">{value}</p>
       ) : (
         value
       )}

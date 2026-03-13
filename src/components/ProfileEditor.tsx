@@ -34,13 +34,26 @@ export default function ProfileEditor({
       setEditBuf(buf);
     }
     prevEditing.current = editing;
+    // Sync edit buffer when entering edit mode (use latest profile)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editing]);
 
   function getDisplayValue(key: keyof PersonProfile): string {
     const val = profile[key];
     if (Array.isArray(val)) return val.join(", ");
+    if (key === "mailing_address" && typeof val === "string" && val.includes("|")) {
+      return val.split("|").map((s) => s.trim()).filter(Boolean).join(", ");
+    }
     return (val as string) || "";
+  }
+
+  function getViewValue(key: keyof PersonProfile, value: unknown): string {
+    if (value === null || value === undefined) return "";
+    if (Array.isArray(value)) return value.join(", ");
+    if (key === "mailing_address" && typeof value === "string" && value.includes("|")) {
+      return value.split("|").map((s) => s.trim()).filter(Boolean).join(", ");
+    }
+    return String(value);
   }
 
   function handleChange(key: keyof PersonProfile, value: string) {
@@ -53,26 +66,24 @@ export default function ProfileEditor({
       <div className="space-y-4">
         {fields.map((field) => (
           <div key={field.key}>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
+            <label className="block text-sm font-medium text-charcoal mb-1">
               {field.label}
               {field.type === "tags" && (
-                <span className="text-gray-400 font-normal ml-1">(comma-separated)</span>
+                <span className="text-warm-gray font-normal ml-1">(comma-separated)</span>
               )}
             </label>
             {field.type === "textarea" ? (
               <textarea
                 value={editBuf[field.key] ?? getDisplayValue(field.key)}
                 onChange={(e) => handleChange(field.key, e.target.value)}
-                rows={2}
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm
-                           outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 transition-colors"
+                rows={field.key === "mailing_address" ? 3 : 2}
+                className="w-full input-field rounded-lg"
               />
             ) : (
               <input
                 value={editBuf[field.key] ?? getDisplayValue(field.key)}
                 onChange={(e) => handleChange(field.key, e.target.value)}
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm
-                           outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 transition-colors"
+                className="w-full input-field rounded-lg"
               />
             )}
           </div>
@@ -90,27 +101,27 @@ export default function ProfileEditor({
           value === undefined ||
           value === "" ||
           (Array.isArray(value) && value.length === 0);
+        const displayStr = getViewValue(field.key, value);
 
         return (
           <div key={field.key}>
-            <p className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-1">
-              {field.label}
-            </p>
+            <p className="section-label mb-1">{field.label}</p>
             {isEmpty ? (
-              <p className="text-sm text-gray-300 italic">Not set</p>
+              <p className="text-sm text-warm-gray italic">Not set</p>
             ) : Array.isArray(value) ? (
               <div className="flex flex-wrap gap-1.5">
                 {value.map((item, i) => (
                   <span
                     key={i}
-                    className="text-xs bg-gray-100 text-gray-600 px-2.5 py-1 rounded-full"
+                    className="text-sm px-2.5 py-1 rounded-full"
+                    style={{ background: "var(--color-faint-gray)", color: "var(--color-charcoal)" }}
                   >
                     {item}
                   </span>
                 ))}
               </div>
             ) : (
-              <p className="text-sm text-gray-700">{value as string}</p>
+              <p className="text-sm text-charcoal">{displayStr}</p>
             )}
           </div>
         );

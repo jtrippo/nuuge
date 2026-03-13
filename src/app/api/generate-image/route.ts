@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import OpenAI, { toFile } from "openai";
 import { trackUsage } from "@/lib/usage";
 import { GLOBAL_GUARDRAILS } from "@/lib/card-recipes";
+import { checkRateLimit } from "@/lib/rate-limit";
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
@@ -10,6 +11,14 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(
       { error: "OPENAI_API_KEY is not set. Add it in Vercel under Settings → Environment Variables." },
       { status: 500 }
+    );
+  }
+  const ip = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
+  const rl = checkRateLimit(ip, { maxRequests: 10, windowMs: 60_000 });
+  if (!rl.allowed) {
+    return NextResponse.json(
+      { error: "Too many requests. Please wait a moment and try again." },
+      { status: 429, headers: { "Retry-After": String(Math.ceil(rl.retryAfterMs / 1000)) } }
     );
   }
   try {
@@ -37,7 +46,8 @@ export async function POST(req: NextRequest) {
     const avoidList = GLOBAL_GUARDRAILS.avoid.join("; ");
     const literalRules = `
 STRICT RULES — follow the scene description LITERALLY:
-- Depict EXACTLY the scene described. Do NOT change the location, add/remove people, or substitute a different setting.
+- Depict EXACTLY the scene described. Do NOT change the location, add/remove elements, or substitute a different setting.
+- Do NOT add human figures, faces, or body parts unless the scene description EXPLICITLY mentions people. If people are mentioned, render them ONLY as silhouettes, abstract shapes, or seen from behind — NEVER with detailed faces, skin tones, or ethnic features.
 - ${GLOBAL_GUARDRAILS.alwaysInclude.join(". ")}.
 - ${GLOBAL_GUARDRAILS.prefer.join(". ")}.
 - AVOID: ${avoidList}.`;

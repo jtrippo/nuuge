@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import OpenAI from "openai";
+import { checkRateLimit } from "@/lib/rate-limit";
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
@@ -10,44 +11,62 @@ export async function POST(req: NextRequest) {
       { status: 500 }
     );
   }
+  const ip = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
+  const rl = checkRateLimit(ip, { maxRequests: 20, windowMs: 60_000 });
+  if (!rl.allowed) {
+    return NextResponse.json(
+      { error: "Too many requests. Please wait a moment and try again." },
+      { status: 429, headers: { "Retry-After": String(Math.ceil(rl.retryAfterMs / 1000)) } }
+    );
+  }
 
   try {
-    const { currentScene, change }: { currentScene: string; change: string } =
+    const {
+      currentScene,
+      change,
+      currentInterests = [],
+    }: { currentScene: string; change: string; currentInterests?: string[] } =
       await req.json();
+
+    const interestsNote =
+      currentInterests.length > 0
+        ? `\n\nCurrent interests to use (only these): ${currentInterests.join(", ")}. In the output, any "Personal touch" or interests line must reference only these, or omit if none fit the scene.`
+        : "\n\nNo interests list provided — omit or minimalize any Personal touch line in the output.";
 
     const { choices } = await openai.chat.completions.create({
       model: "gpt-4o-mini",
       messages: [
         {
           role: "system",
-          content: `You merge a user's change into an existing scene description, classify the change type, and write a focused edit instruction.
+          content: `You merge a user's change into an existing FULL image prompt and output a complete prompt. The output will be used to GENERATE A NEW IMAGE from scratch (not to edit an existing image).
 
-Rules for merging:
-- Keep everything from the current scene UNLESS the user's change contradicts it.
-- Apply the change literally: add what they want added, remove what they want removed.
-- Keep it concise (2-4 sentences). Plain language, no flowery prose.
-- Do NOT invent new elements the user didn't ask for.
+OUTPUT: Return the FULL prompt with the same structure as the input (guardrails, Recipient, Scene, Composition, Lighting, Palette, Art style, Texture, Composition feel, Personal touch/context, Occasion, AVOID). Do not truncate sections.
 
-Rules for classification:
-- "refine" = small edits the AI image editor can handle on the existing image: add/remove an element, change a color, adjust lighting, reposition something.
-- "redesign" = the user is asking for a fundamentally different image that cannot be achieved by editing: changing the entire art style (e.g. "make it a sketch"), switching the subject entirely, requesting a completely different scene, changing from color to black-and-white, etc.
+CRITICAL — Scene section:
+- INTEGRATE the user's change INTO the "Scene:" section. Do NOT append the change at the end of the whole prompt.
+- Rewrite ONLY the Scene paragraph so it is one coherent description that includes both the existing scene and the requested change.
+- Use GENERATION-FRIENDLY wording: we are generating a new image from this text. So convert "remove X" / "no X" into positive constraints, e.g. "No people in the scene", "No figures", "No hiker". Do not use edit-language like "Remove the hiker" — use "Scene has no people" or "No human figures" instead.
+- Add what the user asked for (e.g. campsite, fire ring, tents, smoke) as part of the same Scene description. Keep it concise but clear.
 
-Rules for editInstruction:
-- Write a short, forceful, specific instruction that tells an image editor EXACTLY what to change.
-- Lead with the most important change. Be explicit about what to ADD and what to REMOVE.
-- Mention specific colors, lighting, elements by name. Example: "Replace the warm yellow/golden background with a pure clean white background. Remove all warm color tinting and golden glow."
-- Do NOT describe the whole scene — only describe what is DIFFERENT from the current image.
-- Keep it to 1-3 sentences, imperative tone.
+Other sections:
+- Keep Recipient, Composition, Lighting, Palette, Art style, Texture, Line quality, Composition feel, Occasion, AVOID exactly as in the input unless the user's change explicitly asks to change them.
+- Personal touch / interests: use only the current interests list provided; if none or empty, omit or minimalize that line.
 
-Respond in JSON: { "mergedScene": "...", "changeType": "refine" | "redesign", "editInstruction": "..." }
-Output ONLY valid JSON, no markdown fences, no explanation.`,
+Classification:
+- "refine" = add/remove an element, small tweak, same style and subject.
+- "redesign" = fundamentally different style, subject, or scene.
+
+editInstruction: One short sentence summarizing what will change (for UI display only). Use generation-friendly phrasing, e.g. "Scene will have no people; add campsite in distance with fire ring, smoke, and two tents."
+
+Respond in JSON: { "mergedScene": "<full prompt text>", "changeType": "refine" | "redesign", "editInstruction": "..." }
+Output ONLY valid JSON, no markdown fences, no explanation. Escape any quotes inside mergedScene.`,
         },
         {
           role: "user",
-          content: `Current scene: ${currentScene}\n\nUser's change: ${change}`,
+          content: `Current full prompt:\n${currentScene}\n\nUser's change: ${change}${interestsNote}`,
         },
       ],
-      max_tokens: 500,
+      max_tokens: 1200,
     });
 
     const raw = choices?.[0]?.message?.content?.trim();

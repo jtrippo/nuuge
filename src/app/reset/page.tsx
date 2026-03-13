@@ -17,17 +17,19 @@ export default function ResetPage() {
   if (!cleared) return null;
 
   return (
-    <div className="flex flex-col items-center justify-center h-screen bg-gradient-to-b from-indigo-50 to-white px-4">
+    <div
+      className="flex flex-col items-center justify-center h-screen px-4"
+      style={{ background: "var(--color-cream)" }}
+    >
       <div className="text-center max-w-md">
         <div className="text-5xl mb-4">&#9989;</div>
-        <h1 className="text-2xl font-bold text-gray-900 mb-3">All cleared!</h1>
-        <p className="text-gray-600 mb-8">
+        <h1 className="text-2xl font-semibold text-charcoal mb-3">All cleared!</h1>
+        <p className="text-warm-gray mb-8">
           Your data has been reset. Ready to start fresh.
         </p>
         <button
           onClick={() => router.push("/")}
-          className="bg-indigo-600 text-white px-8 py-3 rounded-xl font-medium
-                     hover:bg-indigo-700 transition-colors"
+          className="btn-primary"
         >
           Back to home
         </button>

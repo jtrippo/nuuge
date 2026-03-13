@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import OpenAI from "openai";
+import { checkRateLimit } from "@/lib/rate-limit";
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
@@ -10,6 +11,14 @@ export async function POST(req: NextRequest) {
       { status: 500 }
     );
   }
+  const ip = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
+  const rl = checkRateLimit(ip, { maxRequests: 20, windowMs: 60_000 });
+  if (!rl.allowed) {
+    return NextResponse.json(
+      { error: "Too many requests. Please wait a moment and try again." },
+      { status: 429, headers: { "Retry-After": String(Math.ceil(rl.retryAfterMs / 1000)) } }
+    );
+  }
   try {
     const body = await req.json();
     const {
@@ -17,6 +26,7 @@ export async function POST(req: NextRequest) {
       recipientContext,
       occasion,
       tone,
+      includeFaithBased = false,
       additionalNotes,
       cardHistory,
       coSignWith,
@@ -28,6 +38,7 @@ export async function POST(req: NextRequest) {
       recipientContext: string;
       occasion: string;
       tone: string;
+      includeFaithBased?: boolean;
       additionalNotes: string;
       cardHistory: string[];
       coSignWith: string | null;
@@ -83,10 +94,30 @@ The recipient is the sender's ${relationshipType}. Keep the tone appropriate for
     } else if (regenCount === 1) {
       contextEmphasis = `The sender didn't like the first batch. Use DIFFERENT profile details than the rejected messages. If any profile details were removed by the sender, do NOT reference them at all. Put more weight on the occasion and tone.`;
     } else if (regenCount === 2) {
-      contextEmphasis = `The sender has regenerated twice and may have removed profile details. Focus primarily on the OCCASION and TONE — not the profile. Write something that feels universal but warm. Only lightly reference any remaining profile details.`;
+      contextEmphasis = `The sender has regenerated and is reducing specific interests/factual details. Use FEWER interests and concrete details from the profile — but KEEP matching the REQUESTED TONE and the recipient's personality/humor style. Focus on occasion and tone; only lightly reference interests or hobbies.`;
     } else {
-      contextEmphasis = `The sender has regenerated ${regenCount} times. Write something mostly GENERIC and occasion-focused. Ignore most profile details. Try a simple, honest, human message — a short punchy observation or heartfelt universal sentiment. Less is more.`;
+      contextEmphasis = `The sender has regenerated ${regenCount} times. Focus primarily on OCCASION and TONE. You may write something more universal and minimal; profile details (including personality/humor) are now de-emphasized. Still match the requested tone where possible. Try a simple, honest, human message — a short punchy observation or heartfelt universal sentiment. Less is more.`;
     }
+
+    const faithModifier = includeFaithBased
+      ? `
+FAITH-BASED MODIFIER (CRITICAL):
+The sender chose to include faith-based or spiritual themes. You MUST:
+- Use respectful, non-denominational spiritual language where appropriate (e.g. "keeping you in my prayers", "may you feel surrounded by love and peace", "sending blessings your way"). Do NOT assume a specific religion or deity unless the occasion clearly indicates one.
+- Do NOT use humor, sarcasm, or playful wit. Keep the tone sincere, warm, and genuine throughout all 3 options.
+- Energy should be warm, emotional, or comforting — never flippant or edgy.
+- All 3 options should feel appropriate for a faith-based card; vary the angle (e.g. blessing, comfort, gratitude, hope) but stay within that range.`
+      : "";
+
+    const optionsInstruction = includeFaithBased
+      ? `Make the 3 options meaningfully different from each other, but ALL must stay sincere and faith-appropriate (no humor or sarcasm):
+- Option 1: A straightforward, heartfelt version — warm and personal
+- Option 2: A version that emphasizes blessing, gratitude, or hope
+- Option 3: Another sincere angle — perhaps comfort, peace, or connection — still respectful and non-denominational`
+      : `Make the 3 options meaningfully different from each other:
+- Option 1: The most straightforward, heartfelt version
+- Option 2: A version that leans into humor or playfulness (using the recipient's interests or personality)
+- Option 3: A creative or unexpected angle — maybe a reference to a shared interest, an inside-joke-style observation, or a clever twist`;
 
     const systemPrompt = `You are Nuuge's card writing engine. Your job is to generate personal, specific greeting card messages based on deep context about the sender and recipient.
 
@@ -100,8 +131,9 @@ ${rejectedSection}
 OCCASION: ${occasion}
 REQUESTED TONE: ${tone}
 ${additionalNotes ? `ADDITIONAL NOTES FROM SENDER: ${additionalNotes}` : ""}
-${coSignWith ? `CO-SIGNING: The card should be signed from both the sender and ${coSignWith}. Use both names in the closing/sign-off (e.g., "Love, [sender] & ${coSignWith}").` : ""}
+${coSignWith ? `CO-SIGNING: This card is from BOTH the sender and ${coSignWith} together. Throughout the entire message, use "we", "our", and "us" instead of "I", "my", and "me". The greeting, body, and closing should all reflect that two people are writing — e.g. "We love you", "We're so proud", "Our favorite memory". Sign off with both names.` : ""}
 ${relationshipGuardrail}
+${faithModifier}
 
 CONTEXT EMPHASIS: ${contextEmphasis}
 
@@ -116,12 +148,9 @@ Generate exactly 3 different card message options. Each should:
 Each message should have:
 - A greeting line
 - The body (2-4 sentences)
-- A closing/sign-off
+- A closing/sign-off: put a newline after the closing phrase so the sender name(s) appear on the next line. Use \\n in the closing string. Example: "Love,\\nJane" or "With gratitude,\\nJane & John". Never put the name on the same line as the phrase.
 
-Make the 3 options meaningfully different from each other:
-- Option 1: The most straightforward, heartfelt version
-- Option 2: A version that leans into humor or playfulness (using the recipient's interests or personality)
-- Option 3: A creative or unexpected angle — maybe a reference to a shared interest, an inside-joke-style observation, or a clever twist
+${optionsInstruction}
 
 Each option should draw from DIFFERENT details in the profile. If option 1 mentions dancing, options 2 and 3 should NOT mention dancing.
 
@@ -134,7 +163,7 @@ Respond with ONLY valid JSON in this exact format:
       "label": "Heartfelt",
       "greeting": "the greeting line",
       "body": "the message body",
-      "closing": "the sign-off"
+      "closing": "closing phrase,\\nSender Name"
     },
     {
       "label": "Playful",

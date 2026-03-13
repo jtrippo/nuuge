@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { getUserProfile, saveUserProfile } from "@/lib/store";
 import ProfileEditor from "@/components/ProfileEditor";
+import AppHeader from "@/components/AppHeader";
 import type { UserProfile, PersonProfile } from "@/types/database";
 
 export default function ProfilePage() {
@@ -28,11 +29,11 @@ export default function ProfilePage() {
 
   if (!profile) {
     return (
-      <div className="flex flex-col items-center justify-center h-screen bg-gradient-to-b from-indigo-50 to-white">
-        <p className="text-gray-500 mb-4">No profile found.</p>
+      <div className="flex flex-col items-center justify-center h-screen" style={{ background: "var(--color-cream)" }}>
+        <p className="text-warm-gray mb-4">No profile found.</p>
         <button
           onClick={() => router.push("/onboarding")}
-          className="text-indigo-600 font-medium"
+          className="btn-link"
         >
           Set up your profile
         </button>
@@ -62,56 +63,49 @@ export default function ProfilePage() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-indigo-50 to-white">
-      <header className="border-b border-gray-200 bg-white px-6 py-4">
-        <div className="max-w-2xl mx-auto flex items-center justify-between">
-          <button
-            onClick={() => router.push("/")}
-            className="text-sm text-gray-500 hover:text-gray-700"
-          >
-            &larr; Dashboard
-          </button>
-          <div className="flex gap-2">
-            {editing ? (
-              <>
-                <button
-                  onClick={() => {
-                    setEditing(false);
-                    setEditData(profile);
-                    setPartnerName(profile.partner_name || "");
-                  }}
-                  className="text-sm text-gray-500 hover:text-gray-700 px-3 py-1.5"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={handleSave}
-                  className="text-sm bg-indigo-600 text-white px-4 py-1.5 rounded-lg
-                             hover:bg-indigo-700 transition-colors"
-                >
-                  Save
-                </button>
-              </>
-            ) : (
+    <div className="min-h-screen bg-cream">
+      <AppHeader>
+        <span className="font-medium text-charcoal">My Profile</span>
+        <span className="flex-1" />
+        <div className="flex gap-2">
+          {editing ? (
+            <>
               <button
-                onClick={() => setEditing(true)}
-                className="text-sm text-indigo-600 font-medium hover:text-indigo-800 px-3 py-1.5"
+                onClick={() => {
+                  setEditing(false);
+                  setEditData(profile);
+                  setPartnerName(profile.partner_name || "");
+                }}
+                className="btn-secondary text-sm px-3 py-1.5"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSave}
+                className="btn-brand text-sm px-4 py-1.5"
+              >
+                Save
+              </button>
+            </>
+          ) : (
+            <button
+              onClick={() => setEditing(true)}
+              className="btn-link text-sm"
               >
                 Edit
               </button>
             )}
           </div>
-        </div>
-      </header>
+      </AppHeader>
 
       <main className="max-w-2xl mx-auto px-6 py-8">
-        <div className="bg-white border border-gray-200 rounded-xl p-6">
+        <div className="card-surface p-6">
           {!editing && (
             <div className="mb-6">
-              <h1 className="text-2xl font-bold text-gray-900">
+              <h1 className="text-2xl font-semibold" style={{ fontFamily: "var(--font-heading)" }}>
                 {profile.display_name || "Your Profile"}
               </h1>
-              <p className="text-gray-500">Your Nuuge profile</p>
+              <p className="text-warm-gray text-sm">Your Nuuge profile</p>
             </div>
           )}
 
@@ -132,8 +126,7 @@ export default function ProfilePage() {
                   value={partnerName}
                   onChange={(e) => setPartnerName(e.target.value)}
                   placeholder="Partner's name (for co-signing cards)"
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm
-                             outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 transition-colors"
+                  className="input-field"
                 />
                 <p className="text-xs text-gray-400 mt-1">
                   If set, you&apos;ll have the option to sign cards from both of you.

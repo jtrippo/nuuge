@@ -3,6 +3,7 @@
 import { useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { exportAllData, importAllData, type NuugeBackup } from "@/lib/store";
+import { backfillToSupabase } from "@/lib/usage-store";
 
 export default function BackupPage() {
   const router = useRouter();
@@ -11,6 +12,7 @@ export default function BackupPage() {
   const [error, setError] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [syncing, setSyncing] = useState(false);
 
   async function handleExport() {
     setExporting(true);
@@ -34,10 +36,12 @@ export default function BackupPage() {
       const recipientCount = data.recipients?.length ?? 0;
       const cardCount = data.cards?.length ?? 0;
       const imageCount = Object.keys(data.images ?? {}).length;
+      const usageCount = data.usageEvents?.length ?? 0;
       setStatus(
         `Exported: ${recipientCount} recipient${recipientCount !== 1 ? "s" : ""}, ` +
         `${cardCount} card${cardCount !== 1 ? "s" : ""}, ` +
-        `${imageCount} image${imageCount !== 1 ? "s" : ""}.`
+        `${imageCount} image${imageCount !== 1 ? "s" : ""}, ` +
+        `${usageCount} usage event${usageCount !== 1 ? "s" : ""}.`
       );
     } catch (err) {
       setError(err instanceof Error ? err.message : "Export failed");
@@ -63,11 +67,13 @@ export default function BackupPage() {
       const recipientCount = data.recipients?.length ?? 0;
       const cardCount = data.cards?.length ?? 0;
       const imageCount = Object.keys(data.images ?? {}).length;
+      const usageCount = data.usageEvents?.length ?? 0;
       setStatus(
         `Restored from ${new Date(data.exportedAt).toLocaleDateString()}: ` +
         `${recipientCount} recipient${recipientCount !== 1 ? "s" : ""}, ` +
         `${cardCount} card${cardCount !== 1 ? "s" : ""}, ` +
-        `${imageCount} image${imageCount !== 1 ? "s" : ""}. ` +
+        `${imageCount} image${imageCount !== 1 ? "s" : ""}, ` +
+        `${usageCount} usage event${usageCount !== 1 ? "s" : ""}. ` +
         `Refresh the page or navigate away to see your data.`
       );
     } catch (err) {
@@ -79,47 +85,49 @@ export default function BackupPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-indigo-50 to-white flex flex-col items-center px-6 py-16">
+    <div
+      className="min-h-screen flex flex-col items-center px-6 py-16"
+      style={{ background: "var(--color-cream)" }}
+    >
       <div className="max-w-md w-full">
         <button
           onClick={() => router.push("/")}
-          className="text-sm text-gray-500 hover:text-gray-700 mb-8"
+          className="text-sm text-warm-gray hover:text-charcoal mb-8 transition-colors"
         >
-          &larr; Dashboard
+          &larr; Circle of People
         </button>
 
-        <h1 className="text-2xl font-bold text-gray-900 mb-2">
+        <h1 className="text-2xl font-semibold text-charcoal mb-2">
           Backup &amp; Restore
         </h1>
-        <p className="text-sm text-gray-500 mb-8">
+        <p className="text-sm text-warm-gray mb-8">
           Save all your profiles, recipients, cards, and images to a file.
           Restore them any time — after a reboot, on a new browser, or on another computer.
         </p>
 
         {/* Export */}
-        <div className="bg-white border border-gray-200 rounded-xl p-5 mb-4">
-          <h2 className="text-sm font-semibold text-gray-900 mb-1">
+        <div className="card-surface p-5 mb-4">
+          <h2 className="text-sm font-semibold text-charcoal mb-1">
             Export everything
           </h2>
-          <p className="text-xs text-gray-500 mb-4">
+          <p className="text-xs text-warm-gray mb-4">
             Downloads a .json file with all your data. Keep it somewhere safe.
           </p>
           <button
             onClick={handleExport}
             disabled={exporting}
-            className="w-full bg-indigo-600 text-white py-3 rounded-xl font-medium
-                       hover:bg-indigo-700 transition-colors disabled:opacity-50"
+            className="w-full btn-primary"
           >
             {exporting ? "Exporting..." : "Download backup"}
           </button>
         </div>
 
         {/* Import */}
-        <div className="bg-white border border-gray-200 rounded-xl p-5 mb-4">
-          <h2 className="text-sm font-semibold text-gray-900 mb-1">
+        <div className="card-surface p-5 mb-4">
+          <h2 className="text-sm font-semibold text-charcoal mb-1">
             Restore from backup
           </h2>
-          <p className="text-xs text-gray-500 mb-4">
+          <p className="text-xs text-warm-gray mb-4">
             Load a previously exported backup file. This will add the data back
             (existing data with the same IDs will be overwritten).
           </p>
@@ -136,26 +144,61 @@ export default function BackupPage() {
           <button
             onClick={() => fileInput.current?.click()}
             disabled={importing}
-            className="w-full bg-white border border-indigo-200 text-indigo-600 py-3 rounded-xl
-                       font-medium hover:bg-indigo-50 transition-colors disabled:opacity-50"
+            className="w-full btn-secondary"
           >
             {importing ? "Restoring..." : "Choose backup file"}
           </button>
         </div>
 
+        {/* Sync usage to Supabase */}
+        <div className="card-surface p-5 mb-4">
+          <h2 className="text-sm font-semibold text-charcoal mb-1">
+            Sync usage data
+          </h2>
+          <p className="text-xs text-warm-gray mb-4">
+            Push all usage events from this browser to Supabase so they&apos;re
+            saved permanently and visible across users.
+          </p>
+          <button
+            onClick={async () => {
+              setSyncing(true);
+              setError(null);
+              setStatus(null);
+              try {
+                const count = await backfillToSupabase();
+                setStatus(`Synced ${count} usage event${count !== 1 ? "s" : ""} to Supabase.`);
+              } catch (err) {
+                setError(err instanceof Error ? err.message : "Sync failed");
+              } finally {
+                setSyncing(false);
+              }
+            }}
+            disabled={syncing}
+            className="w-full btn-secondary"
+          >
+            {syncing ? "Syncing..." : "Sync to Supabase"}
+          </button>
+        </div>
+
         {/* Status / Error */}
         {status && (
-          <div className="bg-green-50 border border-green-200 rounded-xl p-4 text-sm text-green-800 mb-4">
+          <div
+            className="rounded-xl p-4 text-sm mb-4"
+            style={{ background: "var(--color-brand-light)", border: "1px solid var(--color-sage-light)", color: "var(--color-brand)" }}
+          >
             {status}
           </div>
         )}
         {error && (
-          <div className="bg-red-50 border border-red-200 rounded-xl p-4 text-sm text-red-700 mb-4">
+          <div
+            className="rounded-xl p-4 text-sm mb-4"
+            style={{ background: "var(--color-error-light)", border: "1px solid var(--color-error)", color: "var(--color-error)" }}
+          >
             {error}
           </div>
         )}
 
-        <p className="text-xs text-gray-400 mt-6 text-center">
+        <p className="text-xs text-warm-gray mt-6 text-center">
           Tip: Export after every testing session so you never lose your work.
         </p>
       </div>

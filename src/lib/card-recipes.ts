@@ -86,7 +86,8 @@ export const GLOBAL_GUARDRAILS: GlobalGuardrails = {
     "busy cluttered backgrounds",
     "stock photography look",
     "corporate clip art",
-    "photorealistic human faces unless explicitly requested",
+    "human figures, faces, or body parts UNLESS the prompt explicitly describes people — when in doubt, leave people out",
+    "cartoon-style or children's-book-style depictions of people",
     "distorted anatomy",
     "AI-generated artifacts or glitches",
     "generic or template-like composition",
@@ -263,53 +264,54 @@ export const SUBJECT_RECIPES: SubjectRecipe[] = [
     id: "people",
     label: "People / Relationships",
     emoji: "👨‍👩‍👧",
-    examples: "couple walking, family gathering, friends laughing, parent and child",
+    examples: "silhouetted couple, abstract figures, hands held, shadows on a path",
     compositionHints: [
-      "figures shown in relationship context — together, interacting",
-      "body language conveys emotion more than facial detail",
-      "silhouettes or impressionistic figures often work better than detailed faces",
+      "ALWAYS render people as silhouettes, abstract shapes, or impressionistic forms — NEVER detailed faces or skin tones",
+      "body language and posture convey emotion, not facial features",
+      "seen from behind, in shadow, or as elegant minimal outlines",
+      "do NOT depict specific racial features, hair textures, or skin colors — keep figures universal",
     ],
     profileKeywords: ["family", "friends", "dancing", "sports", "couple", "wedding", "together", "kids", "grandchildren", "partner"],
     sceneSketches: {
       heartfelt_and_sincere: [
-        "Two friends walking side by side down a tree-lined path in autumn",
-        "A parent holding a child's hand, silhouetted against a warm sunset",
-        "A couple sitting on a park bench, heads leaning together in comfortable silence",
+        "Two silhouetted figures walking side by side down a tree-lined path in golden autumn light, seen from behind",
+        "A small silhouette hand reaching up to hold a larger one, warm sunset glow behind them",
+        "Two abstract figures on a park bench viewed from a distance, soft bokeh light around them",
       ],
       supportive_and_comforting: [
-        "Two silhouetted figures standing together, facing a peaceful sunrise",
-        "A gentle embrace between two people, soft and tender",
-        "A hand reaching out to hold another hand, simple and powerful",
+        "Two dark silhouettes standing shoulder to shoulder facing a peaceful sunrise over water",
+        "An impressionistic embrace — two abstract forms blending together in soft warm tones",
+        "A single outstretched hand offering another hand, rendered as a minimal ink sketch",
       ],
       romantic_and_affectionate: [
-        "A couple dancing under string lights in a garden at dusk",
-        "Two people sharing an umbrella in soft rain, close together",
-        "Silhouettes of a couple watching a sunset from a balcony",
+        "Two silhouettes dancing under string lights in a garden at dusk, faces not visible",
+        "Abstract figures sharing an umbrella in soft rain, rendered as fluid watercolor shapes",
+        "Two silhouettes on a balcony watching a sunset, seen from behind as dark outlines",
       ],
       joyful_and_celebratory: [
-        "Friends raising glasses in a toast, warm festive lighting",
-        "A group of silhouetted figures jumping joyfully on a hilltop",
-        "A family gathered around a table, warmth and celebration in the air",
+        "Raised glasses clinking in a toast, hands only, warm festive light and confetti",
+        "A row of silhouetted figures jumping joyfully on a hilltop against a bright sky",
+        "An impressionistic table scene — warm light, indistinct figures, celebration implied through color and energy",
       ],
       warm_with_a_touch_of_humor: [
-        "Two friends on a porch with oversized mugs of coffee, cozy and casual",
-        "A couple cooking together, one sneaking a taste while the other pretends not to notice",
-        "A parent chasing a laughing child through a sunlit yard",
+        "Two oversized coffee mugs on a porch railing, two pairs of feet propped up beside them",
+        "A kitchen scene with flour everywhere — only hands and mixing bowls visible, warmth and chaos",
+        "Two shadows cast long across a sunlit yard, one clearly chasing the other",
       ],
       funny_and_playful: [
-        "Two friends in a playful tug-of-war over the last slice of cake",
-        "A group of friends doing a silly synchronized dance move",
-        "A couple taking an exaggerated selfie with goofy poses",
+        "Two pairs of hands in a playful tug-of-war over the last slice of cake on a plate",
+        "A row of silly shadows on a wall — exaggerated poses cast by unseen figures",
+        "Two pairs of sneakers side by side, one pair standing on tiptoe, playful energy",
       ],
       sarcastic_and_edgy: [
-        "Two silhouetted figures clinking coffee mugs with deadpan body language",
-        "A person sitting alone at a party table, casually unbothered",
-        "Two friends in sunglasses, arms crossed, looking impossibly cool",
+        "Two silhouettes clinking coffee mugs with deadpan posture, minimal background",
+        "An empty party chair with a single balloon and a half-eaten cake slice — wryly funny",
+        "Two pairs of sunglasses resting side by side on a table, cool and understated",
       ],
       simple_and_understated: [
-        "A single silhouette figure looking out over a quiet landscape",
-        "Two minimal line-drawn figures holding hands, elegant simplicity",
-        "A quiet profile silhouette against a soft background",
+        "A single elegant silhouette looking out over a quiet landscape at dusk",
+        "Two minimal continuous-line figures holding hands, white space all around",
+        "A quiet shadow profile against a soft gradient background, elegant and spare",
       ],
     },
   },
@@ -785,6 +787,18 @@ export function filterProfileInterests(
 /**
  * Build a complete image prompt from all recipe layers + profile context.
  */
+/** Return the best birthday string for age calculation: recipient.birthday or the date from an Important date with label "Birthday". */
+export function getBirthdayForAge(
+  birthday: string | null | undefined,
+  importantDates?: { label: string; date: string }[] | null
+): string | null {
+  if (birthday?.trim()) return birthday.trim();
+  const entry = (importantDates || []).find(
+    (d) => (d.label ?? "").toLowerCase().trim() === "birthday"
+  );
+  return (entry?.date ?? "").trim() || null;
+}
+
 /** Calculate age from a birthday string (YYYY-MM-DD or similar parseable format) */
 export function calculateAge(birthday: string | null | undefined): number | null {
   if (!birthday) return null;
@@ -809,6 +823,7 @@ export function buildRecipePrompt(opts: {
   occasion: string;
   recipientAge?: number | null;
   relationshipType?: string;
+  includeFaithBased?: boolean;
 }): string {
   const subject = getSubjectRecipe(opts.subjectId);
   const mood = getMoodRecipe(opts.tone);
@@ -858,7 +873,7 @@ export function buildRecipePrompt(opts: {
       else if (opts.recipientAge < 60) parts.push("— design for an adult");
       else parts.push("— design for a mature adult");
     }
-    recipientContext = `\nRecipient: ${parts.join(", ")}. Do NOT depict the recipient as a different age.`;
+    recipientContext = `\nRecipient context (for theme/mood only, NOT to depict): ${parts.join(", ")}. Do NOT draw the recipient.`;
   }
 
   // Compose the prompt from all layers
@@ -896,8 +911,72 @@ export function buildRecipePrompt(opts: {
     // Occasion
     `\nOccasion: ${opts.occasion}.`,
 
+    // Faith-based modifier (non-denominational, respectful imagery)
+    ...(opts.includeFaithBased ? ["\nFaith-based card: use respectful, non-denominational imagery (soft light, peaceful, warm). Avoid humor or edgy elements."] : []),
+
     // Avoid list (global + mood-specific)
     `\nAVOID: ${[...GLOBAL_GUARDRAILS.avoid, ...mood.avoid].join("; ")}.`,
+  ];
+
+  return lines.filter(Boolean).join("\n");
+}
+
+/**
+ * User-facing variant of buildRecipePrompt.
+ * Shows only the creative scene description — system guardrails, avoid lists,
+ * recipient metadata, and faith modifiers are stripped because the generate-image
+ * API already enforces them via literalRules.
+ */
+export function buildUserFacingPrompt(opts: {
+  subjectId: string;
+  subjectDetail?: string;
+  tone: string;
+  styleId: string;
+  personalContext?: string;
+  profileInterests?: string[];
+  occasion: string;
+}): string {
+  const subject = getSubjectRecipe(opts.subjectId);
+  const mood = getMoodRecipe(opts.tone);
+  const style = getStyleRecipe(opts.styleId);
+
+  if (!subject || !mood || !style) {
+    return `Illustration for a ${opts.occasion} card. ${opts.personalContext || ""}`;
+  }
+
+  const moodId = toneToMoodId(opts.tone);
+  const sketches = subject.sceneSketches[moodId] || [];
+  const chosenSketch = opts.subjectDetail?.trim()
+    ? opts.subjectDetail.trim()
+    : (pickRandom(sketches, 1)[0] || `${subject.label} illustration`);
+
+  let profileHint = "";
+  if (opts.profileInterests && opts.profileInterests.length > 0) {
+    const filtered = filterProfileInterests(opts.profileInterests, mood);
+    const relevant = filtered.filter((interest) =>
+      subject.profileKeywords.some((kw) =>
+        interest.toLowerCase().includes(kw) || kw.includes(interest.toLowerCase())
+      )
+    );
+    if (relevant.length > 0) {
+      const picked = pickRandom(relevant, 2);
+      profileHint = `\nPersonal touch: incorporate ${picked.join(" and ")} naturally into the scene.`;
+    }
+  }
+
+  const personalCtx = opts.personalContext?.trim()
+    ? `\nAdditional context: ${opts.personalContext.trim()}`
+    : "";
+
+  const lines = [
+    `Scene: ${chosenSketch}`,
+    `\nArt style: ${style.label} — ${pickRandom(style.technique, 2).join(", ")}.`,
+    `Lighting: ${pickRandom(mood.lighting, 2).join(", ")}.`,
+    `Palette: ${pickRandom(mood.palette, 3).join(", ")}.`,
+    `Atmosphere: ${pickRandom(mood.promptSnippets, 2).join(". ")}.`,
+    profileHint,
+    personalCtx,
+    `\nOccasion: ${opts.occasion}.`,
   ];
 
   return lines.filter(Boolean).join("\n");

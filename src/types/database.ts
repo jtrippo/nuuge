@@ -26,6 +26,9 @@ export interface Database {
  */
 export interface PersonProfile {
   display_name: string;
+  first_name: string | null;
+  last_name: string | null;
+  nickname: string | null;
   birthday: string | null;
   personality: string | null;
   humor_style: string | null;
@@ -42,7 +45,9 @@ export interface PersonProfile {
   favorite_books: string | null;
   dislikes: string | null;
   communication_style: string | null;
+  emotional_energy: string | null;
   mailing_address: string | null;
+  email: string | null;
   notes: string | null;
 }
 
@@ -51,7 +56,10 @@ export const PERSON_PROFILE_FIELDS: {
   label: string;
   type: "text" | "textarea" | "tags";
 }[] = [
-  { key: "display_name", label: "Name", type: "text" },
+  { key: "display_name", label: "Display name (for salutations)", type: "text" },
+  { key: "first_name", label: "First name", type: "text" },
+  { key: "last_name", label: "Last name", type: "text" },
+  { key: "nickname", label: "Nickname", type: "text" },
   { key: "birthday", label: "Birthday", type: "text" },
   { key: "personality", label: "Personality", type: "textarea" },
   { key: "humor_style", label: "Humor style", type: "text" },
@@ -68,7 +76,9 @@ export const PERSON_PROFILE_FIELDS: {
   { key: "favorite_books", label: "Favorite books", type: "text" },
   { key: "dislikes", label: "Dislikes / things to avoid", type: "text" },
   { key: "communication_style", label: "Communication style", type: "text" },
+  { key: "emotional_energy", label: "Emotional energy", type: "text" },
   { key: "mailing_address", label: "Mailing address", type: "textarea" },
+  { key: "email", label: "Email", type: "text" },
   { key: "notes", label: "Additional notes", type: "textarea" },
 ];
 
@@ -76,7 +86,8 @@ export interface UserProfile extends PersonProfile {
   id: string;
   created_at: string;
   updated_at: string;
-  email: string;
+  /** Email (required for user; also on PersonProfile for recipients) */
+  email: string | null;
   partner_name: string | null;
   partner_recipient_id: string | null;
   context_raw: string | null;
@@ -118,6 +129,8 @@ export interface Card {
   recipient_ids: string[];
   created_at: string;
   occasion: string;
+  /** When occasion is "Other", this holds the user-defined label (e.g. "Housewarming"). */
+  occasion_custom?: string | null;
   message_text: string;
   image_url: string | null;
   image_prompt: string | null;
@@ -141,15 +154,25 @@ export interface Card {
   /** Where the inside illustration appears relative to the message text */
   inside_image_position?: "top" | "middle" | "bottom" | "left" | "right" | "behind";
   /** Font style for the front cover text overlay */
-  front_text_font?: "sans" | "script" | "block";
+  front_text_font?: string;
   /** Visual style of the front text overlay */
-  front_text_style?: "dark_box" | "white_box" | "plain";
+  front_text_style?: "dark_box" | "white_box" | "plain" | "plain_white";
   /** Font style for the inside message text */
-  font?: "sans" | "script" | "block";
+  font?: string;
+  /** Scale multiplier for message text size on print (default 1.5) */
+  msg_font_scale?: number | null;
+  /** Scale multiplier for front text size on print (default 1) */
+  ft_font_scale?: number | null;
+  /** Scale multiplier for letter insert text size (default 1) */
+  letter_font_scale?: number | null;
   /** 4-step image builder selections */
   image_subject?: string | null;
   art_style?: string | null;
   image_mood?: string | null;
+  /** Optional personal letter insert tucked inside the card */
+  letter_text?: string | null;
+  /** Font choice for the letter insert */
+  letter_font?: string | null;
 }
 
 export type ConversationMessage = {
