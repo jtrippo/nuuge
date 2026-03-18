@@ -60,7 +60,7 @@ export default function TraitPickerWheel({ items, selected, onToggle, onCenterCh
   };
 
   return (
-    <div className="relative rounded-xl overflow-hidden w-full" style={{ border: "1.5px solid var(--color-sage-light)", backgroundColor: "#E8E4DF" }}>
+    <div className="relative rounded-xl overflow-hidden w-full" style={{ border: "1.5px solid var(--color-sage-light)", backgroundColor: "#E8E4DF", isolation: "isolate" }}>
         {/* Center pill — solid, opaque, behind traits; pale sage so it stands out from cream bg */}
         <div
           className="absolute left-2 right-2 pointer-events-none rounded-full"

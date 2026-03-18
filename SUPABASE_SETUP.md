@@ -111,6 +111,7 @@ CREATE TABLE usage_events (
   estimated_cost numeric(10, 6) NOT NULL DEFAULT 0,
   card_id text,
   recipient_id text,
+  session_id text,
   user_agent text
 );
 
@@ -119,6 +120,9 @@ CREATE INDEX usage_events_device_idx ON usage_events (device_id, created_at DESC
 
 -- Index for querying by endpoint (for analytics)
 CREATE INDEX usage_events_endpoint_idx ON usage_events (endpoint, created_at DESC);
+
+-- Index for session-based queries (cost per session, abandoned sessions)
+CREATE INDEX usage_events_session_idx ON usage_events (session_id, created_at DESC);
 ```
 
 ## 2. Enable RLS and add policies
@@ -134,6 +138,26 @@ CREATE POLICY "Anon insert" ON usage_events
 -- Allow reads from the anon key (for future analytics dashboard)
 CREATE POLICY "Anon read" ON usage_events
   FOR SELECT USING (true);
+
+-- Allow updates from the anon key (needed to backfill card_id after save)
+CREATE POLICY "Anon update" ON usage_events
+  FOR UPDATE USING (true) WITH CHECK (true);
+```
+
+## 2b. Migration — add session_id (if table already exists)
+
+If the `usage_events` table was created before session tracking was added, run these in the **SQL Editor**:
+
+```sql
+-- Add session_id column
+ALTER TABLE usage_events ADD COLUMN IF NOT EXISTS session_id text;
+
+-- Index for session-based queries
+CREATE INDEX IF NOT EXISTS usage_events_session_idx ON usage_events (session_id, created_at DESC);
+
+-- Allow updates (needed for backfilling card_id after save)
+CREATE POLICY "Anon update" ON usage_events
+  FOR UPDATE USING (true) WITH CHECK (true);
 ```
 
 ## 3. Verify it's working
@@ -186,6 +210,48 @@ SELECT card_id, user_name, endpoint,
 FROM usage_events
 WHERE card_id IS NOT NULL
 GROUP BY card_id, user_name, endpoint
+HAVING COUNT(*) > 5
+ORDER BY call_count DESC;
+```
+
+### Cost per session (includes abandoned sessions)
+```sql
+SELECT session_id, user_name,
+       MIN(created_at) AS started,
+       MAX(created_at) AS last_activity,
+       card_id,
+       COUNT(*) AS calls,
+       ROUND(SUM(estimated_cost)::numeric, 4) AS session_cost,
+       CASE WHEN MAX(card_id) IS NOT NULL THEN 'completed' ELSE 'abandoned' END AS status
+FROM usage_events
+WHERE session_id IS NOT NULL
+GROUP BY session_id, user_name, card_id
+ORDER BY started DESC;
+```
+
+### Abandoned sessions (cost with no saved card)
+```sql
+SELECT session_id, user_name,
+       MIN(created_at) AS started,
+       MAX(created_at) AS last_activity,
+       COUNT(*) AS calls,
+       ROUND(SUM(estimated_cost)::numeric, 4) AS wasted_cost
+FROM usage_events
+WHERE session_id IS NOT NULL
+  AND card_id IS NULL
+GROUP BY session_id, user_name
+HAVING COUNT(*) >= 1
+ORDER BY wasted_cost DESC;
+```
+
+### Excessive regeneration per session (potential guardrail trigger)
+```sql
+SELECT session_id, user_name, endpoint,
+       COUNT(*) AS call_count,
+       ROUND(SUM(estimated_cost)::numeric, 4) AS cost
+FROM usage_events
+WHERE session_id IS NOT NULL
+GROUP BY session_id, user_name, endpoint
 HAVING COUNT(*) > 5
 ORDER BY call_count DESC;
 ```

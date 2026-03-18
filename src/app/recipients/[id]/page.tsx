@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter, useParams, useSearchParams } from "next/navigation";
-import { getRecipients, saveRecipient, deleteRecipient, getCards, getCardsForRecipient, saveCard, getCardExpandedState, setCardExpanded, linkRecipients, unlinkRecipients, hydrateCardImages } from "@/lib/store";
+import { getRecipients, saveRecipient, deleteRecipient, getCards, getCardsForRecipient, saveCard, deleteCard, getCardExpandedState, setCardExpanded, linkRecipients, unlinkRecipients, hydrateCardImages } from "@/lib/store";
 import { getDisplayOccasion } from "@/lib/occasions";
 import AppHeader from "@/components/AppHeader";
 import ProfileEditor from "@/components/ProfileEditor";
@@ -702,6 +702,19 @@ export default function RecipientDetailPage() {
                                 style={{ color: "var(--color-brand)", border: "1.5px solid var(--color-sage)" }}
                               >
                                 Reuse for someone else
+                              </button>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  if (confirm("Delete this card? This can't be undone.")) {
+                                    deleteCard(card.id);
+                                    setCards((prev) => prev.filter((c) => c.id !== card.id));
+                                  }
+                                }}
+                                className="text-xs font-medium px-3 py-1 rounded-full transition-colors hover:opacity-80"
+                                style={{ color: "var(--color-error)", border: "1.5px solid var(--color-error)" }}
+                              >
+                                Delete
                               </button>
                             </div>
                           </div>

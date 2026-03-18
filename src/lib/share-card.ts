@@ -21,15 +21,16 @@ function dataUrlToBlob(dataUrl: string): Blob {
 /**
  * Shares a card by uploading images directly to Supabase Storage (client-side)
  * and saving metadata via the API. Avoids payload size limits.
+ * @param senderNames Formatted sender string, e.g. "Jeff" or "Jeff & Linda" or "Jeff, Linda, & Kelsey"
  */
 export async function shareCard(
   card: Card,
   recipientFirstName: string,
-  senderFirstName: string
+  senderNames: string
 ): Promise<{ shareUrl: string } | { error: string }> {
   const cardJson = {
     recipient_name: recipientFirstName,
-    sender_name: senderFirstName,
+    sender_name: senderNames,
     message_text: card.message_text,
     front_text: card.front_text ?? null,
     front_text_position: card.front_text_position ?? "bottom-right",

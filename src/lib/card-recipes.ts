@@ -111,7 +111,7 @@ export const SUBJECT_RECIPES: SubjectRecipe[] = [
     sceneSketches: {
       heartfelt_and_sincere: [
         "A loose bouquet of wildflowers tied with twine, catching soft morning light",
-        "Sunflowers turning toward warm golden light in a simple glass jar",
+        "Sunflowers turning toward gentle light in a simple glass jar",
         "A gentle arrangement of daisies and lavender with dewdrops on petals",
       ],
       supportive_and_comforting: [
@@ -120,7 +120,7 @@ export const SUBJECT_RECIPES: SubjectRecipe[] = [
         "A small potted succulent on a windowsill with soft diffused light",
       ],
       romantic_and_affectionate: [
-        "Lush peonies and garden roses in full bloom, warm golden glow",
+        "Lush peonies and garden roses in full bloom, soft ambient light",
         "A cascading arrangement of soft pink roses with delicate ribbon",
         "An intimate close-up of intertwined rose stems with velvet petals",
       ],
@@ -149,6 +149,11 @@ export const SUBJECT_RECIPES: SubjectRecipe[] = [
         "Three simple line-drawn botanical stems, minimal and refined",
         "A quiet sprig of eucalyptus, understated and modern",
       ],
+      nostalgic_and_reflective: [
+        "Dried pressed flowers in a vintage botanical arrangement, faded and delicate",
+        "A well-worn garden gate overgrown with climbing roses, soft afternoon light",
+        "Wildflowers in a weathered mason jar on an old wooden table",
+      ],
     },
   },
   {
@@ -164,9 +169,9 @@ export const SUBJECT_RECIPES: SubjectRecipe[] = [
     profileKeywords: ["dog", "cat", "bird", "pet", "horse", "fish", "wildlife", "zoo", "puppy", "kitten", "rabbit", "fox", "deer", "butterfly"],
     sceneSketches: {
       heartfelt_and_sincere: [
-        "A gentle fox curled up beside wildflowers in soft golden light",
-        "Two small birds sitting together on a branch at sunset",
-        "A loyal dog resting its head on a warm blanket, peaceful and content",
+        "A gentle fox curled up beside wildflowers in soft diffused light",
+        "Two small birds sitting together on a branch in quiet evening light",
+        "A loyal dog resting its head on a cozy blanket, peaceful and content",
       ],
       supportive_and_comforting: [
         "A calm deer standing at the edge of a misty forest at dawn",
@@ -174,7 +179,7 @@ export const SUBJECT_RECIPES: SubjectRecipe[] = [
         "A rabbit resting under a quiet willow tree in gentle morning light",
       ],
       romantic_and_affectionate: [
-        "Two swans forming a heart shape on still water at golden hour",
+        "Two swans forming a heart shape on still water at dusk",
         "A pair of lovebirds on a flowering branch, heads touching",
         "Two foxes nuzzling in a meadow of soft wildflowers",
       ],
@@ -204,59 +209,79 @@ export const SUBJECT_RECIPES: SubjectRecipe[] = [
         "A quiet silhouette of a cat on a windowsill",
         "One small bird perched on a bare branch, elegant and simple",
       ],
+      nostalgic_and_reflective: [
+        "An old dog resting on a porch, quiet afternoon light filtering through trees",
+        "A pair of songbirds on a fence post, soft overcast sky",
+        "A cat curled on a stack of vintage books beside a window",
+      ],
     },
   },
   {
     id: "nature",
-    label: "Nature / Landscape",
+    label: "Nature & Places",
     emoji: "🏔️",
-    examples: "forest, mountains, ocean, garden, meadow, sunset",
+    examples: "forest, mountains, ocean, garden, cozy cottage, cafe street, old bridge, city skyline",
     compositionHints: [
       "sweeping vista or intimate nature detail",
       "horizon line placement for mood (low = expansive sky, high = grounded)",
       "natural depth through layered elements",
+      "architectural scenes framed with natural elements for warmth",
     ],
-    profileKeywords: ["hiking", "camping", "mountains", "beach", "ocean", "outdoors", "fishing", "skiing", "surfing", "kayaking", "travel", "nature", "forest", "lake"],
+    profileKeywords: ["hiking", "camping", "mountains", "beach", "ocean", "outdoors", "fishing", "skiing", "surfing", "kayaking", "travel", "nature", "forest", "lake", "city", "architecture", "paris", "europe", "urban", "home", "cottage"],
     sceneSketches: {
       heartfelt_and_sincere: [
-        "A sun-dappled path through a gentle woodland, warm and inviting",
+        "A sun-dappled path through a gentle woodland, inviting and serene",
         "A quiet garden bench under a canopy of soft spring blossoms",
-        "Rolling hills dotted with wildflowers under a warm amber sky",
+        "Rolling hills dotted with wildflowers under a soft open sky",
+        "A cozy cottage with a welcoming front door and climbing roses",
       ],
       supportive_and_comforting: [
         "A peaceful sunrise over a calm lake, soft mist rising",
         "A single tree standing strong on a gentle hill, dawn sky behind",
         "A quiet forest path with dappled light filtering through leaves",
+        "A sheltered stone doorway with warm light glowing from within",
       ],
       romantic_and_affectionate: [
-        "A moonlit beach with gentle waves and a warm sky at dusk",
-        "A winding garden path through rose arches at golden hour",
+        "A moonlit beach with gentle waves and a soft sky at dusk",
+        "A winding garden path through rose arches in late afternoon light",
         "A secluded woodland clearing with fireflies at twilight",
+        "A quaint Parisian cafe at dusk, warm light spilling onto cobblestones",
       ],
       joyful_and_celebratory: [
         "A brilliant rainbow arching over a sunlit mountain valley",
         "A meadow of bright wildflowers under a vivid blue sky",
-        "A sparkling ocean scene with golden sun and vibrant sky colors",
+        "A sparkling ocean scene with bright sun and vibrant sky colors",
+        "A festive town square with colorful bunting and bright market stalls",
       ],
       warm_with_a_touch_of_humor: [
-        "A cozy cabin porch with a welcoming rocking chair and warm light",
+        "A cozy cabin porch with a welcoming rocking chair and soft light",
         "A puddle reflecting a surprisingly beautiful sky, humble and charming",
         "A garden gate slightly ajar, as if inviting the viewer in",
+        "A crooked little bookshop on a cobblestone lane, endearingly quirky",
       ],
       funny_and_playful: [
         "A mountain peak with a cartoonish flag planted at the top",
         "A tropical island so small it has just one palm tree and a beach chair",
         "A garden where the flowers are growing in unexpectedly wild directions",
+        "A tiny house with an absurdly oversized chimney puffing cheerful smoke",
       ],
       sarcastic_and_edgy: [
         "A lone cactus in a vast desert, bold and graphic",
         "A stark mountain silhouette against a dramatic moody sky",
         "A single dead tree in an otherwise empty landscape, powerful and minimal",
+        "A brutalist concrete building, stark and unapologetic against a flat sky",
       ],
       simple_and_understated: [
         "A minimal mountain range silhouette against a soft gradient sky",
         "A single leaf floating on still water, concentric ripples",
         "A quiet horizon line where sea meets sky, almost abstract",
+        "A simple arched doorway framing a distant view, elegant and spare",
+      ],
+      nostalgic_and_reflective: [
+        "A winding country road disappearing into misty rolling hills",
+        "An old wooden dock on a still lake at dusk, soft reflections",
+        "A weathered bench under an ancient oak tree, dappled shade",
+        "An old stone bridge over a quiet river, soft afternoon light",
       ],
     },
   },
@@ -274,13 +299,13 @@ export const SUBJECT_RECIPES: SubjectRecipe[] = [
     profileKeywords: ["family", "friends", "dancing", "sports", "couple", "wedding", "together", "kids", "grandchildren", "partner"],
     sceneSketches: {
       heartfelt_and_sincere: [
-        "Two silhouetted figures walking side by side down a tree-lined path in golden autumn light, seen from behind",
-        "A small silhouette hand reaching up to hold a larger one, warm sunset glow behind them",
+        "Two silhouetted figures walking side by side down a tree-lined path in soft autumn light, seen from behind",
+        "A small silhouette hand reaching up to hold a larger one, gentle sky glow behind them",
         "Two abstract figures on a park bench viewed from a distance, soft bokeh light around them",
       ],
       supportive_and_comforting: [
         "Two dark silhouettes standing shoulder to shoulder facing a peaceful sunrise over water",
-        "An impressionistic embrace — two abstract forms blending together in soft warm tones",
+        "An impressionistic embrace — two abstract forms blending together in soft muted tones",
         "A single outstretched hand offering another hand, rendered as a minimal ink sketch",
       ],
       romantic_and_affectionate: [
@@ -289,9 +314,9 @@ export const SUBJECT_RECIPES: SubjectRecipe[] = [
         "Two silhouettes on a balcony watching a sunset, seen from behind as dark outlines",
       ],
       joyful_and_celebratory: [
-        "Raised glasses clinking in a toast, hands only, warm festive light and confetti",
+        "Raised glasses clinking in a toast, hands only, bright festive light and confetti",
         "A row of silhouetted figures jumping joyfully on a hilltop against a bright sky",
-        "An impressionistic table scene — warm light, indistinct figures, celebration implied through color and energy",
+        "An impressionistic table scene — lively light, indistinct figures, celebration implied through color and energy",
       ],
       warm_with_a_touch_of_humor: [
         "Two oversized coffee mugs on a porch railing, two pairs of feet propped up beside them",
@@ -313,6 +338,11 @@ export const SUBJECT_RECIPES: SubjectRecipe[] = [
         "Two minimal continuous-line figures holding hands, white space all around",
         "A quiet shadow profile against a soft gradient background, elegant and spare",
       ],
+      nostalgic_and_reflective: [
+        "Two silhouettes walking together down a tree-lined path, soft filtered light",
+        "A figure sitting on a porch swing looking at a distant sunset",
+        "Gentle shadows of two people sharing an umbrella in light rain",
+      ],
     },
   },
   {
@@ -329,8 +359,8 @@ export const SUBJECT_RECIPES: SubjectRecipe[] = [
     sceneSketches: {
       heartfelt_and_sincere: [
         "A small hedgehog offering a tiny flower with earnest expression",
-        "A fox cub sitting under a string of warm fairy lights, content",
-        "A teddy bear holding a hand-written card, looking up warmly",
+        "A fox cub sitting under a string of soft fairy lights, content",
+        "A teddy bear holding a hand-written card, looking up sweetly",
       ],
       supportive_and_comforting: [
         "A small bear wrapping a blanket around a smaller friend",
@@ -368,6 +398,11 @@ export const SUBJECT_RECIPES: SubjectRecipe[] = [
         "A tiny fox silhouette, clean and elegant against white space",
         "A simple bunny character in repose, gentle and refined",
       ],
+      nostalgic_and_reflective: [
+        "A small owl character sitting on a stack of old letters",
+        "A gentle bear character holding a faded photograph",
+        "A rabbit character tending a timeworn garden, quiet contentment",
+      ],
     },
   },
   {
@@ -383,24 +418,24 @@ export const SUBJECT_RECIPES: SubjectRecipe[] = [
     profileKeywords: ["christmas", "halloween", "easter", "thanksgiving", "hanukkah", "diwali", "new year", "valentines", "fourth of july", "holiday"],
     sceneSketches: {
       heartfelt_and_sincere: [
-        "A warm fireplace scene with stockings, soft candlelight",
-        "A gentle snow-covered cottage with golden light in the windows",
+        "A cozy fireplace scene with stockings, soft candlelight",
+        "A gentle snow-covered cottage with soft light in the windows",
         "A spring garden in soft bloom, easter-morning feeling",
       ],
       supportive_and_comforting: [
         "A single candle flame glowing steadily against a quiet winter night",
         "First snowdrops emerging in early spring, promise of renewal",
-        "A quiet winter scene with soft falling snow and warm light",
+        "A quiet winter scene with soft falling snow and gentle light",
       ],
       romantic_and_affectionate: [
-        "Mistletoe and warm string lights in a cozy winter setting",
+        "Mistletoe and soft string lights in a cozy winter setting",
         "A Valentine's garden with heart-shaped topiaries and roses",
-        "Two stockings hanging side by side by a warm fire",
+        "Two stockings hanging side by side by a quiet fire",
       ],
       joyful_and_celebratory: [
         "Brilliant fireworks bursting over a cityscape in celebration",
         "A brightly decorated Christmas tree with glowing ornaments",
-        "Festive autumn harvest table with pumpkins and warm colors",
+        "Festive autumn harvest table with pumpkins and rich seasonal colors",
       ],
       warm_with_a_touch_of_humor: [
         "A snowman with a slightly crooked carrot nose, charming and imperfect",
@@ -422,59 +457,79 @@ export const SUBJECT_RECIPES: SubjectRecipe[] = [
         "A minimal holly branch with red berries, elegant and clean",
         "One simple autumn leaf, perfectly formed, against white space",
       ],
+      nostalgic_and_reflective: [
+        "Vintage Christmas ornaments in a worn wooden box, soft light",
+        "An old-fashioned valentine with lace edges and faded ink",
+        "A weathered birthday candle holder with a single lit flame, quiet celebration",
+      ],
     },
   },
   {
     id: "objects",
-    label: "Objects / Symbols",
+    label: "Objects & Celebrations",
     emoji: "☕",
-    examples: "coffee cup, books, guitar, compass, bicycle, key, typewriter",
+    examples: "coffee cup, books, guitar, birthday cake, champagne, tea set, gift box, picnic",
     compositionHints: [
       "single strong focal object",
       "object as metaphor or symbol of the sentiment",
       "lots of negative space around the focal element",
+      "food and drink items styled as still life with atmosphere",
     ],
-    profileKeywords: ["coffee", "tea", "books", "reading", "music", "guitar", "piano", "cooking", "baking", "art", "photography", "cycling", "running", "wine", "craft", "knitting", "chess", "gaming", "writing", "vintage"],
+    profileKeywords: ["coffee", "tea", "books", "reading", "music", "guitar", "piano", "cooking", "baking", "art", "photography", "cycling", "running", "wine", "craft", "knitting", "chess", "gaming", "writing", "vintage", "food", "cake", "cocktails", "brunch"],
     sceneSketches: {
       heartfelt_and_sincere: [
-        "A warm cup of tea with steam curling upward in soft light",
+        "A steaming cup of tea with steam curling upward in soft light",
         "An open book with pressed flowers between the pages",
         "A hand-written letter in an envelope with a wax seal",
+        "A lovingly arranged tea set for two on a linen cloth, soft light",
       ],
       supportive_and_comforting: [
-        "A warm blanket draped over a reading chair, soft lamp light",
+        "A soft blanket draped over a reading chair, gentle lamp light",
         "A steaming mug of cocoa with a cozy knit sleeve",
         "A small candle glowing steadily beside a stack of books",
+        "A warm bowl of soup and fresh bread on a quiet table, comforting light",
       ],
       romantic_and_affectionate: [
-        "Two wine glasses touching in a toast, warm candlelight",
+        "Two wine glasses touching in a toast, soft candlelight",
         "A vintage key on a velvet ribbon, symbolizing the heart",
         "A pair of intertwined coffee cups viewed from above",
+        "A box of artisan chocolates with a satin ribbon, intimate setting",
       ],
       joyful_and_celebratory: [
         "A champagne bottle with cork popping and sparkles",
         "A colorful birthday cake with lit candles, festive and bright",
         "A gift box with a spectacular bow, anticipation and joy",
+        "A festive table spread with cupcakes, confetti, and party favors",
       ],
       warm_with_a_touch_of_humor: [
         "A coffee mug that says something you can't quite read, next to a donut",
         "A guitar leaning against a porch railing on a lazy afternoon",
         "A stack of books piled improbably high, endearingly precarious",
+        "A slightly lopsided homemade birthday cake, charming and heartfelt",
       ],
       funny_and_playful: [
         "A donut wearing sunglasses next to a very serious cup of coffee",
         "A pizza slice on a throne with a tiny crown",
         "A sock missing its match, looking forlorn on a clothesline",
+        "A cake with way too many candles, cheerful and absurd",
       ],
       sarcastic_and_edgy: [
         "A single black coffee in a stark white mug, no nonsense",
         "A vintage typewriter with a crumpled paper ball beside it",
         "A cactus in a tiny pot on an otherwise empty desk",
+        "A single candle on a cupcake, deadpan minimal birthday",
       ],
       simple_and_understated: [
         "A single vintage bicycle leaning against a wall",
         "A compass rose, clean and elegant against a soft background",
         "A simple line drawing of a coffee cup, refined and minimal",
+        "A single macaron on a white plate, elegant and spare",
+      ],
+      nostalgic_and_reflective: [
+        "A well-loved book open on a worn leather armchair, reading glasses nearby",
+        "An antique pocket watch resting on a handwritten letter",
+        "A vintage camera on a wooden shelf beside faded photographs",
+        "A grandmother's tea cup and saucer on a lace doily, gentle light",
       ],
     },
   },
@@ -491,9 +546,9 @@ export const SUBJECT_RECIPES: SubjectRecipe[] = [
     profileKeywords: ["art", "design", "patterns", "geometry", "colors", "abstract", "modern", "contemporary", "minimal"],
     sceneSketches: {
       heartfelt_and_sincere: [
-        "Soft watercolor washes blending warm golds, peach, and gentle greens",
-        "Flowing organic shapes in warm pastel tones, like a gentle embrace",
-        "A soft gradient from warm gold to blush pink, simple and emotional",
+        "Soft watercolor washes blending gentle blues, sage, and muted rose",
+        "Flowing organic shapes in soft pastel tones, like a gentle embrace",
+        "A soft gradient from dusty blue to blush pink, simple and emotional",
       ],
       supportive_and_comforting: [
         "Gentle concentric circles in calming blues and soft lavender",
@@ -501,9 +556,9 @@ export const SUBJECT_RECIPES: SubjectRecipe[] = [
         "Soft overlapping shapes in muted tones, like a gentle exhale",
       ],
       romantic_and_affectionate: [
-        "Flowing curves in deep rose and gold, intimate and warm",
+        "Flowing curves in deep rose and slate, intimate and refined",
         "Intertwining abstract forms in blush and burgundy",
-        "Soft bokeh-like circles in romantic pink and gold tones",
+        "Soft bokeh-like circles in romantic pink and muted plum tones",
       ],
       joyful_and_celebratory: [
         "Bold splashes of confetti-like color bursting across the canvas",
@@ -511,8 +566,8 @@ export const SUBJECT_RECIPES: SubjectRecipe[] = [
         "Radiating sunburst pattern in vibrant yellows and oranges",
       ],
       warm_with_a_touch_of_humor: [
-        "Playful polka dots in mismatched warm colors, charming and casual",
-        "Squiggly hand-drawn shapes in friendly warm tones",
+        "Playful polka dots in mismatched soft colors, charming and casual",
+        "Squiggly hand-drawn shapes in friendly muted tones",
         "A pattern where one element is deliberately out of place, winking",
       ],
       funny_and_playful: [
@@ -528,7 +583,71 @@ export const SUBJECT_RECIPES: SubjectRecipe[] = [
       simple_and_understated: [
         "A single thin line forming a gentle curve against white space",
         "Two overlapping circles in muted neutral tones",
-        "A quiet gradient from soft gray to warm white, barely there",
+        "A quiet gradient from soft gray to cool white, barely there",
+      ],
+      nostalgic_and_reflective: [
+        "Layered translucent shapes suggesting faded memories, soft edges",
+        "A gentle wash of sepia and dusty blue, abstract and evocative",
+        "Overlapping circles in muted tones, like ripples in still water",
+      ],
+    },
+  },
+  {
+    id: "celestial",
+    label: "Celestial / Night Sky",
+    emoji: "🌙",
+    examples: "stars, moon, constellations, aurora, sunrise, galaxy, shooting star",
+    compositionHints: [
+      "sky as the dominant element, filling most of the composition",
+      "single celestial focal point (moon, star cluster, aurora band)",
+      "sense of vastness and wonder through scale and color",
+    ],
+    profileKeywords: ["astronomy", "stars", "space", "science", "nature", "night", "sky", "travel", "wonder", "meditation", "philosophy"],
+    sceneSketches: {
+      heartfelt_and_sincere: [
+        "A gentle crescent moon above a quiet landscape, soft starlight",
+        "A sky full of softly glowing stars reflected in still water below",
+        "A warm sunrise breaking over a distant horizon, hopeful and tender",
+      ],
+      supportive_and_comforting: [
+        "A steady guiding star in a soft night sky, calm and reassuring",
+        "The first light of dawn appearing on a dark horizon, quiet promise",
+        "A gentle aurora in soft blues and greens over a peaceful scene",
+      ],
+      romantic_and_affectionate: [
+        "A full moon casting silver light over a calm sea at night",
+        "Two shooting stars crossing paths in a deep twilight sky",
+        "A starlit sky above a silhouetted tree line, intimate and magical",
+      ],
+      joyful_and_celebratory: [
+        "A brilliant burst of shooting stars streaking across a vivid sky",
+        "A vibrant aurora borealis in greens, pinks, and purples, dazzling",
+        "A radiant sunrise with bold color bands of coral, gold, and blue",
+      ],
+      nostalgic_and_reflective: [
+        "A familiar constellation in a faded indigo sky, quiet wonder",
+        "An old telescope pointed at a soft moon, sense of shared memories",
+        "The last light of a sunset fading into deep blue dusk",
+      ],
+      warm_with_a_touch_of_humor: [
+        "A smiling crescent moon peeking through friendly clouds",
+        "A single star that shines just a bit brighter than the rest, winking",
+        "A cozy rooftop scene with a blanket laid out for stargazing",
+      ],
+      funny_and_playful: [
+        "A moon with a cheerful face winking at the viewer, bright and playful",
+        "Stars arranged in a cartoonishly perfect constellation shape",
+        "A rocket ship trailing a rainbow through a starry cartoon sky",
+      ],
+      sarcastic_and_edgy: [
+        "A stark black sky with a single unimpressed-looking star",
+        "A dramatic eclipse in high contrast, bold and graphic",
+        "A minimalist crescent moon against absolute darkness, striking",
+      ],
+      simple_and_understated: [
+        "A thin crescent moon against a soft gradient sky, minimal and elegant",
+        "Three small stars in a quiet expanse of night, understated and calm",
+        "A single horizon line with the faintest glow of predawn light",
       ],
     },
   },
@@ -541,13 +660,13 @@ export const MOOD_RECIPES: MoodRecipe[] = [
     id: "heartfelt_and_sincere",
     label: "Heartfelt and sincere",
     recommendedSubjects: ["flowers", "animals", "nature", "people"],
-    lighting: ["warm natural light", "soft golden glow", "low contrast", "gentle ambient light"],
-    palette: ["soft pastels", "warm neutrals", "gentle greens", "peach and blush accents", "warm ivory"],
+    lighting: ["soft natural light", "gentle ambient light", "low contrast", "soft diffused light", "overcast natural light"],
+    palette: ["soft pastels", "gentle greens", "dusty blue and sage", "muted rose and slate", "soft ivory and cool gray", "peach and blush accents"],
     texture: ["subtle paper texture", "soft gradients", "light painterly edges"],
     composition: ["simple focal subject", "airy spacing", "lower-third focal point"],
     avoid: ["confetti", "neon colors", "harsh shadows", "overly busy compositions"],
     promptSnippets: [
-      "warm, genuine, heartfelt atmosphere",
+      "genuine, heartfelt atmosphere",
       "soft natural light and gentle inviting colors",
       "simple uncluttered composition with breathing room",
     ],
@@ -557,8 +676,8 @@ export const MOOD_RECIPES: MoodRecipe[] = [
     id: "supportive_and_comforting",
     label: "Supportive and comforting",
     recommendedSubjects: ["nature", "objects", "flowers", "characters"],
-    lighting: ["diffused soft light", "gentle dawn glow", "low contrast", "no harsh highlights"],
-    palette: ["muted pastels", "soft blues", "lavender", "warm gray", "cream", "sage"],
+    lighting: ["diffused soft light", "gentle dawn glow", "low contrast", "overcast softness", "cool morning light"],
+    palette: ["muted pastels", "soft blues", "lavender", "cool gray", "sage", "dusty periwinkle", "soft celadon"],
     texture: ["smooth washes", "very light grain", "misty atmospheric quality"],
     composition: ["minimal elements", "single focal point", "wide open space", "very low visual density"],
     avoid: ["celebration elements", "high saturation", "dramatic contrast", "busy patterns"],
@@ -572,15 +691,15 @@ export const MOOD_RECIPES: MoodRecipe[] = [
   {
     id: "romantic_and_affectionate",
     label: "Romantic and affectionate",
-    recommendedSubjects: ["flowers", "people", "nature", "characters"],
-    lighting: ["warm golden glow", "soft candlelight feel", "gentle vignette"],
-    palette: ["blush pink", "deep rose", "warm cream", "soft gold accents", "sage green accents", "burgundy"],
+    recommendedSubjects: ["flowers", "people", "nature", "celestial"],
+    lighting: ["soft diffused glow", "gentle vignette", "low ambient light", "twilight softness", "candlelight feel"],
+    palette: ["blush pink", "deep rose", "dusty mauve", "soft plum and sage", "muted teal accents", "burgundy and cool cream"],
     texture: ["velvety soft blending", "gentle painterly quality", "light paper texture"],
     composition: ["elegant focal arrangement", "gently asymmetrical balance", "intimate framing"],
     avoid: ["cartoonish exaggeration", "neon pinks", "overcrowded compositions", "harsh contrast"],
     promptSnippets: [
       "romantic, affectionate, intimate atmosphere",
-      "soft warm glow with elegant refined composition",
+      "soft glow with elegant refined composition",
       "beautiful details with breathing room",
     ],
     profileFilter: "all",
@@ -589,8 +708,8 @@ export const MOOD_RECIPES: MoodRecipe[] = [
     id: "joyful_and_celebratory",
     label: "Joyful and celebratory",
     recommendedSubjects: ["characters", "holiday", "flowers", "animals"],
-    lighting: ["bright daylight feel", "cheerful highlights", "medium contrast", "vibrant"],
-    palette: ["bright primaries", "happy pastels", "vibrant accents", "sunny yellows", "sky blues"],
+    lighting: ["bright daylight feel", "cheerful highlights", "medium contrast", "vibrant clean light"],
+    palette: ["bright primaries", "happy pastels", "vibrant accents", "sky blues and coral", "fresh greens and turquoise", "vivid magenta and cobalt"],
     texture: ["clean illustration", "crisp shapes", "energetic brushwork"],
     composition: ["energetic but not cluttered", "clear focal elements", "upward diagonal movement"],
     avoid: ["overdense confetti", "dark moody palettes", "too many competing elements"],
@@ -605,15 +724,15 @@ export const MOOD_RECIPES: MoodRecipe[] = [
     id: "warm_with_a_touch_of_humor",
     label: "Warm with a touch of humor",
     recommendedSubjects: ["characters", "animals", "objects", "flowers"],
-    lighting: ["warm cozy light", "soft inviting shadows", "friendly ambient tone"],
-    palette: ["warm pastels", "soft oranges", "gentle teal accents", "cream background", "honey tones"],
+    lighting: ["soft cozy light", "friendly ambient tone", "gentle natural light", "soft inviting shadows"],
+    palette: ["soft pastels", "gentle teal and peach", "muted coral and sage", "dusty blue and cream", "light olive and blush"],
     texture: ["hand-drawn feel", "slight ink outline", "soft friendly shading"],
     composition: ["simple character or object + one prop", "clear read at small size", "ample whitespace"],
     avoid: ["mean-spirited elements", "heavy sarcasm", "aggressive contrast", "visual chaos"],
     promptSnippets: [
-      "friendly warm mood with a subtle charming twist",
+      "friendly mood with a subtle charming twist",
       "simple inviting composition with personality",
-      "cozy palette and clean uncluttered background",
+      "approachable palette and clean uncluttered background",
     ],
     profileFilter: "all",
   },
@@ -636,7 +755,7 @@ export const MOOD_RECIPES: MoodRecipe[] = [
   {
     id: "sarcastic_and_edgy",
     label: "Sarcastic and edgy",
-    recommendedSubjects: ["objects", "characters", "animals", "abstract"],
+    recommendedSubjects: ["objects", "characters", "celestial", "abstract"],
     lighting: ["flat or lightly shaded", "graphic contrast", "controlled highlights"],
     palette: ["limited palette", "bold single accent color", "neutral base (white/cream/gray)", "black and white with pop"],
     texture: ["graphic illustration", "poster-like cleanliness", "crisp outlines"],
@@ -652,9 +771,9 @@ export const MOOD_RECIPES: MoodRecipe[] = [
   {
     id: "simple_and_understated",
     label: "Simple and understated",
-    recommendedSubjects: ["objects", "flowers", "abstract", "nature"],
-    lighting: ["soft and even", "very low contrast", "no dramatic effects"],
-    palette: ["neutral tones", "monochrome options", "muted earth tones", "soft gray-blue", "warm white"],
+    recommendedSubjects: ["objects", "flowers", "abstract", "celestial"],
+    lighting: ["soft and even", "very low contrast", "no dramatic effects", "flat ambient light"],
+    palette: ["neutral tones", "monochrome options", "cool gray and white", "soft gray-blue", "charcoal and ivory", "muted stone and slate"],
     texture: ["clean matte look", "very subtle grain", "no heavy brush texture"],
     composition: ["ultra minimal", "abundant negative space", "centered or rule-of-thirds placement"],
     avoid: ["visual noise", "busy patterns", "too many colors", "complex scenes", "clutter"],
@@ -664,6 +783,22 @@ export const MOOD_RECIPES: MoodRecipe[] = [
       "simple forms with elegant sophistication",
     ],
     profileFilter: "minimal",
+  },
+  {
+    id: "nostalgic_and_reflective",
+    label: "Nostalgic and reflective",
+    recommendedSubjects: ["nature", "objects", "celestial", "flowers"],
+    lighting: ["late afternoon light", "soft filtered light through curtains", "gentle overcast glow", "dappled shade", "quiet evening light"],
+    palette: ["faded denim and ivory", "sepia and dusty rose", "muted olive and cream", "slate blue and parchment", "antique gold and soft gray", "cool lavender and warm bisque"],
+    texture: ["subtle paper aging", "soft grain", "gentle vignette", "slightly faded edges"],
+    composition: ["single evocative object", "wide negative space inviting memory", "off-center focal point with breathing room"],
+    avoid: ["neon colors", "busy patterns", "overly modern elements", "harsh contrast", "cartoonish exaggeration"],
+    promptSnippets: [
+      "nostalgic, reflective atmosphere evoking cherished memories",
+      "soft muted palette with gentle vintage quality",
+      "quiet composition that invites contemplation and warmth",
+    ],
+    profileFilter: "all",
   },
 ];
 
@@ -704,7 +839,7 @@ export const STYLE_RECIPES: StyleRecipe[] = [
     technique: ["mid-century illustration style", "screen-print aesthetic", "limited color separations"],
     texture: ["subtle paper aging", "slight grain or noise", "muted color saturation"],
     lineQuality: ["bold confident strokes", "retro lettering-style curves", "woodblock feel"],
-    renderingNotes: ["desaturate slightly", "warm the overall tone", "embrace imperfection in registration"],
+    renderingNotes: ["desaturate slightly", "slightly aged color quality", "embrace imperfection in registration"],
   },
   {
     id: "painterly",
@@ -723,6 +858,33 @@ export const STYLE_RECIPES: StyleRecipe[] = [
     texture: ["varied — from smooth gradients to rough marks", "mixed media feel"],
     lineQuality: ["free-form", "expressive", "no concern for realism"],
     renderingNotes: ["emotion through color and form, not representation", "bold compositional choices"],
+  },
+  {
+    id: "art_deco",
+    label: "Art Deco",
+    desc: "Geometric elegance with bold lines, symmetry, and luxurious detail",
+    technique: ["geometric symmetry", "bold angular forms", "ornamental pattern work", "1920s-30s decorative design"],
+    texture: ["smooth polished surfaces", "metallic accents (gold, silver, bronze)", "crisp clean rendering"],
+    lineQuality: ["strong precise outlines", "angular geometric shapes", "symmetrical framing elements"],
+    renderingNotes: ["emphasize symmetry and geometric repetition", "luxurious and glamorous without being gaudy"],
+  },
+  {
+    id: "line_art",
+    label: "Line Art / Ink",
+    desc: "Clean ink drawings with expressive linework and minimal or no color",
+    technique: ["pen and ink illustration", "cross-hatching for depth", "contour drawing"],
+    texture: ["crisp ink on paper", "occasional ink splatter or bleed", "white space as a design element"],
+    lineQuality: ["varied line weight for emphasis", "confident fluid strokes", "fine detail work"],
+    renderingNotes: ["limited palette — black ink with at most one or two accent colors", "let the linework carry the composition"],
+  },
+  {
+    id: "gouache",
+    label: "Gouache",
+    desc: "Flat, opaque, matte color with a modern illustrative feel",
+    technique: ["flat opaque color application", "layered shapes with clean edges", "modern editorial illustration style"],
+    texture: ["matte velvety finish", "smooth flat color fields", "subtle visible brush marks at edges"],
+    lineQuality: ["shapes defined by color contrast, not outlines", "crisp silhouettes", "occasional thin outline accents"],
+    renderingNotes: ["bold flat areas of color with confident placement", "contemporary and fresh — like a modern book or magazine illustration"],
   },
 ];
 

@@ -1,19 +1,21 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { getCardById, updateCard, saveCard, getRecipients, hydrateCardImages } from "@/lib/store";
+import { getCardById, updateCard, saveCard, getRecipients, getUserProfile, hydrateCardImages } from "@/lib/store";
 import AppHeader from "@/components/AppHeader";
 import type { Card, Recipient } from "@/types/database";
 import { ALL_OCCASIONS, OTHER_OCCASION_VALUE, OTHER_OCCASION_LABEL, getDisplayOccasion } from "@/lib/occasions";
-import { fontCSS, positionCSS, textStyleCSS, frontTextAlign, messageSizing, FONT_OPTIONS } from "@/lib/card-ui-helpers";
+import { fontCSS, positionCSS, textStyleCSS, frontTextAlign, messageSizing, msgSizeOptions, FONT_OPTIONS, isAccentPosition, defaultAccentSlots, cornerStyle, cornerImgStyle, edgeStyle, edgeImgStyle, frameImgStyle } from "@/lib/card-ui-helpers";
 import type { FontChoice, TextStyleChoice } from "@/lib/card-ui-helpers";
+import { STYLE_RECIPES } from "@/lib/card-recipes";
+import { formatSignerNames, getSignerNameList } from "@/lib/signer-helpers";
 
 const FRONT_TEXT_STYLES: { id: TextStyleChoice; label: string }[] = [
-  { id: "white_box", label: "Plain black text" },
-  { id: "plain", label: "Black on white box" },
-  { id: "plain_white", label: "Plain white text" },
-  { id: "dark_box", label: "White on dark box" },
+  { id: "plain_black", label: "Plain black" },
+  { id: "plain_white", label: "Plain white" },
+  { id: "black_white_border", label: "Black / white outline" },
+  { id: "white_black_border", label: "White / black outline" },
 ];
 
 const FRONT_TEXT_POSITIONS = [
@@ -25,14 +27,68 @@ const FRONT_TEXT_POSITIONS = [
   { id: "top-left", label: "Top left" },
 ];
 
-const INSIDE_POSITIONS = [
-  { id: "top", label: "Top banner" },
-  { id: "middle", label: "Middle band" },
-  { id: "bottom", label: "Bottom banner" },
-  { id: "left", label: "Left edge" },
-  { id: "right", label: "Right edge" },
-  { id: "behind", label: "Watermark (behind text)" },
-];
+const ALL_DECORATION_OPTIONS = [
+  { id: "none", label: "None (remove)", group: "remove", orientation: "horizontal" as const },
+  { id: "top", label: "Top banner", group: "banner", orientation: "horizontal" },
+  { id: "middle", label: "Middle band", group: "banner", orientation: "horizontal" },
+  { id: "bottom", label: "Bottom banner", group: "banner", orientation: "horizontal" },
+  { id: "left", label: "Left edge", group: "banner", orientation: "vertical" },
+  { id: "right", label: "Right edge", group: "banner", orientation: "vertical" },
+  { id: "behind", label: "Watermark (behind text)", group: "banner", orientation: "square" },
+  { id: "corner_flourish", label: "Corner flourish", group: "accent", orientation: "square" },
+  { id: "top_edge_accent", label: "Edge motif", group: "accent", orientation: "horizontal" },
+  { id: "frame", label: "Full frame", group: "accent", orientation: "vertical" },
+] as const;
+
+type DecorationOrientation = "horizontal" | "vertical" | "square";
+
+function getDecorationOrientation(posId: string): DecorationOrientation {
+  return ALL_DECORATION_OPTIONS.find((o) => o.id === posId)?.orientation ?? "horizontal";
+}
+
+function getDecorationGroup(posId: string): string {
+  return ALL_DECORATION_OPTIONS.find((o) => o.id === posId)?.group ?? "banner";
+}
+
+function needsRegeneration(oldPos: string, newPos: string): boolean {
+  if (oldPos === newPos) return false;
+  if (newPos === "none") return false;
+  if (oldPos === "none") return true;
+  const oldGroup = getDecorationGroup(oldPos);
+  const newGroup = getDecorationGroup(newPos);
+  if (oldGroup !== newGroup) return true;
+  if (oldGroup === "accent") return true;
+  const oldOrientation = getDecorationOrientation(oldPos);
+  const newOrientation = getDecorationOrientation(newPos);
+  return oldOrientation !== newOrientation;
+}
+
+function imageSizeForPosition(pos: string): "1536x1024" | "1024x1536" | "1024x1024" {
+  const o = getDecorationOrientation(pos);
+  if (o === "horizontal") return "1536x1024";
+  if (o === "vertical") return "1024x1536";
+  return "1024x1024";
+}
+
+function buildAccentPrompt(accent: string, styleLabel: string): string {
+  const base = `${styleLabel}-style decorative element for a greeting card interior. Delicate, subtle, refined ornamental design. PURE WHITE (#FFFFFF) background — absolutely no cream, ivory, beige, or off-white tones. The background must be perfectly white. No text, no words, no letters.`;
+  switch (accent) {
+    case "corner_flourish":
+      return `Create a single corner flourish ornament in ${base} The design should be a decorative scroll or floral motif for one corner only, occupying roughly the bottom-right quarter of the image. The rest of the image must be pure white/empty. The flourish should be elegant and minimal — thin delicate lines.`;
+    case "top_edge_accent":
+      return `Create a horizontal decorative ornamental strip in ${base} A wide, short decorative motif or garland suitable for the top edge of a card. Centered composition, symmetrical, with ornamental scrollwork or subtle botanical flourishes. The strip should span the full width but be short in height.`;
+    case "frame":
+      return `Create a subtle ornamental border frame in ${base} A delicate decorative frame around the edges of the image with a completely white/empty center (at least 70% of the area must be empty white space). Light decorative flourish corners, thin ornamental lines along the edges. The frame should be refined and minimal — not heavy or ornate.`;
+    default:
+      return "";
+  }
+}
+
+function buildBannerPrompt(pos: string, styleLabel: string, frontImageBase64?: string | null): string | null {
+  if (frontImageBase64) return null;
+  const orientationWord = getDecorationOrientation(pos) === "vertical" ? "vertical" : "horizontal";
+  return `Create a ${orientationWord} decorative illustration in ${styleLabel} style suitable for a greeting card interior. Soft, complementary colors. No text, no words, no letters.`;
+}
 
 const TONES = [
   "Heartfelt and sincere", "Supportive and comforting",
@@ -70,6 +126,7 @@ export default function EditCardPage() {
   const [mounted, setMounted] = useState(false);
   const [saved, setSaved] = useState(false);
   const [savedAsNew, setSavedAsNew] = useState<string | null>(null);
+  const loadedRef = useRef(false);
 
   // Editable fields
   const [greeting, setGreeting] = useState("");
@@ -77,20 +134,30 @@ export default function EditCardPage() {
   const [closing, setClosing] = useState("");
   const [frontText, setFrontText] = useState("");
   const [frontTextPosition, setFrontTextPosition] = useState("bottom-right");
-  const [frontTextStyle, setFrontTextStyle] = useState<TextStyleChoice>("dark_box");
+  const [frontTextStyle, setFrontTextStyle] = useState<TextStyleChoice>("plain_black");
   const [frontTextFont, setFrontTextFont] = useState<string>("sans");
   const [insideFont, setInsideFont] = useState<string>("sans");
   const [toneUsed, setToneUsed] = useState("");
   const [occasion, setOccasion] = useState("");
   const [insideImagePosition, setInsideImagePosition] = useState("top");
+  const [accentPositions, setAccentPositions] = useState<number[]>([3]);
   const [cardSize, setCardSize] = useState<"4x6" | "5x7">("5x7");
   const [letterText, setLetterText] = useState("");
   const [letterFont, setLetterFont] = useState<string>("handwritten");
-  const [msgSizeScale, setMsgSizeScale] = useState<number>(1.5);
+  const [msgSizeScale, setMsgSizeScale] = useState<number>(0);
   const [ftSizeScale, setFtSizeScale] = useState<number>(1);
   const [letterSizeScale, setLetterSizeScale] = useState<number>(1);
   const [artStyle, setArtStyle] = useState("");
   const [imageSubject, setImageSubject] = useState("");
+  const [signerRecipientIds, setSignerRecipientIds] = useState<string[]>([]);
+  const [allRecipients, setAllRecipients] = useState<Recipient[]>([]);
+  const [regenerating, setRegenerating] = useState(false);
+  const [regenError, setRegenError] = useState<string | null>(null);
+
+  // Cache the original inside image so switching back is free
+  const [originalInsideImageUrl, setOriginalInsideImageUrl] = useState<string | null>(null);
+  const [originalInsidePosition, setOriginalInsidePosition] = useState<string>("none");
+  const [originalAccentPositions, setOriginalAccentPositions] = useState<number[]>([]);
 
   // Track original content-affecting values for change detection
   const [originalTone, setOriginalTone] = useState("");
@@ -110,7 +177,7 @@ export default function EditCardPage() {
         setClosing(parts[parts.length - 1] || "");
         setFrontText(hydrated.front_text ?? "");
         setFrontTextPosition(hydrated.front_text_position ?? "bottom-right");
-        setFrontTextStyle((hydrated.front_text_style as TextStyleChoice) ?? "dark_box");
+        setFrontTextStyle((hydrated.front_text_style as TextStyleChoice) ?? "plain_black");
         setFrontTextFont(hydrated.front_text_font ?? "sans");
         setInsideFont(hydrated.font ?? "sans");
         const t = hydrated.tone_used ?? "";
@@ -125,19 +192,63 @@ export default function EditCardPage() {
         setOriginalOccasion(o);
         setOriginalArtStyle(s);
         setOriginalSubject(sub);
-        setInsideImagePosition(hydrated.inside_image_position ?? "top");
+        const loadedPos = hydrated.inside_image_url ? (hydrated.inside_image_position ?? "top") : "none";
+        setInsideImagePosition(loadedPos);
+        setOriginalInsidePosition(loadedPos);
+        setOriginalInsideImageUrl(hydrated.inside_image_url ?? null);
+        const pos = hydrated.inside_image_position;
+        if (isAccentPosition(pos)) {
+          const ap = (hydrated as { accent_positions?: number[] }).accent_positions ?? defaultAccentSlots(pos);
+          setAccentPositions(ap);
+          setOriginalAccentPositions(ap);
+        }
         setCardSize(hydrated.card_size ?? "5x7");
         setLetterText(hydrated.letter_text ?? "");
         setLetterFont(hydrated.letter_font ?? "handwritten");
         if (hydrated.msg_font_scale != null) setMsgSizeScale(hydrated.msg_font_scale);
         if (hydrated.ft_font_scale != null) setFtSizeScale(hydrated.ft_font_scale);
         if (hydrated.letter_font_scale != null) setLetterSizeScale(hydrated.letter_font_scale);
+        const signerIds = (hydrated as { signer_recipient_ids?: string[] }).signer_recipient_ids;
+        if (signerIds?.length) {
+          setSignerRecipientIds(signerIds);
+        } else if (hydrated.co_signed_with?.trim()) {
+          const recipients = getRecipients();
+          const r = recipients.find((rec) => rec.id === c.recipient_id);
+          const coName = hydrated.co_signed_with.trim().toLowerCase();
+          const match = r?.links?.find((link) => {
+            const linked = recipients.find((rec) => rec.id === link.recipient_id);
+            const fn = (linked?.first_name || linked?.display_name || linked?.name || "").toLowerCase();
+            return fn && (fn === coName || fn.startsWith(coName) || coName.startsWith(fn));
+          });
+          if (match) setSignerRecipientIds([match.recipient_id]);
+        }
+        loadedRef.current = true;
       });
       const recipients = getRecipients();
+      setAllRecipients(recipients);
       const r = recipients.find((rec) => rec.id === c.recipient_id);
       if (r) setRecipient(r);
     }
   }, [cardId]);
+
+  useEffect(() => {
+    if (!card || !loadedRef.current) return;
+    updateCard(cardId, {
+      message_text: [greeting, body, closing].filter(Boolean).join("\n\n"),
+      front_text: frontText.trim() || null,
+      front_text_position: frontText.trim() ? frontTextPosition : null,
+      front_text_style: frontTextStyle,
+      front_text_font: frontTextFont,
+      font: insideFont,
+      msg_font_scale: msgSizeScale,
+      ft_font_scale: ftSizeScale,
+      card_size: cardSize,
+      letter_text: letterText.trim() || null,
+      letter_font: letterText.trim() ? letterFont : null,
+      letter_font_scale: letterSizeScale,
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [greeting, body, closing, frontText, frontTextPosition, frontTextStyle, frontTextFont, insideFont, msgSizeScale, ftSizeScale, cardSize, letterText, letterFont, letterSizeScale]);
 
   if (!mounted) return null;
 
@@ -161,12 +272,22 @@ export default function EditCardPage() {
   const imageAffected = styleChanged || subjectChanged || toneChanged;
   const contentChanged = messageAffected || imageAffected;
 
-  const insidePos = (card.inside_image_position ?? insideImagePosition) as string;
   const ftPos = positionCSS(frontTextPosition);
   const ftFont = fontCSS(frontTextFont);
   const ftStyle = textStyleCSS(frontTextStyle);
   const msgFont = fontCSS(insideFont);
-  const sizing = messageSizing(messageText.length);
+  const sizeOpts = msgSizeOptions(messageText.length);
+  const autoValue = sizeOpts.find((o) => o.label === "Auto")!.value;
+  const effectiveMsgScale = msgSizeScale === 0 ? autoValue : msgSizeScale;
+  const baseSizing = messageSizing(messageText.length);
+  const remToCqw = (rem: string, scale: number) => `${(parseFloat(rem) * scale * 3.81).toFixed(2)}cqw`;
+  const sizingCqw = {
+    greetingSize: remToCqw(baseSizing.greetingSize, effectiveMsgScale),
+    bodySize: remToCqw(baseSizing.bodySize, effectiveMsgScale),
+    closingSize: remToCqw(baseSizing.closingSize, effectiveMsgScale),
+    gap: remToCqw(baseSizing.gap, effectiveMsgScale),
+  };
+  const ftSizeCqw = remToCqw("1.5rem", ftSizeScale);
 
   function getUpdates(): Partial<Card> {
     return {
@@ -191,13 +312,17 @@ export default function EditCardPage() {
       })(),
       art_style: artStyle || null,
       image_subject: imageSubject || null,
-      inside_image_position: (card!.inside_image_url ? insideImagePosition : card!.inside_image_position) as Card["inside_image_position"],
+      inside_image_position: (insideImagePosition === "none" ? undefined : (card!.inside_image_url ? insideImagePosition : card!.inside_image_position)) as Card["inside_image_position"],
+      ...(insideImagePosition === "none" ? { inside_image_url: null } : {}),
+      accent_positions: isAccentPosition(insideImagePosition) ? accentPositions : undefined,
       card_size: cardSize,
       letter_text: letterText.trim() || null,
       letter_font: letterText.trim() ? letterFont : null,
       msg_font_scale: msgSizeScale,
       ft_font_scale: ftSizeScale,
       letter_font_scale: letterSizeScale,
+      signer_recipient_ids: signerRecipientIds.length ? signerRecipientIds : undefined,
+      ...(signerRecipientIds.length ? { co_signed_with: null } : {}),
     };
   }
 
@@ -231,6 +356,77 @@ export default function EditCardPage() {
     router.push(`/cards/create/${recipient.id}?editCardId=${cardId}&startStep=${startStep}`);
   }
 
+  function restoreOriginalDecoration() {
+    if (!card || !originalInsideImageUrl) return;
+    updateCard(cardId, {
+      inside_image_url: originalInsideImageUrl,
+      inside_image_position: originalInsidePosition as Card["inside_image_position"],
+      accent_positions: isAccentPosition(originalInsidePosition) ? originalAccentPositions : undefined,
+    });
+    const updated = getCardById(cardId);
+    if (updated) hydrateCardImages(updated).then(setCard);
+    setInsideImagePosition(originalInsidePosition);
+    if (isAccentPosition(originalInsidePosition)) setAccentPositions(originalAccentPositions);
+    setSaved(true);
+  }
+
+  async function regenerateDecoration(newPos: string) {
+    if (!card) return;
+
+    // If switching back to original position, restore cached image for free
+    if (newPos === originalInsidePosition && originalInsideImageUrl) {
+      restoreOriginalDecoration();
+      return;
+    }
+
+    setRegenerating(true);
+    setRegenError(null);
+    const styleLabel = STYLE_RECIPES.find((s) => s.id === artStyle)?.label
+      ?? ART_STYLES.find((s) => s.id === artStyle)?.label
+      ?? "elegant";
+    const isAccent = isAccentPosition(newPos);
+
+    const prompt = isAccent
+      ? buildAccentPrompt(newPos, styleLabel)
+      : buildBannerPrompt(newPos, styleLabel, card.image_url);
+
+    try {
+      const res = await fetch("/api/generate-image", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          imagePrompt: prompt || `Create a decorative illustration in ${styleLabel} style for a greeting card interior. Soft, complementary colors. No text.`,
+          userId: "local",
+          isInsideIllustration: true,
+          insideImageSize: imageSizeForPosition(newPos),
+          frontImageBase64: (!isAccent && card.image_url && !card.image_url.startsWith("idb:")) ? card.image_url : undefined,
+        }),
+      });
+      if (!res.ok) {
+        const errData = await res.json();
+        throw new Error(errData.error || "Failed to generate decoration");
+      }
+      const data = await res.json();
+      updateCard(cardId, {
+        inside_image_url: data.imageUrl,
+        inside_image_position: newPos as Card["inside_image_position"],
+        accent_positions: isAccent ? defaultAccentSlots(newPos as "corner_flourish" | "top_edge_accent" | "frame") : undefined,
+      });
+      const updated = getCardById(cardId);
+      if (updated) {
+        const hydrated = await hydrateCardImages(updated);
+        setCard(hydrated);
+        if (isAccent) setAccentPositions(defaultAccentSlots(newPos as "corner_flourish" | "top_edge_accent" | "frame"));
+      }
+      setInsideImagePosition(newPos);
+      setSaved(true);
+    } catch (err: unknown) {
+      setRegenError(err instanceof Error ? err.message : "Failed to regenerate");
+    } finally {
+      setRegenerating(false);
+    }
+  }
+
   const changeLabel = [
     toneChanged ? `Tone → "${toneUsed || "Not specified"}"` : "",
     occasionChanged ? `Occasion → "${occasion}"` : "",
@@ -244,7 +440,7 @@ export default function EditCardPage() {
         title={`${occasion} card${recipient ? ` for ${recipient.name}` : ""}`}
       >
         <button
-          onClick={() => recipient ? router.push(`/recipients/${recipient.id}`) : router.push("/")}
+          onClick={() => { handleSave(); recipient ? router.push(`/recipients/${recipient.id}`) : router.push("/"); }}
           className="flex items-center gap-1.5 px-4 py-1.5 rounded-full text-sm text-warm-gray hover:text-charcoal transition-colors"
           style={{ border: "1.5px solid var(--color-sage)" }}
         >
@@ -265,14 +461,14 @@ export default function EditCardPage() {
             Save as new card
           </button>
           <button
-            onClick={() => { handleSave(); router.push(`/cards/view/${card.id}`); }}
+            onClick={() => { handleSave(); window.location.href = `/cards/view/${card.id}`; }}
             className="px-5 py-2.5 rounded-full text-sm font-medium text-warm-gray hover:text-charcoal transition-colors"
             style={{ border: "1.5px solid var(--color-sage)" }}
           >
             View e-card
           </button>
           <button
-            onClick={() => { handleSave(); router.push(`/cards/print/${card.id}`); }}
+            onClick={() => { handleSave(); window.location.href = `/cards/print/${card.id}`; }}
             className="px-5 py-2.5 rounded-full text-sm font-medium text-warm-gray hover:text-charcoal transition-colors"
             style={{ border: "1.5px solid var(--color-sage)" }}
           >
@@ -280,7 +476,7 @@ export default function EditCardPage() {
           </button>
           <span className="flex-1" />
           <button
-            onClick={() => recipient && router.push(`/cards/create/${recipient.id}`)}
+            onClick={() => { handleSave(); recipient && router.push(`/cards/create/${recipient.id}`); }}
             className="btn-primary px-5 py-2.5 rounded-full text-sm font-medium"
           >
             Create card
@@ -299,7 +495,7 @@ export default function EditCardPage() {
               Edit the new card
             </button>{" "}
             or{" "}
-            <button onClick={() => router.push(`/cards/view/${savedAsNew}`)} className="underline font-medium" style={{ color: "var(--color-brand)" }}>
+            <button onClick={() => { window.location.href = `/cards/view/${savedAsNew}`; }} className="underline font-medium" style={{ color: "var(--color-brand)" }}>
               view it
             </button>.
           </div>
@@ -309,10 +505,10 @@ export default function EditCardPage() {
         <div className="mb-8">
           <p className="section-label mb-3">Preview</p>
           <div className="flex gap-4 justify-center">
-            {/* Front panel */}
+            {/* Front panel — container-type for cqw font sizing (matches print/view) */}
             <div
               className="relative card-surface rounded-xl shadow-lg overflow-hidden"
-              style={{ width: "45%", maxWidth: 240, aspectRatio: "5 / 7" }}
+              style={{ width: "45%", maxWidth: 240, aspectRatio: "5 / 7", containerType: "inline-size" }}
             >
               {card.image_url ? (
                 <>
@@ -327,7 +523,7 @@ export default function EditCardPage() {
                         maxWidth: "84%",
                         padding: "0.5rem",
                         boxSizing: "border-box",
-                        fontSize: "clamp(0.65rem, 3vw, 1.1rem)",
+                        fontSize: ftSizeCqw,
                         lineHeight: 1.25,
                         textAlign: frontTextAlign(frontTextPosition),
                         whiteSpace: "pre-line",
@@ -347,18 +543,36 @@ export default function EditCardPage() {
               </div>
             </div>
 
-            {/* Inside panel */}
+            {/* Inside panel — container-type for cqw font sizing (matches print/view) */}
             <div
               className="relative card-surface rounded-xl shadow-lg overflow-hidden flex"
               style={{
                 width: "45%",
                 maxWidth: 240,
                 aspectRatio: "5 / 7",
+                containerType: "inline-size",
                 ...msgFont,
-                flexDirection: insideImagePosition === "left" || insideImagePosition === "right" ? "row" : "column",
+                flexDirection: (!isAccentPosition(insideImagePosition) && (insideImagePosition === "left" || insideImagePosition === "right")) ? "row" : "column",
                 position: "relative",
               }}
             >
+              {/* Loading overlay */}
+              {regenerating && (
+                <div style={{
+                  position: "absolute", top: 0, left: 0, width: "100%", height: "100%",
+                  background: "rgba(255,255,255,0.85)", zIndex: 10,
+                  display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: "0.5rem",
+                }}>
+                  <div style={{
+                    width: 28, height: 28, border: "3px solid var(--color-sage-light)",
+                    borderTop: "3px solid var(--color-brand)", borderRadius: "50%",
+                    animation: "spin 0.8s linear infinite",
+                  }} />
+                  <p className="text-xs text-warm-gray font-medium">Generating...</p>
+                  <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+                </div>
+              )}
+
               {/* Watermark */}
               {insideImagePosition === "behind" && card.inside_image_url && (
                 <img
@@ -379,15 +593,25 @@ export default function EditCardPage() {
                 </div>
               )}
 
+              {/* Top edge accent (slot 1) */}
+              {insideImagePosition === "top_edge_accent" && card.inside_image_url && accentPositions.includes(1) && (
+                <div style={edgeStyle(1)}>
+                  <img src={card.inside_image_url} alt="" style={edgeImgStyle()} />
+                </div>
+              )}
+
               <div
                 className="flex flex-col justify-center items-center text-center"
                 style={{
                   flex: 1,
-                  padding: insideImagePosition === "left" || insideImagePosition === "right" ? "0.6rem 0.4rem" : "0.75rem",
+                  padding: (!isAccentPosition(insideImagePosition) && (insideImagePosition === "left" || insideImagePosition === "right")) ? "6% 4%"
+                    : insideImagePosition === "corner_flourish" ? (accentPositions.length > 2 ? "2rem 1.2rem" : "0.75rem")
+                    : insideImagePosition === "frame" ? "15% 12%"
+                    : "8% 10%",
                   overflow: "hidden",
                   position: "relative",
                   zIndex: 1,
-                  gap: sizing.gap,
+                  gap: sizingCqw.gap,
                 }}
               >
                 {insideImagePosition === "middle" && card.inside_image_url && (
@@ -396,16 +620,16 @@ export default function EditCardPage() {
                   </div>
                 )}
 
-                <p className="text-charcoal" style={{ fontSize: "clamp(0.55rem, 2.5vw, 0.85rem)", fontWeight: 600 }}>
+                <p className="text-charcoal" style={{ fontSize: sizingCqw.greetingSize, fontWeight: 600 }}>
                   {greeting}
                 </p>
                 {body && (
-                  <p className="text-charcoal leading-relaxed whitespace-pre-wrap" style={{ fontSize: "clamp(0.45rem, 2vw, 0.7rem)" }}>
+                  <p className="text-charcoal leading-relaxed whitespace-pre-wrap" style={{ fontSize: sizingCqw.bodySize }}>
                     {body}
                   </p>
                 )}
                 {closing && (
-                  <p className="text-warm-gray whitespace-pre-line" style={{ fontSize: "clamp(0.45rem, 2vw, 0.7rem)", fontStyle: "italic" }}>
+                  <p className="text-warm-gray whitespace-pre-line" style={{ fontSize: sizingCqw.closingSize, fontStyle: "italic" }}>
                     {closing}
                   </p>
                 )}
@@ -421,6 +645,25 @@ export default function EditCardPage() {
                 <div style={{ width: "20%", flexShrink: 0, height: "100%" }}>
                   <img src={card.inside_image_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
                 </div>
+              )}
+
+              {/* Bottom edge accent (slot 2) */}
+              {insideImagePosition === "top_edge_accent" && card.inside_image_url && accentPositions.includes(2) && (
+                <div style={edgeStyle(2)}>
+                  <img src={card.inside_image_url} alt="" style={edgeImgStyle()} />
+                </div>
+              )}
+
+              {/* Corner flourish — per selected corner */}
+              {insideImagePosition === "corner_flourish" && card.inside_image_url && accentPositions.map((slot) => (
+                <div key={slot} style={cornerStyle(slot)}>
+                  <img src={card.inside_image_url!} alt="" style={cornerImgStyle()} />
+                </div>
+              ))}
+
+              {/* Frame — portrait fill */}
+              {insideImagePosition === "frame" && card.inside_image_url && (
+                <img src={card.inside_image_url!} alt="" style={frameImgStyle()} />
               )}
 
               <div className="absolute bottom-0 left-0 right-0 bg-black/40 text-white text-[0.55rem] text-center py-0.5" style={{ zIndex: 2 }}>
@@ -466,7 +709,63 @@ export default function EditCardPage() {
               <p className="text-xs text-warm-gray mt-0.5">Put the sender name(s) on a new line below the phrase.</p>
             </div>
 
-            <div className={`grid gap-3 ${card.inside_image_url ? "grid-cols-3" : "grid-cols-2"}`}>
+            {/* Who's signing — affects e-card envelope and can pre-fill closing */}
+            {recipient && (recipient.links?.length ?? 0) > 0 && (
+              <div>
+                <label className="block text-sm font-medium text-charcoal mb-2">Signed from</label>
+                <p className="text-xs text-warm-gray mb-2">
+                  Include linked people on the e-card envelope? You can also add their names to the closing above.
+                </p>
+                <div className="flex flex-wrap gap-3">
+                  {recipient.links!.map((link) => {
+                    const linked = allRecipients.find((r) => r.id === link.recipient_id);
+                    if (!linked) return null;
+                    const checked = signerRecipientIds.includes(link.recipient_id);
+                    const displayName = linked.nickname || linked.first_name || linked.display_name || linked.name || "?";
+                    return (
+                      <label key={link.recipient_id} className="flex items-center gap-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => {
+                            setSaved(false);
+                            setSignerRecipientIds((prev) =>
+                              checked ? prev.filter((id) => id !== link.recipient_id) : [...prev, link.recipient_id]
+                            );
+                          }}
+                          className="rounded border-warm-gray"
+                        />
+                        <span className="text-sm text-charcoal">
+                          {displayName}
+                          <span className="text-warm-gray font-normal capitalize"> ({link.label})</span>
+                        </span>
+                      </label>
+                    );
+                  })}
+                </div>
+                {signerRecipientIds.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const profile = getUserProfile();
+                      const virtualCard = { ...card!, signer_recipient_ids: signerRecipientIds } as Card;
+                      const names = getSignerNameList(virtualCard, recipient, allRecipients, profile);
+                      const formatted = formatSignerNames(names);
+                      if (formatted && !closing.includes(formatted)) {
+                        setClosing(closing.trim() ? `${closing.trim()}\n\n${formatted}` : formatted);
+                        setSaved(false);
+                      }
+                    }}
+                    className="mt-2 text-xs font-medium"
+                    style={{ color: "var(--color-brand)" }}
+                  >
+                    Insert these names into closing
+                  </button>
+                )}
+              </div>
+            )}
+
+            <div className="grid gap-3 grid-cols-3">
               <div>
                 <label className="block text-xs text-warm-gray mb-1">Font</label>
                 <select
@@ -486,25 +785,94 @@ export default function EditCardPage() {
                   onChange={(e) => { setMsgSizeScale(parseFloat(e.target.value)); setSaved(false); }}
                   className="w-full input-field rounded-lg px-2 py-1.5 text-sm"
                 >
-                  <option value={1}>Small</option>
-                  <option value={1.25}>Medium</option>
-                  <option value={1.5}>Auto</option>
-                  <option value={1.75}>Large</option>
-                  <option value={2}>Extra Large</option>
+                  {sizeOpts.map((o) => (
+                    <option key={o.label} value={o.label === "Auto" ? 0 : o.value}>{o.label}</option>
+                  ))}
                 </select>
               </div>
-              {card.inside_image_url && (
-                <div>
-                  <label className="block text-xs text-warm-gray mb-1">Decoration position</label>
-                  <select
-                    value={insideImagePosition}
-                    onChange={(e) => { setInsideImagePosition(e.target.value); setSaved(false); }}
-                    className="w-full input-field rounded-lg px-2 py-1.5 text-sm"
-                  >
-                    {INSIDE_POSITIONS.map((p) => (
-                      <option key={p.id} value={p.id}>{p.label}</option>
+              {(() => {
+                const currentGroup = getDecorationGroup(insideImagePosition);
+                const filteredOptions = ALL_DECORATION_OPTIONS.filter(
+                  (o) => o.group === "remove" || o.group === currentGroup
+                );
+                const isOriginalAvailable = originalInsideImageUrl && insideImagePosition !== originalInsidePosition;
+                return (
+                  <div>
+                    <label className="block text-xs text-warm-gray mb-1">Decoration</label>
+                    <select
+                      value={insideImagePosition}
+                      disabled={regenerating}
+                      onChange={(e) => {
+                        const newVal = e.target.value;
+                        const oldVal = insideImagePosition;
+                        if (newVal === oldVal) return;
+
+                        if (newVal === "none") {
+                          setInsideImagePosition("none");
+                          updateCard(cardId, { inside_image_url: null, inside_image_position: undefined, accent_positions: undefined } as Partial<Card>);
+                          const updated = getCardById(cardId);
+                          if (updated) hydrateCardImages(updated).then(setCard);
+                          setSaved(true);
+                          return;
+                        }
+
+                        if (needsRegeneration(oldVal, newVal)) {
+                          regenerateDecoration(newVal);
+                        } else {
+                          setInsideImagePosition(newVal);
+                          if (newVal === "corner_flourish") setAccentPositions((p) => p.length ? p : [3]);
+                          else if (newVal === "top_edge_accent") setAccentPositions((p) => p.length ? p : [1]);
+                          else if (newVal === "frame") setAccentPositions([]);
+                          setSaved(false);
+                        }
+                      }}
+                      className="w-full input-field rounded-lg px-2 py-1.5 text-sm"
+                    >
+                      {filteredOptions.map((p) => (
+                        <option key={p.id} value={p.id}>{p.label}</option>
+                      ))}
+                    </select>
+                    {isOriginalAvailable && !regenerating && (
+                      <button
+                        onClick={restoreOriginalDecoration}
+                        className="text-xs mt-1 hover:underline"
+                        style={{ color: "var(--color-brand)" }}
+                      >
+                        Restore original
+                      </button>
+                    )}
+                  </div>
+                );
+              })()}
+              {regenError && (
+                <div className="col-span-full">
+                  <p className="text-xs text-red-600">{regenError}</p>
+                </div>
+              )}
+              {/* Corner position picker */}
+              {card.inside_image_url && insideImagePosition === "corner_flourish" && !regenerating && (
+                <div className="col-span-full">
+                  <label className="block text-xs text-warm-gray mb-1">Active corners</label>
+                  <div className="flex gap-2">
+                    {[{ s: 1, l: "TL" }, { s: 2, l: "TR" }, { s: 4, l: "BL" }, { s: 3, l: "BR" }].map(({ s, l }) => (
+                      <button key={s} onClick={() => { setAccentPositions((p) => p.includes(s) ? p.filter((x) => x !== s) : [...p, s]); setSaved(false); }}
+                        className={`px-2 py-1 rounded text-xs font-medium border ${accentPositions.includes(s) ? "border-brand bg-brand-light text-charcoal" : "border-light-gray text-warm-gray"}`}
+                      >{l}</button>
                     ))}
-                  </select>
+                  </div>
+                </div>
+              )}
+              {/* Edge position picker */}
+              {card.inside_image_url && insideImagePosition === "top_edge_accent" && !regenerating && (
+                <div className="col-span-full">
+                  <label className="block text-xs text-warm-gray mb-1">Active edges</label>
+                  <div className="flex gap-2">
+                    {[{ s: 1, l: "Top" }, { s: 2, l: "Bottom" }].map(({ s, l }) => (
+                      <button key={s} onClick={() => { setAccentPositions((p) => p.includes(s) ? p.filter((x) => x !== s) : [...p, s]); setSaved(false); }}
+                        className={`px-3 py-1 rounded text-xs font-medium border ${accentPositions.includes(s) ? "border-brand bg-brand-light text-charcoal" : "border-light-gray text-warm-gray"}`}
+                      >{l}</button>
+                    ))}
+                  </div>
                 </div>
               )}
             </div>

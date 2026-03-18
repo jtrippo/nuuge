@@ -20,6 +20,7 @@ export interface UsageEvent {
   estimatedCost: number;
   cardId?: string;
   recipientId?: string;
+  sessionId?: string;
   userName?: string;
   userAgent?: string;
   metadata?: Record<string, unknown>;
@@ -48,7 +49,8 @@ function getUserName(): string {
 
 async function sendToSupabase(event: UsageEvent): Promise<void> {
   try {
-    await supabase.from("usage_events").insert({
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (supabase.from as any)("usage_events").insert({
       id: event.id,
       created_at: event.timestamp,
       device_id: getDeviceId(),
@@ -59,6 +61,7 @@ async function sendToSupabase(event: UsageEvent): Promise<void> {
       estimated_cost: event.estimatedCost,
       card_id: event.cardId || null,
       recipient_id: event.recipientId || null,
+      session_id: event.sessionId || null,
       user_agent: typeof navigator !== "undefined" ? navigator.userAgent : null,
     });
   } catch {
@@ -101,10 +104,10 @@ function openDB(): Promise<IDBDatabase> {
   });
 }
 
-export async function logUsage(event: Omit<UsageEvent, "id" | "timestamp">): Promise<void> {
+export async function logUsage(event: Omit<UsageEvent, "id" | "timestamp">, eventId?: string): Promise<void> {
   const entry: UsageEvent = {
     ...event,
-    id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    id: eventId || `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     timestamp: new Date().toISOString(),
     estimatedCost: event.estimatedCost ?? estimateCost(event.callType, event.model),
   };
@@ -213,6 +216,7 @@ export async function backfillToSupabase(): Promise<number> {
     estimated_cost: e.estimatedCost,
     card_id: e.cardId || null,
     recipient_id: e.recipientId || null,
+    session_id: e.sessionId || null,
     user_agent: typeof navigator !== "undefined" ? navigator.userAgent : null,
   }));
 
@@ -220,8 +224,8 @@ export async function backfillToSupabase(): Promise<number> {
   let sent = 0;
   for (let i = 0; i < rows.length; i += batchSize) {
     const batch = rows.slice(i, i + batchSize);
-    const { error } = await supabase
-      .from("usage_events")
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { error } = await (supabase.from as any)("usage_events")
       .upsert(batch, { onConflict: "id" });
     if (!error) sent += batch.length;
   }
@@ -239,8 +243,10 @@ export async function logApiCall(
     callType: UsageEvent["callType"];
     cardId?: string;
     recipientId?: string;
+    sessionId?: string;
   }
-): Promise<void> {
+): Promise<string> {
+  const eventId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   await logUsage({
     endpoint,
     model: opts.model,
@@ -248,5 +254,38 @@ export async function logApiCall(
     estimatedCost: estimateCost(opts.callType, opts.model),
     cardId: opts.cardId,
     recipientId: opts.recipientId,
-  });
+    sessionId: opts.sessionId,
+  }, eventId);
+  return eventId;
+}
+
+/**
+ * After a card is saved, stamp all session events with the new card ID.
+ * Updates both IndexedDB and Supabase so cost-per-card queries work.
+ */
+export async function tagSessionWithCardId(sessionId: string, cardId: string): Promise<void> {
+  try {
+    const all = await getAllUsage();
+    const sessionEvents = all.filter((e) => e.sessionId === sessionId && !e.cardId);
+
+    const db = await openDB();
+    const tx = db.transaction(STORE_NAME, "readwrite");
+    const store = tx.objectStore(STORE_NAME);
+    for (const evt of sessionEvents) {
+      evt.cardId = cardId;
+      store.put(evt);
+    }
+    await new Promise<void>((resolve, reject) => {
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (supabase.from as any)("usage_events")
+      .update({ card_id: cardId })
+      .eq("session_id", sessionId)
+      .is("card_id", null);
+  } catch {
+    // Best-effort — don't block the save flow
+  }
 }

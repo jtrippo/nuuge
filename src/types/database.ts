@@ -114,6 +114,8 @@ export interface Recipient extends PersonProfile {
   context_raw: string | null;
   linked_user_id: string | null;
   links: RecipientLink[];
+  setup_complete?: boolean;
+  setup_step?: string;
 }
 
 export interface ImportantDate {
@@ -147,16 +149,20 @@ export interface Card {
   sent: boolean;
   feedback_rating: number | null;
   co_signed_with: string | null;
+  /** Recipient IDs of linked people co-signing (replaces co_signed_with when set). */
+  signer_recipient_ids?: string[];
   /** When true, card is hidden from default history list (can show via "Show hidden") */
   hidden?: boolean;
   /** Print size: 4x6 or 5x7 inches (folded card). Used for image aspect ratio and print layout. */
   card_size?: "4x6" | "5x7";
   /** Where the inside illustration appears relative to the message text */
-  inside_image_position?: "top" | "middle" | "bottom" | "left" | "right" | "behind";
+  inside_image_position?: "top" | "middle" | "bottom" | "left" | "right" | "behind" | "corner_flourish" | "top_edge_accent" | "frame";
+  /** Which positions are active for accent decorations (corners: 1-4, edges: 1-2) */
+  accent_positions?: number[];
   /** Font style for the front cover text overlay */
   front_text_font?: string;
   /** Visual style of the front text overlay */
-  front_text_style?: "dark_box" | "white_box" | "plain" | "plain_white";
+  front_text_style?: "dark_box" | "white_box" | "plain" | "plain_white" | "plain_black" | "black_white_border" | "white_black_border";
   /** Font style for the inside message text */
   font?: string;
   /** Scale multiplier for message text size on print (default 1.5) */

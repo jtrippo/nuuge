@@ -23,9 +23,11 @@ import {
   calculateAge,
   getBirthdayForAge,
 } from "@/lib/card-recipes";
-import { fontCSS, FONT_OPTIONS as CARD_FONT_OPTIONS } from "@/lib/card-ui-helpers";
-import type { FontChoice } from "@/lib/card-ui-helpers";
-import { logApiCall } from "@/lib/usage-store";
+import { formatSignerNames } from "@/lib/signer-helpers";
+import { fontCSS, textStyleCSS, FONT_OPTIONS as CARD_FONT_OPTIONS, isAccentPosition, defaultAccentSlots, cornerStyle, cornerImgStyle, edgeStyle, edgeImgStyle, frameImgStyle } from "@/lib/card-ui-helpers";
+import type { FontChoice, TextStyleChoice } from "@/lib/card-ui-helpers";
+import { saveImage, getImage } from "@/lib/image-store";
+import { logApiCall, tagSessionWithCardId } from "@/lib/usage-store";
 import AppHeader from "@/components/AppHeader";
 import {
   OCCASION_CATEGORIES,
@@ -40,6 +42,7 @@ const TONES = [
   "Supportive and comforting",
   "Romantic and affectionate",
   "Joyful and celebratory",
+  "Nostalgic and reflective",
   "Warm with a touch of humor",
   "Funny and playful",
   "Sarcastic and edgy",
@@ -135,6 +138,7 @@ interface CardDraft {
   notes: string;
   sharedWith: string[];
   coSign: boolean;
+  signerRecipientIds: string[];
   activeProfileElements: Record<string, boolean>;
   selected: CardMessage | null;
   editedMessage: CardMessage | null;
@@ -146,7 +150,8 @@ interface CardDraft {
   currentSceneDescription: string;
   selectedDesignTitle: string | null;
   selectedDesignPrompt: string | null;
-  insideImagePosition: "top" | "middle" | "bottom" | "left" | "right" | "behind";
+  insideImagePosition: "top" | "middle" | "bottom" | "left" | "right" | "behind" | "corner_flourish" | "top_edge_accent" | "frame";
+  accentPositions: number[];
   imageInterests: string[];
   frontText: string;
   frontTextPosition: string;
@@ -248,6 +253,7 @@ function CreateCardPage() {
   const [notes, setNotes] = useState("");
   const [sharedWith, setSharedWith] = useState<string[]>([]);
   const [coSign, setCoSign] = useState(false);
+  const [signerRecipientIds, setSignerRecipientIds] = useState<string[]>([]);
   const [messages, setMessages] = useState<CardMessage[]>([]);
   const [rejectedMessages, setRejectedMessages] = useState<string[]>([]);
   const [regenerationCount, setRegenerationCount] = useState(0);
@@ -277,13 +283,17 @@ function CreateCardPage() {
   const [insideSceneDescription, setInsideSceneDescription] = useState("");
   const [insideDesignFeedback, setInsideDesignFeedback] = useState("");
   const [insideMerging, setInsideMerging] = useState(false);
+  const [insideDesignGuidance, setInsideDesignGuidance] = useState("");
   const [pendingInsideScene, setPendingInsideScene] = useState("");
-  const [insideImagePosition, setInsideImagePosition] = useState<"top" | "middle" | "bottom" | "left" | "right" | "behind">("top");
+  const [insideImagePosition, setInsideImagePosition] = useState<"top" | "middle" | "bottom" | "left" | "right" | "behind" | "corner_flourish" | "top_edge_accent" | "frame">("top");
+  const [decorationType, setDecorationType] = useState<"banner" | "accent" | null>(null);
+  const [accentStyle, setAccentStyle] = useState<"corner_flourish" | "top_edge_accent" | "frame" | null>(null);
+  const [accentPositions, setAccentPositions] = useState<number[]>([3]);
   const [skipInsideDesign, setSkipInsideDesign] = useState(false);
   const [frontTextSuggestions, setFrontTextSuggestions] = useState<{ wording: string; position: string }[]>([]);
   const [frontText, setFrontText] = useState("");
   const [frontTextPosition, setFrontTextPosition] = useState("bottom-right");
-  const [frontTextStyle, setFrontTextStyle] = useState<"dark_box" | "white_box" | "plain" | "plain_white">("dark_box");
+  const [frontTextStyle, setFrontTextStyle] = useState<TextStyleChoice>("plain_black");
   const [font, setFont] = useState<string>("sans");
   const [insideFont, setInsideFont] = useState<string>("sans");
   const [cardSize, setCardSize] = useState<"4x6" | "5x7">("5x7");
@@ -295,6 +305,7 @@ function CreateCardPage() {
   const [pendingChangeType, setPendingChangeType] = useState<"refine" | "redesign">("refine");
   const [pendingEditInstruction, setPendingEditInstruction] = useState("");
   const [sessionCost, setSessionCost] = useState(0);
+  const sessionIdRef = useRef(`ses_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`);
   const [showResumePrompt, setShowResumePrompt] = useState(false);
   const [pendingDraft, setPendingDraft] = useState<CardDraft | null>(null);
 
@@ -325,7 +336,7 @@ function CreateCardPage() {
           setInsideFont(card.font ?? "sans");
           setFrontText(card.front_text ?? "");
           setFrontTextPosition(card.front_text_position ?? "bottom-right");
-          setFrontTextStyle((card.front_text_style as "dark_box" | "white_box" | "plain" | "plain_white") ?? "dark_box");
+          setFrontTextStyle((card.front_text_style as TextStyleChoice) ?? "plain_black");
           setImageSubject(card.image_subject ?? null);
           setArtStyle(card.art_style ?? null);
           if (card.image_url) setGeneratedImageUrl(card.image_url);
@@ -401,6 +412,7 @@ function CreateCardPage() {
       notes,
       sharedWith,
       coSign,
+      signerRecipientIds: signerRecipientIds,
       activeProfileElements,
       selected,
       editedMessage,
@@ -412,6 +424,7 @@ function CreateCardPage() {
       selectedDesignTitle: selectedDesign?.title ?? null,
       selectedDesignPrompt: selectedDesign?.image_prompt ?? null,
       insideImagePosition,
+      accentPositions,
       imageInterests,
       frontText,
       frontTextPosition,
@@ -420,11 +433,18 @@ function CreateCardPage() {
       updatedAt: 0,
     };
     saveDraft(draft);
+    if (generatedImageUrl && generatedImageUrl.startsWith("data:image/")) {
+      saveImage(`draft_${recipientId}_front`, generatedImageUrl).catch(() => {});
+    }
+    if (insideImageUrl && insideImageUrl.startsWith("data:image/")) {
+      saveImage(`draft_${recipientId}_inside`, insideImageUrl).catch(() => {});
+    }
   }, [
     mounted, recipientId, editMode, editCardId, showResumePrompt, pendingDraft, step,
-    occasion, occasionCustom, includeFaithBased, tone, notes, sharedWith, coSign, activeProfileElements,
+    occasion, occasionCustom, includeFaithBased, tone, notes, sharedWith, coSign, signerRecipientIds, activeProfileElements,
     selected, editedMessage, imageSubject, subjectDetail, artStyle, personalContext,
-    currentSceneDescription, selectedDesign, insideImagePosition, imageInterests, frontText, frontTextPosition, frontTextStyle, cardSize,
+    currentSceneDescription, selectedDesign, insideImagePosition, accentPositions, imageInterests, frontText, frontTextPosition, frontTextStyle, cardSize,
+    generatedImageUrl, insideImageUrl,
   ]);
 
   if (!mounted) return null;
@@ -464,6 +484,7 @@ function CreateCardPage() {
     setNotes(d.notes);
     setSharedWith(d.sharedWith);
     setCoSign(d.coSign);
+    setSignerRecipientIds(d.signerRecipientIds ?? []);
     setActiveProfileElements(normalizeProfileElements(d.activeProfileElements));
     setSelected(d.selected);
     setEditedMessage(d.editedMessage);
@@ -474,16 +495,25 @@ function CreateCardPage() {
     setCurrentSceneDescription(d.currentSceneDescription);
     setPendingSceneDescription(d.currentSceneDescription);
     setInsideImagePosition(d.insideImagePosition);
+    setAccentPositions(d.accentPositions ?? [3]);
+    if (isAccentPosition(d.insideImagePosition)) {
+      setDecorationType("accent");
+      setAccentStyle(d.insideImagePosition);
+    }
     setImageInterests(d.imageInterests ?? []);
     setFrontText(d.frontText);
     setFrontTextPosition(d.frontTextPosition);
-    setFrontTextStyle(d.frontTextStyle as "dark_box" | "white_box" | "plain" | "plain_white");
+    setFrontTextStyle(d.frontTextStyle as TextStyleChoice);
     setCardSize(d.cardSize);
-    if (d.step === "design_preview") setGeneratedImageUrl(null);
-    if (d.step === "inside_design_preview") setInsideImageUrl(null);
     if (d.selectedDesignTitle && d.selectedDesignPrompt) {
       setSelectedDesign({ title: d.selectedDesignTitle, description: "", image_prompt: d.selectedDesignPrompt });
     }
+    getImage(`draft_${d.recipientId}_front`).then((img) => {
+      if (img) setGeneratedImageUrl(img);
+    }).catch(() => {});
+    getImage(`draft_${d.recipientId}_inside`).then((img) => {
+      if (img) setInsideImageUrl(img);
+    }).catch(() => {});
     setShowResumePrompt(false);
     setPendingDraft(null);
   }
@@ -586,7 +616,6 @@ Personality: ${p.personality || "Not specified"}
 Communication style: ${p.communication_style || "Not specified"}
 Emotional energy: ${(p as { emotional_energy?: string }).emotional_energy || "Not specified"}
 Humor style (when humor applies): ${p.humor_style || "Not specified"}
-Interests: ${(p.interests || []).join(", ") || "Not specified"}
 Lifestyle: ${p.lifestyle || "Not specified"}`
       : "No sender context available.";
 
@@ -690,7 +719,17 @@ Humor tolerance: ${r.humor_tolerance || "Not specified"}`.replace(/\n{2,}/g, "\n
           includeFaithBased,
           additionalNotes: notes,
           cardHistory,
-          coSignWith: coSign ? profile?.partner_name : null,
+          coSignWith: (() => {
+            if (signerRecipientIds.length) {
+              const names = signerRecipientIds
+                .map((id) => allRecipients.find((r) => r.id === id))
+                .filter(Boolean)
+                .map((r) => r!.nickname || r!.first_name || r!.display_name || r!.name || "")
+                .filter(Boolean);
+              return names.length ? formatSignerNames(names) : null;
+            }
+            return coSign ? profile?.partner_name ?? null : null;
+          })(),
           relationshipType: recipient!.relationship_type,
           regenerationCount,
           rejectedMessages: rejectedMessages.length > 0 ? rejectedMessages : undefined,
@@ -706,7 +745,7 @@ Humor tolerance: ${r.humor_tolerance || "Not specified"}`.replace(/\n{2,}/g, "\n
       setMessages(data.messages);
       setIsLoading(false);
       setStep("select");
-      logApiCall("generate-card", { model: "gpt-4o", callType: "chat_completion", recipientId, cardId: editCardId || undefined });
+      logApiCall("generate-card", { model: "gpt-4o", callType: "chat_completion", recipientId, cardId: editCardId || undefined, sessionId: sessionIdRef.current });
       setSessionCost((c) => c + 0.025);
     } catch (err: unknown) {
       const message =
@@ -776,7 +815,7 @@ Humor tolerance: ${r.humor_tolerance || "Not specified"}`.replace(/\n{2,}/g, "\n
 
       const data = await res.json();
       setDesignConcepts(data.designs);
-      logApiCall("suggest-designs", { model: "gpt-4o", callType: "chat_completion", recipientId, cardId: editCardId || undefined });
+      logApiCall("suggest-designs", { model: "gpt-4o", callType: "chat_completion", recipientId, cardId: editCardId || undefined, sessionId: sessionIdRef.current });
       setSessionCost((c) => c + 0.025);
     } catch {
       // Non-blocking — alternatives just won't appear
@@ -825,12 +864,13 @@ Humor tolerance: ${r.humor_tolerance || "Not specified"}`.replace(/\n{2,}/g, "\n
 
   async function generateDesignImage(
     prompt: string,
-    options?: { isInside?: boolean; editExisting?: boolean; editInstruction?: string }
+    options?: { isInside?: boolean; editExisting?: boolean; editInstruction?: string; isAccent?: boolean }
   ) {
     const isInside = options?.isInside ?? false;
     const editExisting = options?.editExisting ?? false;
+    const isAccent = options?.isAccent ?? false;
     setIsLoading(true);
-    setLoadingMessage(isInside ? "Creating inside illustration..." : "Creating card artwork...");
+    setLoadingMessage(isInside ? (isAccent ? "Creating decorative accent..." : "Creating inside illustration...") : "Creating card artwork...");
     setError(null);
     if (!isInside) setDesignFeedback("");
 
@@ -849,7 +889,7 @@ Humor tolerance: ${r.humor_tolerance || "Not specified"}`.replace(/\n{2,}/g, "\n
           cardSize: isInside ? undefined : cardSize,
           existingImageBase64: existingImage || undefined,
           insideImageSize: isInside ? insideImageSize() : undefined,
-          frontImageBase64: isInside ? (generatedImageUrl || undefined) : undefined,
+          frontImageBase64: (isInside && !isAccent) ? (generatedImageUrl || undefined) : undefined,
           editInstruction: editExisting ? (options?.editInstruction || undefined) : undefined,
         }),
       });
@@ -861,7 +901,7 @@ Humor tolerance: ${r.humor_tolerance || "Not specified"}`.replace(/\n{2,}/g, "\n
 
       const data = await res.json();
       const imgCallType = editExisting ? "image_edit" : "image_generate";
-      logApiCall("generate-image", { model: "gpt-image-1", callType: imgCallType as "image_edit" | "image_generate", recipientId, cardId: editCardId || undefined });
+      logApiCall("generate-image", { model: "gpt-image-1", callType: imgCallType as "image_edit" | "image_generate", recipientId, cardId: editCardId || undefined, sessionId: sessionIdRef.current });
       setSessionCost((c) => c + 0.08);
       setIsLoading(false);
       if (isInside) {
@@ -909,7 +949,7 @@ Humor tolerance: ${r.humor_tolerance || "Not specified"}`.replace(/\n{2,}/g, "\n
       setPendingChangeType(data.changeType === "redesign" ? "redesign" : "refine");
       setPendingEditInstruction(data.editInstruction || "");
       setStep("design_confirm_refinement");
-      logApiCall("merge-scene", { model: "gpt-4o-mini", callType: "chat_completion", recipientId, cardId: editCardId || undefined });
+      logApiCall("merge-scene", { model: "gpt-4o-mini", callType: "chat_completion", recipientId, cardId: editCardId || undefined, sessionId: sessionIdRef.current });
       setSessionCost((c) => c + 0.005);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Something went wrong";
@@ -919,7 +959,23 @@ Humor tolerance: ${r.humor_tolerance || "Not specified"}`.replace(/\n{2,}/g, "\n
     }
   }
 
+  function buildAccentPrompt(accent: "corner_flourish" | "top_edge_accent" | "frame"): string {
+    const styleLabel = ART_STYLES.find((s) => s.id === artStyle)?.label || "elegant";
+    const base = `${styleLabel}-style decorative element for a greeting card interior. Delicate, subtle, refined ornamental design. PURE WHITE (#FFFFFF) background — absolutely no cream, ivory, beige, or off-white tones. The background must be perfectly white. No text, no words, no letters.`;
+    switch (accent) {
+      case "corner_flourish":
+        return `Create a single corner flourish ornament in ${base} The design should be a decorative scroll or floral motif for one corner only, occupying roughly the bottom-right quarter of the image. The rest of the image must be pure white/empty. The flourish should be elegant and minimal — thin delicate lines.`;
+      case "top_edge_accent":
+        return `Create a horizontal decorative ornamental strip in ${base} A wide, short decorative motif or garland suitable for the top edge of a card. Centered composition, symmetrical, with ornamental scrollwork or subtle botanical flourishes. The strip should span the full width but be short in height.`;
+      case "frame":
+        return `Create a subtle ornamental border frame in ${base} A delicate decorative frame around the edges of the image with a completely white/empty center (at least 70% of the area must be empty white space). Light decorative flourish corners, thin ornamental lines along the edges. The frame should be refined and minimal — not heavy or ornate.`;
+    }
+  }
+
   function insideImageOrientation(): "horizontal" | "vertical" | "square" {
+    if (insideImagePosition === "corner_flourish") return "square";
+    if (insideImagePosition === "frame") return "vertical";
+    if (insideImagePosition === "top_edge_accent") return "horizontal";
     return INSIDE_POSITIONS.find((p) => p.id === insideImagePosition)?.orientation ?? "horizontal";
   }
 
@@ -953,7 +1009,7 @@ Humor tolerance: ${r.humor_tolerance || "Not specified"}`.replace(/\n{2,}/g, "\n
       setPendingChangeType(data.changeType === "redesign" ? "redesign" : "refine");
       setPendingEditInstruction(data.editInstruction || "");
       setStep("inside_confirm_refinement");
-      logApiCall("merge-scene", { model: "gpt-4o-mini", callType: "chat_completion", recipientId, cardId: editCardId || undefined });
+      logApiCall("merge-scene", { model: "gpt-4o-mini", callType: "chat_completion", recipientId, cardId: editCardId || undefined, sessionId: sessionIdRef.current });
       setSessionCost((c) => c + 0.005);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Something went wrong";
@@ -980,6 +1036,7 @@ Humor tolerance: ${r.humor_tolerance || "Not specified"}`.replace(/\n{2,}/g, "\n
           messageText: editedMessage ? `${editedMessage.greeting}\n\n${editedMessage.body}\n\n${editedMessage.closing}` : undefined,
           artStyle: artStyle || undefined,
           imageSubject: imageSubject || undefined,
+          sceneDescription: currentSceneDescription || undefined,
         }),
       });
       const data = await res.json();
@@ -993,7 +1050,7 @@ Humor tolerance: ${r.humor_tolerance || "Not specified"}`.replace(/\n{2,}/g, "\n
         setFrontText(suggestions[0].wording);
         setFrontTextPosition(suggestions[0].position);
       }
-      logApiCall("suggest-front-text", { model: "gpt-4o", callType: "chat_completion", recipientId, cardId: editCardId || undefined });
+      logApiCall("suggest-front-text", { model: "gpt-4o", callType: "chat_completion", recipientId, cardId: editCardId || undefined, sessionId: sessionIdRef.current });
       setSessionCost((c) => c + 0.025);
     } catch {
       setFrontTextSuggestions([]);
@@ -1025,6 +1082,7 @@ Humor tolerance: ${r.humor_tolerance || "Not specified"}`.replace(/\n{2,}/g, "\n
       front_text_font: font,
       font: insideFont,
       inside_image_position: insideImageUrl ? insideImagePosition : undefined,
+      accent_positions: insideImageUrl && isAccentPosition(insideImagePosition) ? accentPositions : undefined,
       image_subject: imageSubject,
       art_style: artStyle,
       image_mood: null,
@@ -1032,15 +1090,20 @@ Humor tolerance: ${r.humor_tolerance || "Not specified"}`.replace(/\n{2,}/g, "\n
       style: editedMessage.label,
       delivery_method: method,
       sent: false,
-      co_signed_with: coSign ? profile?.partner_name || null : null,
+      co_signed_with: signerRecipientIds.length ? null : (coSign ? profile?.partner_name || null : null),
+      signer_recipient_ids: signerRecipientIds.length ? signerRecipientIds : undefined,
       card_size: cardSize,
+      msg_font_scale: 0,
+      ft_font_scale: 1,
       letter_text: letterText.trim() || null,
       letter_font: letterText.trim() ? letterFont : null,
+      letter_font_scale: 1,
     };
 
     if (editMode && editCardId) {
       updateCard(editCardId, cardData);
       setSavedCardId(editCardId);
+      tagSessionWithCardId(sessionIdRef.current, editCardId);
       setDeliveryMethod(method);
       if (method === "print_at_home") {
         clearDraft(recipientId);
@@ -1051,6 +1114,7 @@ Humor tolerance: ${r.humor_tolerance || "Not specified"}`.replace(/\n{2,}/g, "\n
       const saved = saveCard(cardData) as { id: string } | undefined;
       if (saved) {
         setSavedCardId(saved.id);
+        tagSessionWithCardId(sessionIdRef.current, saved.id);
         setDeliveryMethod(method);
         if (method === "print_at_home") {
           clearDraft(recipientId);
@@ -1346,7 +1410,42 @@ Humor tolerance: ${r.humor_tolerance || "Not specified"}`.replace(/\n{2,}/g, "\n
                 ))}
               </div>
             )}
-            {profile?.partner_name && (
+            {/* Signed from — linked people (preferred) or partner_name */}
+            {linkedRecipients.length > 0 ? (
+              <div className="rounded-xl p-4 mb-4" style={{ background: "var(--color-faint-gray)", border: "1px solid var(--color-light-gray)" }}>
+                <p className="text-base font-medium text-charcoal mb-2">Signed from</p>
+                <p className="text-xs text-warm-gray mb-2">Include these people on the e-card envelope and in the sign-off.</p>
+                <div className="flex flex-wrap gap-3">
+                  {linkedRecipients.map((lr) => {
+                    const checked = signerRecipientIds.includes(lr.id);
+                    return (
+                      <label key={lr.id} className="flex items-center gap-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => {
+                            setSignerRecipientIds((prev) =>
+                              checked ? prev.filter((id) => id !== lr.id) : [...prev, lr.id]
+                            );
+                          }}
+                          className="rounded"
+                          style={{ accentColor: "var(--color-brand)" }}
+                        />
+                        <span className="text-sm text-charcoal">
+                          {lr.nickname || lr.first_name || lr.display_name || lr.name}
+                          <span className="text-warm-gray font-normal capitalize"> ({lr.linkLabel})</span>
+                        </span>
+                      </label>
+                    );
+                  })}
+                </div>
+                {(signerRecipientIds.length > 0 || coSign) && (
+                  <p className="text-xs text-warm-gray mt-2">
+                    The message will use &ldquo;we&rdquo; and &ldquo;our&rdquo; and sign from all of you.
+                  </p>
+                )}
+              </div>
+            ) : profile?.partner_name ? (
               <div className="rounded-xl p-4 mb-4" style={{ background: "var(--color-faint-gray)", border: "1px solid var(--color-light-gray)" }}>
                 <label className="flex items-center gap-3 cursor-pointer">
                   <span className="text-base text-charcoal">Co-sign with {profile.partner_name}</span>
@@ -1370,7 +1469,7 @@ Humor tolerance: ${r.humor_tolerance || "Not specified"}`.replace(/\n{2,}/g, "\n
                   </p>
                 )}
               </div>
-            )}
+            ) : null}
             {/* Profile topics to include — split into Interests (opt-in) and Personality (opt-out) */}
             {recipient && (() => {
               const raw = Object.keys(activeProfileElements).length > 0
@@ -1958,10 +2057,10 @@ Humor tolerance: ${r.humor_tolerance || "Not specified"}`.replace(/\n{2,}/g, "\n
                   setCurrentSceneDescription(prompt);
                   generateDesignImage(prompt);
                 }}
-                disabled={!pendingSceneDescription.trim()}
-                className="btn-primary"
+                disabled={!pendingSceneDescription.trim() || conceptsLoading}
+                className="btn-primary disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                Generate image
+                {conceptsLoading ? "Waiting for Nuuge ideas\u2026" : "Generate image"}
               </button>
             </div>
           </div>
@@ -2159,61 +2258,254 @@ Humor tolerance: ${r.humor_tolerance || "Not specified"}`.replace(/\n{2,}/g, "\n
           </div>
         )}
 
-        {/* Step: Inside design — add illustration? */}
+        {/* Step: Inside design — inline accordion for banner vs accent */}
         {step === "inside_design_ask" && (
           <div>
             <h2 className="text-xl font-bold text-charcoal mb-2">
-              Add an inside illustration?
+              Add an inside decoration?
             </h2>
-            <p className="text-sm text-warm-gray mb-4">
-              Carry the front theme to the inside — a matching decorative element.
-              Pick a placement below, or skip this step.
+            <p className="text-sm text-warm-gray mb-6">
+              Enhance the inside of your card with artwork or a decorative touch.
             </p>
 
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-4">
-              {INSIDE_POSITIONS.map((pos) => (
-                <button
-                  key={pos.id}
-                  onClick={() => setInsideImagePosition(pos.id)}
-                  className={`flex flex-col items-center justify-center p-4 rounded-xl border-2 transition-all
-                    ${insideImagePosition === pos.id
-                      ? "border-brand bg-brand-light shadow-md"
-                      : "border-light-gray bg-white hover:border-sage hover:shadow-sm"
-                    }`}
-                >
-                  <div className="w-16 h-20 border border-light-gray rounded bg-white relative mb-2 flex items-center justify-center overflow-hidden">
-                    {pos.id === "top" && <div className="absolute top-0 left-0 right-0 h-4 bg-sage-light rounded-t" />}
-                    {pos.id === "middle" && <div className="absolute left-0 right-0 h-4 bg-sage-light" style={{ top: "40%" }} />}
-                    {pos.id === "bottom" && <div className="absolute bottom-0 left-0 right-0 h-4 bg-sage-light rounded-b" />}
-                    {pos.id === "left" && <div className="absolute top-0 bottom-0 left-0 w-4 bg-sage-light rounded-l" />}
-                    {pos.id === "right" && <div className="absolute top-0 bottom-0 right-0 w-4 bg-sage-light rounded-r" />}
-                    {pos.id === "behind" && <div className="absolute inset-2 bg-brand-light rounded opacity-40" />}
-                    {pos.id !== "behind" && (
-                      <div className="flex flex-col gap-0.5 px-1" style={{ fontSize: 3 }}>
-                        {[1, 2, 3].map((l) => (
-                          <div key={l} className="h-0.5 bg-light-gray rounded" style={{ width: pos.id === "left" || pos.id === "right" ? 8 : 12 }} />
-                        ))}
-                      </div>
-                    )}
+            {/* Two selectable cards */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+              <button
+                onClick={() => { setDecorationType(decorationType === "banner" ? null : "banner"); }}
+                className={`flex flex-col items-center p-5 rounded-xl border-2 transition-all ${
+                  decorationType === "banner" ? "border-brand bg-brand-light shadow-md" : "border-light-gray bg-white hover:border-sage hover:shadow-sm"
+                }`}
+              >
+                <div className="w-20 h-24 border border-light-gray rounded bg-white relative mb-3 overflow-hidden">
+                  <div className="absolute top-0 left-0 right-0 h-5 bg-sage-light rounded-t" />
+                  <div className="flex flex-col gap-0.5 items-center justify-center px-2 mt-7" style={{ fontSize: 3 }}>
+                    {[1, 2, 3].map((l) => <div key={l} className="h-0.5 bg-light-gray rounded" style={{ width: 14 }} />)}
                   </div>
-                  <span className="text-sm font-semibold text-charcoal">{pos.label}</span>
-                  <span className="text-xs text-warm-gray mt-0.5 text-center">{pos.desc}</span>
-                </button>
-              ))}
+                </div>
+                <span className="text-sm font-semibold text-charcoal">Image banner</span>
+                <span className="text-xs text-warm-gray mt-1 text-center">Extends your front image inside</span>
+              </button>
+
+              <button
+                onClick={() => { setDecorationType(decorationType === "accent" ? null : "accent"); setAccentStyle(null); }}
+                className={`flex flex-col items-center p-5 rounded-xl border-2 transition-all ${
+                  decorationType === "accent" ? "border-brand bg-brand-light shadow-md" : "border-light-gray bg-white hover:border-sage hover:shadow-sm"
+                }`}
+              >
+                <div className="w-20 h-24 border border-light-gray rounded bg-white relative mb-3 overflow-hidden flex items-center justify-center">
+                  <div className="absolute top-1 left-1 w-3 h-3 border-t-2 border-l-2 rounded-tl" style={{ borderColor: "var(--color-sage)" }} />
+                  <div className="absolute top-1 right-1 w-3 h-3 border-t-2 border-r-2 rounded-tr" style={{ borderColor: "var(--color-sage)" }} />
+                  <div className="absolute bottom-1 left-1 w-3 h-3 border-b-2 border-l-2 rounded-bl" style={{ borderColor: "var(--color-sage)" }} />
+                  <div className="absolute bottom-1 right-1 w-3 h-3 border-b-2 border-r-2 rounded-br" style={{ borderColor: "var(--color-sage)" }} />
+                  <div className="flex flex-col gap-0.5 px-2" style={{ fontSize: 3 }}>
+                    {[1, 2, 3].map((l) => <div key={l} className="h-0.5 bg-light-gray rounded" style={{ width: 10 }} />)}
+                  </div>
+                </div>
+                <span className="text-sm font-semibold text-charcoal">Decorative accent</span>
+                <span className="text-xs text-warm-gray mt-1 text-center">Corners, edge motif, or frame</span>
+              </button>
             </div>
 
-            {insideImagePosition && (
-              <div className="bg-faint-gray rounded-xl p-3 mb-4 text-sm text-warm-gray">
-                {insideImagePosition === "top" || insideImagePosition === "middle" || insideImagePosition === "bottom"
-                  ? `Horizontal banner — approximately ${cardSize === "4x6" ? "4\"" : "5\""} wide × 1" tall`
-                  : insideImagePosition === "left" || insideImagePosition === "right"
-                    ? `Vertical strip — approximately 1" wide × ${cardSize === "4x6" ? "6\"" : "7\""} tall`
-                    : "Faded watermark behind the message text"
-                }
+            {/* Banner expanded options */}
+            {decorationType === "banner" && (
+              <div className="card-surface p-4 mb-4 space-y-4">
+                <p className="text-sm font-medium text-charcoal">Choose banner placement</p>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                  {INSIDE_POSITIONS.map((pos) => (
+                    <button
+                      key={pos.id}
+                      onClick={() => setInsideImagePosition(pos.id)}
+                      className={`flex flex-col items-center justify-center p-3 rounded-xl border-2 transition-all
+                        ${insideImagePosition === pos.id
+                          ? "border-brand bg-brand-light shadow-md"
+                          : "border-light-gray bg-white hover:border-sage hover:shadow-sm"
+                        }`}
+                    >
+                      <div className="w-14 h-18 border border-light-gray rounded bg-white relative mb-1.5 flex items-center justify-center overflow-hidden" style={{ height: 72 }}>
+                        {pos.id === "top" && <div className="absolute top-0 left-0 right-0 h-3.5 bg-sage-light rounded-t" />}
+                        {pos.id === "middle" && <div className="absolute left-0 right-0 h-3.5 bg-sage-light" style={{ top: "40%" }} />}
+                        {pos.id === "bottom" && <div className="absolute bottom-0 left-0 right-0 h-3.5 bg-sage-light rounded-b" />}
+                        {pos.id === "left" && <div className="absolute top-0 bottom-0 left-0 w-3.5 bg-sage-light rounded-l" />}
+                        {pos.id === "right" && <div className="absolute top-0 bottom-0 right-0 w-3.5 bg-sage-light rounded-r" />}
+                        {pos.id === "behind" && <div className="absolute inset-2 bg-brand-light rounded opacity-40" />}
+                      </div>
+                      <span className="text-xs font-semibold text-charcoal">{pos.label}</span>
+                    </button>
+                  ))}
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-charcoal mb-1 block">
+                    Focus suggestion <span className="text-warm-gray font-normal">(optional)</span>
+                  </label>
+                  <input
+                    value={insideDesignGuidance}
+                    onChange={(e) => setInsideDesignGuidance(e.target.value)}
+                    placeholder="e.g. Focus on the floral elements..."
+                    className="input-field w-full"
+                  />
+                </div>
+                <button
+                  onClick={async () => {
+                    setIsLoading(true);
+                    setLoadingMessage("Suggesting inside illustrations...");
+                    if (!selectedDesign) return;
+                    const orientation = insideImageOrientation();
+                    try {
+                      const res = await fetch("/api/suggest-inside-designs", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                          frontTitle: selectedDesign.title,
+                          frontDescription: selectedDesign.description,
+                          frontImagePrompt: selectedDesign.image_prompt,
+                          occasion: effectiveOccasion,
+                          tone,
+                          position: insideImagePosition,
+                          orientation,
+                          artStyle: ART_STYLES.find((s) => s.id === artStyle)?.label,
+                          userGuidance: insideDesignGuidance.trim() || undefined,
+                        }),
+                      });
+                      if (!res.ok) throw new Error("Failed to load");
+                      const data = await res.json();
+                      setInsideConcepts(data.designs ?? []);
+                      setIsLoading(false);
+                      setStep("inside_design_pick");
+                      logApiCall("suggest-inside-designs", { model: "gpt-4o", callType: "chat_completion", recipientId, cardId: editCardId || undefined, sessionId: sessionIdRef.current });
+                      setSessionCost((c) => c + 0.025);
+                    } catch {
+                      setIsLoading(false);
+                      loadFrontTextSuggestions();
+                    }
+                  }}
+                  disabled={!insideImagePosition}
+                  className="btn-primary disabled:opacity-40 w-full"
+                >
+                  Suggest illustrations
+                </button>
               </div>
             )}
 
-            <div className="flex items-center gap-3 mt-4">
+            {/* Accent expanded options */}
+            {decorationType === "accent" && (
+              <div className="card-surface p-4 mb-4 space-y-4">
+                <p className="text-sm font-medium text-charcoal">Choose accent style</p>
+                <div className="grid grid-cols-3 gap-3">
+                  <button
+                    onClick={() => { setAccentStyle("corner_flourish"); setAccentPositions([3]); }}
+                    className={`flex flex-col items-center p-3 rounded-xl border-2 transition-all ${
+                      accentStyle === "corner_flourish" ? "border-brand bg-brand-light shadow-md" : "border-light-gray bg-white hover:border-sage hover:shadow-sm"
+                    }`}
+                  >
+                    <div className="w-14 border border-light-gray rounded bg-white relative mb-1.5 overflow-hidden flex items-center justify-center" style={{ height: 72 }}>
+                      <div className="absolute top-1 left-1 w-3 h-3 border-t-2 border-l-2 rounded-tl" style={{ borderColor: "var(--color-brand)" }} />
+                      <div className="absolute bottom-1 right-1 w-3 h-3 border-b-2 border-r-2 rounded-br" style={{ borderColor: "var(--color-brand)" }} />
+                    </div>
+                    <span className="text-xs font-semibold text-charcoal">Corner</span>
+                  </button>
+                  <button
+                    onClick={() => { setAccentStyle("top_edge_accent"); setAccentPositions([1]); }}
+                    className={`flex flex-col items-center p-3 rounded-xl border-2 transition-all ${
+                      accentStyle === "top_edge_accent" ? "border-brand bg-brand-light shadow-md" : "border-light-gray bg-white hover:border-sage hover:shadow-sm"
+                    }`}
+                  >
+                    <div className="w-14 border border-light-gray rounded bg-white relative mb-1.5 overflow-hidden flex items-center justify-center" style={{ height: 72 }}>
+                      <div className="absolute top-0 left-0 right-0 h-3" style={{ borderBottom: "2px solid var(--color-brand)" }} />
+                    </div>
+                    <span className="text-xs font-semibold text-charcoal">Edge motif</span>
+                  </button>
+                  <button
+                    onClick={() => { setAccentStyle("frame"); setAccentPositions([]); }}
+                    className={`flex flex-col items-center p-3 rounded-xl border-2 transition-all ${
+                      accentStyle === "frame" ? "border-brand bg-brand-light shadow-md" : "border-light-gray bg-white hover:border-sage hover:shadow-sm"
+                    }`}
+                  >
+                    <div className="w-14 rounded bg-white relative mb-1.5 overflow-hidden flex items-center justify-center" style={{ height: 72, border: "2px solid var(--color-brand)" }}>
+                      <div className="absolute inset-1.5 rounded" style={{ border: "1px solid var(--color-sage)" }} />
+                    </div>
+                    <span className="text-xs font-semibold text-charcoal">Frame</span>
+                  </button>
+                </div>
+
+                {/* Multi-position picker for corners */}
+                {accentStyle === "corner_flourish" && (
+                  <div>
+                    <p className="text-xs text-warm-gray mb-2">Select which corners to decorate:</p>
+                    <div className="grid grid-cols-4 gap-2">
+                      {[
+                        { slot: 1, label: "Top left" },
+                        { slot: 2, label: "Top right" },
+                        { slot: 4, label: "Bottom left" },
+                        { slot: 3, label: "Bottom right" },
+                      ].map(({ slot, label }) => {
+                        const active = accentPositions.includes(slot);
+                        return (
+                          <button
+                            key={slot}
+                            onClick={() => {
+                              setAccentPositions((prev) =>
+                                active ? prev.filter((s) => s !== slot) : [...prev, slot]
+                              );
+                            }}
+                            className={`p-2 rounded-lg border-2 text-xs font-medium transition-all ${
+                              active ? "border-brand bg-brand-light text-charcoal" : "border-light-gray bg-white text-warm-gray hover:border-sage"
+                            }`}
+                          >
+                            {label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* Multi-position picker for edges */}
+                {accentStyle === "top_edge_accent" && (
+                  <div>
+                    <p className="text-xs text-warm-gray mb-2">Select edge positions:</p>
+                    <div className="grid grid-cols-2 gap-2">
+                      {[
+                        { slot: 1, label: "Top edge" },
+                        { slot: 2, label: "Bottom edge" },
+                      ].map(({ slot, label }) => {
+                        const active = accentPositions.includes(slot);
+                        return (
+                          <button
+                            key={slot}
+                            onClick={() => {
+                              setAccentPositions((prev) =>
+                                active ? prev.filter((s) => s !== slot) : [...prev, slot]
+                              );
+                            }}
+                            className={`p-2 rounded-lg border-2 text-xs font-medium transition-all ${
+                              active ? "border-brand bg-brand-light text-charcoal" : "border-light-gray bg-white text-warm-gray hover:border-sage"
+                            }`}
+                          >
+                            {label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                <button
+                  onClick={async () => {
+                    if (!accentStyle) return;
+                    setInsideImagePosition(accentStyle);
+                    const prompt = buildAccentPrompt(accentStyle);
+                    setInsideSceneDescription(prompt);
+                    generateDesignImage(prompt, { isInside: true, isAccent: true });
+                  }}
+                  disabled={!accentStyle || (accentStyle !== "frame" && accentPositions.length === 0)}
+                  className="btn-primary disabled:opacity-40 w-full"
+                >
+                  Generate accent
+                </button>
+              </div>
+            )}
+
+            <div className="flex items-center gap-3">
               <button
                 onClick={() => setStep("design_preview")}
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium transition-colors"
@@ -2223,44 +2515,6 @@ Humor tolerance: ${r.humor_tolerance || "Not specified"}`.replace(/\n{2,}/g, "\n
                 Back
               </button>
               <button
-                onClick={async () => {
-                  setIsLoading(true);
-                  setLoadingMessage("Suggesting inside illustrations...");
-                  if (!selectedDesign) return;
-                  const orientation = insideImageOrientation();
-                  try {
-                    const res = await fetch("/api/suggest-inside-designs", {
-                      method: "POST",
-                      headers: { "Content-Type": "application/json" },
-                      body: JSON.stringify({
-                        frontTitle: selectedDesign.title,
-                        frontDescription: selectedDesign.description,
-                        frontImagePrompt: selectedDesign.image_prompt,
-                        occasion: effectiveOccasion,
-                        tone,
-                        position: insideImagePosition,
-                        orientation,
-                        artStyle: ART_STYLES.find((s) => s.id === artStyle)?.label,
-                      }),
-                    });
-                    if (!res.ok) throw new Error("Failed to load");
-                    const data = await res.json();
-                    setInsideConcepts(data.designs ?? []);
-                    setIsLoading(false);
-                    setStep("inside_design_pick");
-                    logApiCall("suggest-inside-designs", { model: "gpt-4o", callType: "chat_completion", recipientId, cardId: editCardId || undefined });
-                    setSessionCost((c) => c + 0.025);
-                  } catch {
-                    setIsLoading(false);
-                    loadFrontTextSuggestions();
-                  }
-                }}
-                disabled={!insideImagePosition}
-                className="btn-primary disabled:opacity-40"
-              >
-                Suggest illustrations
-              </button>
-              <button
                 onClick={() => {
                   if (editMode) {
                     handleSave({ deliveryMethodOverride: deliveryMethod });
@@ -2268,9 +2522,9 @@ Humor tolerance: ${r.humor_tolerance || "Not specified"}`.replace(/\n{2,}/g, "\n
                     loadFrontTextSuggestions();
                   }
                 }}
-                className="btn-secondary"
+                className="btn-secondary ml-auto"
               >
-                {editMode ? "Save & finish" : "Skip"}
+                {editMode ? "Save & finish" : "Skip — no decoration"}
               </button>
             </div>
           </div>
@@ -2448,28 +2702,142 @@ Humor tolerance: ${r.humor_tolerance || "Not specified"}`.replace(/\n{2,}/g, "\n
         {step === "inside_design_preview" && insideImageUrl && (
           <div>
             <h2 className="text-xl font-bold text-charcoal mb-2">
-              Inside illustration
+              {decorationType === "accent" ? "Decorative accent" : "Inside illustration"}
             </h2>
             <p className="text-sm text-warm-gray mb-4">
-              Position: <strong>{INSIDE_POSITIONS.find((p) => p.id === insideImagePosition)?.label}</strong>
+              Style: <strong>{
+                insideImagePosition === "corner_flourish" ? "Corner flourish" :
+                insideImagePosition === "top_edge_accent" ? "Top edge motif" :
+                insideImagePosition === "frame" ? "Full frame" :
+                INSIDE_POSITIONS.find((p) => p.id === insideImagePosition)?.label
+              }</strong>
             </p>
 
             <div className="card-surface p-4 mb-4">
               <p className="text-sm text-warm-gray uppercase tracking-wide mb-3 text-center">
-                Preview
+                Preview — how it will look on the card
               </p>
               <div className="flex justify-center">
-                <img
-                  src={insideImageUrl}
-                  alt=""
-                  className={
-                    insideImageOrientation() === "horizontal"
-                      ? "w-full max-w-md h-auto rounded-lg"
-                      : insideImageOrientation() === "vertical"
-                        ? "max-h-48 w-auto rounded-lg"
-                        : "max-h-32 w-auto rounded-lg"
-                  }
-                />
+                <div
+                  className="bg-white rounded-lg shadow-md overflow-hidden relative"
+                  style={{
+                    width: 300,
+                    height: cardSize === "4x6" ? 400 : 420,
+                    border: "1px solid var(--color-light-gray)",
+                  }}
+                >
+                  {insideImagePosition === "top" && (
+                    <>
+                      <img src={insideImageUrl} alt="" className="w-full object-cover" style={{ height: "20%" }} />
+                      <div className="flex flex-col items-center justify-center px-4" style={{ height: "80%" }}>
+                        <div className="w-3/4 space-y-1.5">
+                          {[1,2,3,4].map(l => <div key={l} className="h-1.5 rounded bg-light-gray" style={{ width: l === 4 ? "50%" : "100%" }} />)}
+                        </div>
+                      </div>
+                    </>
+                  )}
+                  {insideImagePosition === "bottom" && (
+                    <>
+                      <div className="flex flex-col items-center justify-center px-4" style={{ height: "80%" }}>
+                        <div className="w-3/4 space-y-1.5">
+                          {[1,2,3,4].map(l => <div key={l} className="h-1.5 rounded bg-light-gray" style={{ width: l === 4 ? "50%" : "100%" }} />)}
+                        </div>
+                      </div>
+                      <img src={insideImageUrl} alt="" className="w-full object-cover" style={{ height: "20%" }} />
+                    </>
+                  )}
+                  {insideImagePosition === "middle" && (
+                    <>
+                      <div className="flex flex-col items-center justify-center px-4" style={{ height: "35%" }}>
+                        <div className="w-3/4 space-y-1.5">
+                          {[1,2].map(l => <div key={l} className="h-1.5 rounded bg-light-gray" style={{ width: l === 2 ? "60%" : "100%" }} />)}
+                        </div>
+                      </div>
+                      <img src={insideImageUrl} alt="" className="w-full object-cover" style={{ height: "18%" }} />
+                      <div className="flex flex-col items-center justify-center px-4" style={{ height: "47%" }}>
+                        <div className="w-3/4 space-y-1.5">
+                          {[1,2,3].map(l => <div key={l} className="h-1.5 rounded bg-light-gray" style={{ width: l === 3 ? "40%" : "100%" }} />)}
+                        </div>
+                      </div>
+                    </>
+                  )}
+                  {insideImagePosition === "left" && (
+                    <div className="flex h-full">
+                      <img src={insideImageUrl} alt="" className="h-full object-cover" style={{ width: "22%" }} />
+                      <div className="flex-1 flex flex-col items-center justify-center px-4">
+                        <div className="w-3/4 space-y-1.5">
+                          {[1,2,3,4].map(l => <div key={l} className="h-1.5 rounded bg-light-gray" style={{ width: l === 4 ? "50%" : "100%" }} />)}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                  {insideImagePosition === "right" && (
+                    <div className="flex h-full">
+                      <div className="flex-1 flex flex-col items-center justify-center px-4">
+                        <div className="w-3/4 space-y-1.5">
+                          {[1,2,3,4].map(l => <div key={l} className="h-1.5 rounded bg-light-gray" style={{ width: l === 4 ? "50%" : "100%" }} />)}
+                        </div>
+                      </div>
+                      <img src={insideImageUrl} alt="" className="h-full object-cover" style={{ width: "22%" }} />
+                    </div>
+                  )}
+                  {insideImagePosition === "behind" && (
+                    <div className="relative h-full">
+                      <img src={insideImageUrl} alt="" className="absolute inset-0 w-full h-full object-cover opacity-15" />
+                      <div className="relative flex flex-col items-center justify-center h-full px-4">
+                        <div className="w-3/4 space-y-1.5">
+                          {[1,2,3,4].map(l => <div key={l} className="h-1.5 rounded bg-light-gray" style={{ width: l === 4 ? "50%" : "100%", backgroundColor: "var(--color-warm-gray)" }} />)}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                  {/* Corner flourish — render per selected corner */}
+                  {insideImagePosition === "corner_flourish" && (
+                    <div className="relative h-full">
+                      {accentPositions.map((slot) => (
+                        <div key={slot} style={cornerStyle(slot)}>
+                          <img src={insideImageUrl} alt="" style={cornerImgStyle()} />
+                        </div>
+                      ))}
+                      <div className="relative flex flex-col items-center justify-center h-full px-4" style={{ padding: accentPositions.length > 2 ? "2.5rem 1.5rem" : "1rem" }}>
+                        <div className="w-3/4 space-y-1.5">
+                          {[1,2,3,4].map(l => <div key={l} className="h-1.5 rounded bg-light-gray" style={{ width: l === 4 ? "50%" : "100%" }} />)}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                  {/* Frame — portrait fill */}
+                  {insideImagePosition === "frame" && (
+                    <div className="relative h-full">
+                      <img src={insideImageUrl} alt="" style={frameImgStyle()} />
+                      <div className="relative flex flex-col items-center justify-center h-full" style={{ padding: "15% 12%" }}>
+                        <div className="w-3/4 space-y-1.5">
+                          {[1,2,3,4].map(l => <div key={l} className="h-1.5 rounded bg-light-gray" style={{ width: l === 4 ? "50%" : "100%" }} />)}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                  {/* Top/bottom edge motif */}
+                  {insideImagePosition === "top_edge_accent" && (
+                    <div className="flex flex-col h-full">
+                      {accentPositions.includes(1) && (
+                        <div style={edgeStyle(1)}>
+                          <img src={insideImageUrl} alt="" style={edgeImgStyle()} />
+                        </div>
+                      )}
+                      <div className="flex-1 flex flex-col items-center justify-center px-4">
+                        <div className="w-3/4 space-y-1.5">
+                          {[1,2,3,4].map(l => <div key={l} className="h-1.5 rounded bg-light-gray" style={{ width: l === 4 ? "50%" : "100%" }} />)}
+                        </div>
+                      </div>
+                      {accentPositions.includes(2) && (
+                        <div style={edgeStyle(2)}>
+                          <img src={insideImageUrl} alt="" style={edgeImgStyle()} />
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
 
@@ -2519,11 +2887,17 @@ Humor tolerance: ${r.humor_tolerance || "Not specified"}`.replace(/\n{2,}/g, "\n
 
             <div className="flex gap-3">
               <button
-                onClick={() => setStep("inside_design_pick")}
+                onClick={() => {
+                  if (decorationType === "accent") {
+                    setStep("inside_design_ask");
+                  } else {
+                    setStep("inside_design_pick");
+                  }
+                }}
                 className="text-sm text-warm-gray hover:text-charcoal px-4 py-2 rounded-full"
                 style={{ border: "1.5px solid var(--color-sage)" }}
               >
-                &larr; Pick different
+                &larr; {decorationType === "accent" ? "Change style" : "Pick different"}
               </button>
               {editMode && (
                 <button
@@ -2623,17 +2997,17 @@ Humor tolerance: ${r.humor_tolerance || "Not specified"}`.replace(/\n{2,}/g, "\n
               <label className="block text-xs font-medium text-warm-gray uppercase tracking-wide mt-3 mb-2">
                 Text style
               </label>
-              <div className="flex gap-2">
+              <div className="grid grid-cols-2 gap-2">
                 {([
-                  { value: "white_box" as const, label: "Plain black" },
-                  { value: "plain" as const, label: "Black on white" },
+                  { value: "plain_black" as const, label: "Plain black" },
                   { value: "plain_white" as const, label: "Plain white" },
-                  { value: "dark_box" as const, label: "White on dark" },
+                  { value: "black_white_border" as const, label: "Black / white outline" },
+                  { value: "white_black_border" as const, label: "White / black outline" },
                 ]).map((opt) => (
                   <button
                     key={opt.value}
                     onClick={() => setFrontTextStyle(opt.value)}
-                    className={`flex-1 py-2 px-3 rounded-lg text-sm font-medium border transition-colors ${
+                    className={`py-2 px-3 rounded-lg text-sm font-medium border transition-colors ${
                       frontTextStyle === opt.value
                         ? "border-brand bg-brand-light text-brand"
                         : "border-light-gray text-warm-gray hover:border-light-gray"
@@ -2650,23 +3024,7 @@ Humor tolerance: ${r.humor_tolerance || "Not specified"}`.replace(/\n{2,}/g, "\n
                     ...fontCSS(font as FontChoice),
                     fontSize: "1.1rem",
                     display: "inline-block",
-                    ...(frontTextStyle === "dark_box" ? {
-                      color: "#fff",
-                      backgroundColor: "rgba(0,0,0,0.45)",
-                      borderRadius: "0.375rem",
-                      padding: "0.4rem 0.75rem",
-                    } : frontTextStyle === "plain" ? {
-                      color: "#111",
-                      backgroundColor: "rgba(255,255,255,0.7)",
-                      borderRadius: "0.375rem",
-                      padding: "0.4rem 0.75rem",
-                    } : frontTextStyle === "plain_white" ? {
-                      color: "#fff",
-                      textShadow: "0 1px 4px rgba(0,0,0,0.7)",
-                    } : {
-                      color: "#111",
-                      textShadow: "0 1px 3px rgba(255,255,255,0.5)",
-                    }),
+                    ...textStyleCSS(frontTextStyle as TextStyleChoice),
                     whiteSpace: "pre-line",
                   }}>
                     {frontText}

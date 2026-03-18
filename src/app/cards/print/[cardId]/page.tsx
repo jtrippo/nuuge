@@ -1,15 +1,16 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { getCards, getRecipients, getUserProfile, hydrateCardImages, updateCard, deleteCard } from "@/lib/store";
 import AppHeader from "@/components/AppHeader";
 import type { Card, Recipient } from "@/types/database";
 import { getDisplayOccasion } from "@/lib/occasions";
-import { fontCSS, positionCSS, textStyleCSS, frontTextAlign, messageSizing, FONT_OPTIONS } from "@/lib/card-ui-helpers";
+import { fontCSS, positionCSS, textStyleCSS, frontTextAlign, messageSizing, maxMsgScale, msgSizeOptions, FONT_OPTIONS, isAccentPosition, defaultAccentSlots, cornerStyle, cornerImgStyle, edgeStyle, edgeImgStyle, frameImgStyle } from "@/lib/card-ui-helpers";
 import type { FontChoice, TextStyleChoice } from "@/lib/card-ui-helpers";
 import { shareCard } from "@/lib/share-card";
 import { copyToClipboard } from "@/lib/clipboard";
+import { getSenderNames } from "@/lib/signer-helpers";
 
 const POSITION_OPTIONS: { value: string; label: string }[] = [
   { value: "center", label: "Center" },
@@ -22,10 +23,10 @@ const POSITION_OPTIONS: { value: string; label: string }[] = [
 ];
 
 const TEXT_STYLE_OPTIONS: { value: TextStyleChoice; label: string }[] = [
-  { value: "white_box", label: "Plain black" },
-  { value: "plain", label: "Black on white" },
+  { value: "plain_black", label: "Plain black" },
   { value: "plain_white", label: "Plain white" },
-  { value: "dark_box", label: "White on dark" },
+  { value: "black_white_border", label: "Black / white outline" },
+  { value: "white_black_border", label: "White / black outline" },
 ];
 
 export default function PrintCardPage() {
@@ -51,11 +52,12 @@ export default function PrintCardPage() {
   const [printSize, setPrintSize] = useState<"4x6" | "5x7" | "8.5x11">("5x7");
   const [ftFont, setFtFont] = useState<string>("sans");
   const [ftPosition, setFtPosition] = useState("bottom-right");
-  const [ftStyle, setFtStyle] = useState<TextStyleChoice>("plain");
+  const [ftStyle, setFtStyle] = useState<TextStyleChoice>("plain_black");
   const [msgFont, setMsgFont] = useState<string>("sans");
-  const [insidePos, setInsidePos] = useState<"top" | "middle" | "bottom" | "left" | "right" | "behind">("top");
-  const [msgSizeScale, setMsgSizeScale] = useState<number>(1.5);
+  const [insidePos, setInsidePos] = useState<"top" | "middle" | "bottom" | "left" | "right" | "behind" | "corner_flourish" | "top_edge_accent" | "frame">("top");
+  const [msgSizeScale, setMsgSizeScale] = useState<number>(0);
   const [ftSizeScale, setFtSizeScale] = useState<number>(1);
+  const loadedRef = useRef(false);
 
   useEffect(() => {
     setMounted(true);
@@ -68,7 +70,7 @@ export default function PrintCardPage() {
 
       setFtFont(found.front_text_font ?? "sans");
       setFtPosition(found.front_text_position ?? "bottom-right");
-      setFtStyle(found.front_text_style ?? "plain");
+      setFtStyle(found.front_text_style ?? "plain_black");
       setMsgFont(found.font ?? "sans");
       setInsidePos((found.inside_image_position as typeof insidePos) ?? "top");
       if (found.card_size) setPrintSize(found.card_size as "4x6" | "5x7");
@@ -78,7 +80,10 @@ export default function PrintCardPage() {
       if (found.letter_font) setLetterFont(found.letter_font);
       if (found.letter_font_scale != null) setLetterSizeScale(found.letter_font_scale);
 
-      hydrateCardImages(found).then((hydrated) => setCard(hydrated));
+      hydrateCardImages(found).then((hydrated) => {
+        setCard(hydrated);
+        loadedRef.current = true;
+      });
     }
   }, [cardId]);
 
@@ -100,7 +105,7 @@ export default function PrintCardPage() {
   }, [card?.id]);
 
   useEffect(() => {
-    if (!card) return;
+    if (!card || !loadedRef.current) return;
     updateCard(card.id, {
       front_text_font: ftFont,
       front_text_position: ftPosition,
@@ -128,6 +133,21 @@ export default function PrintCardPage() {
     );
   }
 
+  function saveSettings() {
+    if (!card) return;
+    updateCard(card.id, {
+      front_text_font: ftFont,
+      front_text_position: ftPosition,
+      front_text_style: ftStyle,
+      font: msgFont,
+      inside_image_position: insidePos,
+      msg_font_scale: msgSizeScale,
+      ft_font_scale: ftSizeScale,
+      letter_font: letterFont,
+      letter_font_scale: letterSizeScale,
+    });
+  }
+
   const messageParts = card.message_text.split("\n\n");
   const greeting = messageParts[0] || "";
   const body = messageParts.length > 2 ? messageParts.slice(1, -1).join("\n\n") : "";
@@ -135,15 +155,15 @@ export default function PrintCardPage() {
   const totalChars = card.message_text.length;
   const baseSizing = messageSizing(totalChars);
 
-  const scaleRem = (rem: string) => {
-    const n = parseFloat(rem);
-    return `${(n * msgSizeScale).toFixed(3)}rem`;
-  };
+  const sizeOpts = msgSizeOptions(totalChars);
+  const autoValue = sizeOpts.find((o) => o.label === "Auto")!.value;
+  const effectiveMsgScale = msgSizeScale === 0 ? autoValue : msgSizeScale;
+  const remToCqw = (rem: string) => `${(parseFloat(rem) * effectiveMsgScale * 3.81).toFixed(2)}cqw`;
   const sizing = {
-    greetingSize: scaleRem(baseSizing.greetingSize),
-    bodySize: scaleRem(baseSizing.bodySize),
-    closingSize: scaleRem(baseSizing.closingSize),
-    gap: scaleRem(baseSizing.gap),
+    greetingSize: remToCqw(baseSizing.greetingSize),
+    bodySize: remToCqw(baseSizing.bodySize),
+    closingSize: remToCqw(baseSizing.closingSize),
+    gap: remToCqw(baseSizing.gap),
   };
 
   const frontFontStyle = fontCSS(ftFont);
@@ -162,8 +182,22 @@ export default function PrintCardPage() {
           borderRadius: ftStyleCSS.borderRadius,
           padding: ftStyleCSS.padding,
         };
+      case "black_white_border":
+        return {
+          color: "#000",
+          WebkitTextStroke: "1.5px #fff",
+          paintOrder: "stroke fill",
+        };
+      case "white_black_border":
+        return {
+          color: "#fff",
+          WebkitTextStroke: "1.5px #000",
+          paintOrder: "stroke fill",
+        };
       case "plain_white":
         return { color: "#fff" };
+      case "plain_black":
+        return { color: "#111" };
       case "plain":
         return { color: "#111" };
       case "white_box":
@@ -219,6 +253,7 @@ export default function PrintCardPage() {
           position: relative;
           overflow: hidden;
           box-sizing: border-box;
+          container-type: inline-size;
         }
         .card-panel + .card-panel {
           border-left: 1px dashed var(--color-light-gray);
@@ -284,7 +319,7 @@ export default function PrintCardPage() {
 
       <AppHeader title={card ? `${getDisplayOccasion(card)} card for ${recipient?.name ?? "recipient"}` : undefined}>
         <button
-          onClick={() => recipient ? router.push(`/recipients/${recipient.id}`) : router.push("/")}
+          onClick={() => { saveSettings(); recipient ? router.push(`/recipients/${recipient.id}`) : router.push("/"); }}
           className="flex items-center gap-1.5 px-4 py-1.5 rounded-full text-sm text-warm-gray hover:text-charcoal transition-colors"
           style={{ border: "1.5px solid var(--color-sage)" }}
         >
@@ -292,7 +327,7 @@ export default function PrintCardPage() {
           {recipient?.name ?? "Circle of People"}
         </button>
         <button
-          onClick={() => router.push(`/cards/edit/${cardId}`)}
+          onClick={() => { saveSettings(); window.location.href = `/cards/edit/${cardId}`; }}
           className="px-4 py-1.5 rounded-full text-sm text-warm-gray hover:text-charcoal transition-colors"
           style={{ border: "1.5px solid var(--color-sage)" }}
         >
@@ -306,7 +341,7 @@ export default function PrintCardPage() {
           {letterText.trim() ? "Edit letter" : "Add letter"}
         </button>
         <button
-          onClick={() => router.push(`/cards/view/${cardId}`)}
+          onClick={() => { saveSettings(); window.location.href = `/cards/view/${cardId}`; }}
           className="px-4 py-1.5 rounded-full text-sm text-warm-gray hover:text-charcoal transition-colors"
           style={{ border: "1.5px solid var(--color-sage)" }}
         >
@@ -315,12 +350,14 @@ export default function PrintCardPage() {
         <button
           onClick={async () => {
             if (!card || sharing) return;
+            saveSettings();
             setSharing(true);
             setShareError(null);
             try {
               const profile = getUserProfile();
-              const sName = (profile?.first_name as string) || (profile?.display_name as string) || "";
+              const recipients = getRecipients();
               const rName = recipient?.first_name || recipient?.display_name || recipient?.name || "";
+              const sName = recipient ? getSenderNames(card, recipient, recipients, profile) : (profile?.first_name || profile?.display_name || "");
               const hydrated = await hydrateCardImages(card);
               const result = await shareCard(hydrated, rName, sName);
               if ("error" in result) { setShareError(result.error); }
@@ -626,6 +663,14 @@ export default function PrintCardPage() {
                 <img src={card.inside_image_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
               </div>
             )}
+            {insidePos === "top_edge_accent" && card.inside_image_url && (() => {
+              const slots = (card as { accent_positions?: number[] }).accent_positions ?? defaultAccentSlots("top_edge_accent");
+              return slots.includes(1) ? (
+                <div style={edgeStyle(1)}>
+                  <img src={card.inside_image_url!} alt="" style={edgeImgStyle()} />
+                </div>
+              ) : null;
+            })()}
 
             {/* Message text — centered, adaptive sizing */}
             <div
@@ -685,6 +730,25 @@ export default function PrintCardPage() {
                 <img src={card.inside_image_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
               </div>
             )}
+            {insidePos === "corner_flourish" && card.inside_image_url && (() => {
+              const slots = (card as { accent_positions?: number[] }).accent_positions ?? defaultAccentSlots("corner_flourish");
+              return slots.map((slot) => (
+                <div key={slot} style={cornerStyle(slot)}>
+                  <img src={card.inside_image_url!} alt="" style={cornerImgStyle()} />
+                </div>
+              ));
+            })()}
+            {insidePos === "frame" && card.inside_image_url && (
+              <img src={card.inside_image_url} alt="" style={frameImgStyle()} />
+            )}
+            {insidePos === "top_edge_accent" && card.inside_image_url && (() => {
+              const slots = (card as { accent_positions?: number[] }).accent_positions ?? defaultAccentSlots("top_edge_accent");
+              return slots.includes(2) ? (
+                <div style={edgeStyle(2)}>
+                  <img src={card.inside_image_url!} alt="" style={edgeImgStyle()} />
+                </div>
+              ) : null;
+            })()}
           </div>
         </div>
 
@@ -711,11 +775,9 @@ export default function PrintCardPage() {
                 onChange={(e) => { setMsgSizeScale(parseFloat(e.target.value)); }}
                 className="w-full text-sm input-field px-2 py-1.5"
               >
-                <option value={1}>Small</option>
-                <option value={1.25}>Medium</option>
-                <option value={1.5}>Auto</option>
-                <option value={1.75}>Large</option>
-                <option value={2}>Extra Large</option>
+                {sizeOpts.map((o) => (
+                  <option key={o.label} value={o.label === "Auto" ? 0 : o.value}>{o.label}</option>
+                ))}
               </select>
             </div>
             {card.inside_image_url && (

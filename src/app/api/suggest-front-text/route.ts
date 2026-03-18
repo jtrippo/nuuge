@@ -46,6 +46,7 @@ export async function POST(req: NextRequest) {
       messageText,
       artStyle,
       imageSubject,
+      sceneDescription,
     }: {
       occasion: string;
       tone: string;
@@ -55,6 +56,7 @@ export async function POST(req: NextRequest) {
       messageText?: string;
       artStyle?: string;
       imageSubject?: string;
+      sceneDescription?: string;
     } = body;
 
     const avoidClause =
@@ -66,9 +68,13 @@ export async function POST(req: NextRequest) {
       ? `\nThe inside message reads:\n"${messageText.slice(0, 500)}"`
       : "";
 
-    const imageContext = (artStyle || imageSubject)
-      ? `\nThe card image is ${artStyle ? `${artStyle} style` : ""}${artStyle && imageSubject ? ", " : ""}${imageSubject ? `featuring ${imageSubject}` : ""}.`
-      : "";
+    const imageContext = (() => {
+      const parts: string[] = [];
+      if (artStyle) parts.push(`${artStyle} style`);
+      if (imageSubject) parts.push(`featuring ${imageSubject}`);
+      if (sceneDescription) parts.push(`Scene: ${sceneDescription.slice(0, 400)}`);
+      return parts.length > 0 ? `\nThe card image is ${parts.join(". ")}.` : "";
+    })();
 
     const completion = await openai.chat.completions.create({
       model: "gpt-4o",

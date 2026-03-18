@@ -4,7 +4,8 @@ import { useEffect, useState, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { getCards, getRecipients, getUserProfile, hydrateCardImages } from "@/lib/store";
 import type { Card } from "@/types/database";
-import { fontCSS, positionCSS, textStyleCSS, frontTextAlign, messageSizing } from "@/lib/card-ui-helpers";
+import { getSenderNames } from "@/lib/signer-helpers";
+import { fontCSS, positionCSS, textStyleCSS, frontTextAlign, messageSizing, msgSizeOptions, isAccentPosition, defaultAccentSlots, cornerStyle, cornerImgStyle, edgeStyle, edgeImgStyle, frameImgStyle } from "@/lib/card-ui-helpers";
 import type { TextStyleChoice } from "@/lib/card-ui-helpers";
 import { shareCard } from "@/lib/share-card";
 import { copyToClipboard } from "@/lib/clipboard";
@@ -17,7 +18,7 @@ export default function CardViewerPage() {
   const cardId = params.cardId as string;
   const [card, setCard] = useState<Card | null>(null);
   const [recipientFirstName, setRecipientFirstName] = useState<string>("");
-  const [senderFirstName, setSenderFirstName] = useState<string>("");
+  const [senderNames, setSenderNames] = useState<string>("");
   const [recipientId, setRecipientId] = useState<string>("");
   const [recipientName, setRecipientName] = useState<string>("");
   const [stage, setStage] = useState<ViewStage>("envelope_front");
@@ -42,9 +43,8 @@ export default function CardViewerPage() {
         setRecipientName(r.name || r.display_name || r.first_name || "");
       }
       const profile = getUserProfile();
-      if (profile) {
-        setSenderFirstName((profile.first_name as string) || (profile.display_name as string) || "");
-      }
+      const names = r ? getSenderNames(found, r, recipients, profile) : (profile?.first_name || profile?.display_name || "");
+      setSenderNames(names);
       hydrateCardImages(found).then((hydrated) => setCard(hydrated));
     }
   }, [cardId]);
@@ -98,16 +98,18 @@ export default function CardViewerPage() {
   const msgFontStyle = fontCSS(card.font);
   const ftFontStyle = fontCSS(card.front_text_font);
   const ftPos = positionCSS(card.front_text_position ?? "bottom-right");
-  const ftStyle = textStyleCSS((card.front_text_style ?? "dark_box") as TextStyleChoice);
+  const ftStyle = textStyleCSS((card.front_text_style ?? "plain_black") as TextStyleChoice);
   const ftScale = card.ft_font_scale ?? 1;
-  const msgScale = card.msg_font_scale ?? 1.5;
+  const rawMsgScale = card.msg_font_scale ?? 0;
+  const msgAutoValue = msgSizeOptions(card.message_text.length).find((o) => o.label === "Auto")!.value;
+  const msgScale = rawMsgScale === 0 ? msgAutoValue : rawMsgScale;
   const baseSizing = messageSizing(card.message_text.length);
-  const scaleRem = (rem: string, scale: number) => `${(parseFloat(rem) * scale).toFixed(3)}rem`;
+  const remToCqw = (rem: string, scale: number) => `${(parseFloat(rem) * scale * 3.81).toFixed(2)}cqw`;
   const sizing = {
-    greetingSize: scaleRem(baseSizing.greetingSize, msgScale),
-    bodySize: scaleRem(baseSizing.bodySize, msgScale),
-    closingSize: scaleRem(baseSizing.closingSize, msgScale),
-    gap: scaleRem(baseSizing.gap, msgScale),
+    greetingSize: remToCqw(baseSizing.greetingSize, msgScale),
+    bodySize: remToCqw(baseSizing.bodySize, msgScale),
+    closingSize: remToCqw(baseSizing.closingSize, msgScale),
+    gap: remToCqw(baseSizing.gap, msgScale),
   };
 
   const hasLetter = Boolean(card.letter_text?.trim());
@@ -120,7 +122,7 @@ export default function CardViewerPage() {
     setShareError(null);
     try {
       const hydrated = await hydrateCardImages(card);
-      const result = await shareCard(hydrated, recipientFirstName, senderFirstName);
+      const result = await shareCard(hydrated, recipientFirstName, senderNames);
       if ("error" in result) {
         setShareError(result.error);
       } else {
@@ -209,6 +211,7 @@ export default function CardViewerPage() {
         }
         .ecard-panel {
           width: min(90vw, 420px);
+          container-type: inline-size;
         }
       `}</style>
 
@@ -226,9 +229,9 @@ export default function CardViewerPage() {
                 style={{ background: "#faf7f2", border: "1px solid #e8e0d4" }}
               >
                 {/* Sender name — upper left */}
-                {senderFirstName && (
+                {senderNames && (
                   <p className="absolute top-4 left-5 text-xs" style={{ color: "#8b7d6b", fontFamily: "var(--font-handwritten), cursive" }}>
-                    {senderFirstName}
+                    {senderNames}
                   </p>
                 )}
 
@@ -363,12 +366,20 @@ export default function CardViewerPage() {
                 <img src={card.inside_image_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
               </div>
             )}
+            {insidePos === "top_edge_accent" && card.inside_image_url && (() => {
+              const slots = (card as { accent_positions?: number[] }).accent_positions ?? defaultAccentSlots("top_edge_accent");
+              return slots.includes(1) ? (
+                <div style={edgeStyle(1)}>
+                  <img src={card.inside_image_url} alt="" style={edgeImgStyle()} />
+                </div>
+              ) : null;
+            })()}
 
             <div
               className="flex flex-col justify-center items-center text-center"
               style={{
                 flex: 1,
-                padding: insidePos === "left" || insidePos === "right" ? "1rem 0.6rem" : "1.25rem",
+                padding: insidePos === "left" || insidePos === "right" ? "6% 4%" : "8% 10%",
                 overflow: "hidden",
                 position: "relative",
                 zIndex: 1,
@@ -405,6 +416,25 @@ export default function CardViewerPage() {
                 <img src={card.inside_image_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
               </div>
             )}
+            {insidePos === "corner_flourish" && card.inside_image_url && (() => {
+              const slots = (card as { accent_positions?: number[] }).accent_positions ?? defaultAccentSlots("corner_flourish");
+              return slots.map((slot) => (
+                <div key={slot} style={cornerStyle(slot)}>
+                  <img src={card.inside_image_url!} alt="" style={cornerImgStyle()} />
+                </div>
+              ));
+            })()}
+            {insidePos === "frame" && card.inside_image_url && (
+              <img src={card.inside_image_url} alt="" style={frameImgStyle()} />
+            )}
+            {insidePos === "top_edge_accent" && card.inside_image_url && (() => {
+              const slots = (card as { accent_positions?: number[] }).accent_positions ?? defaultAccentSlots("top_edge_accent");
+              return slots.includes(2) ? (
+                <div style={edgeStyle(2)}>
+                  <img src={card.inside_image_url!} alt="" style={edgeImgStyle()} />
+                </div>
+              ) : null;
+            })()}
           </div>
 
           <div className="mt-6 space-y-3">
@@ -439,7 +469,7 @@ export default function CardViewerPage() {
               </button>
               {!hasLetter && (
                 <button
-                  onClick={() => router.push(`/cards/print/${cardId}`)}
+                  onClick={() => { window.location.href = `/cards/print/${cardId}`; }}
                   className="btn-primary px-5 py-2 rounded-full text-sm flex-shrink-0"
                 >
                   Print preview
@@ -546,7 +576,7 @@ export default function CardViewerPage() {
                 {sharing ? "Sharing..." : "Share e-card"}
               </button>
               <button
-                onClick={() => router.push(`/cards/print/${cardId}`)}
+                onClick={() => { window.location.href = `/cards/print/${cardId}`; }}
                 className="btn-primary px-5 py-2 rounded-full text-sm flex-shrink-0"
               >
                 Print preview

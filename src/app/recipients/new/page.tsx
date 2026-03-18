@@ -1,10 +1,11 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
-import { getUserProfile, saveRecipient } from "@/lib/store";
+import { useState, useEffect, useRef } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { getUserProfile, saveRecipient, getRecipients } from "@/lib/store";
 import TraitPickerWheel from "@/components/TraitPickerWheel";
 import AppHeader from "@/components/AppHeader";
+import { Suspense } from "react";
 
 // ─── Curated selection lists ────────────────────────────────────────
 
@@ -82,11 +83,23 @@ interface PersonalDate {
 }
 
 export default function NewRecipientPage() {
+  return (
+    <Suspense fallback={null}>
+      <NewRecipientPageInner />
+    </Suspense>
+  );
+}
+
+function NewRecipientPageInner() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const resumeId = searchParams.get("resumeId");
   const [mounted, setMounted] = useState(false);
   const [userProfile, setUserProfile] = useState<ReturnType<typeof getUserProfile>>(null);
   const [completed, setCompleted] = useState(false);
   const [step, setStep] = useState<RecipientStep>("who");
+
+  const recipientIdRef = useRef<string>(resumeId || crypto.randomUUID());
 
   // Form state — Who step
   const [firstName, setFirstName] = useState("");
@@ -115,6 +128,48 @@ export default function NewRecipientPage() {
   useEffect(() => {
     setMounted(true);
     setUserProfile(getUserProfile());
+
+    if (resumeId) {
+      const all = getRecipients();
+      const existing = all.find((r) => r.id === resumeId);
+      if (existing) {
+        setFirstName(existing.first_name || "");
+        setLastName(existing.last_name || "");
+        setEmail(existing.email || "");
+        setNickname(existing.nickname || "");
+        if (existing.mailing_address) {
+          const parts = existing.mailing_address.split("|");
+          setAddressStreet(parts[0] || "");
+          setAddressCity(parts[1] || "");
+          setAddressState(parts[2] || "");
+          setAddressPostal(parts[3] || "");
+        }
+        setLifestyle(existing.lifestyle || "");
+        const rel = existing.relationship_type || "";
+        if (rel && !RELATIONSHIP_TYPES.includes(rel)) {
+          setRelationship("__custom");
+          setCustomRelationship(rel);
+        } else {
+          setRelationship(rel);
+        }
+        if (existing.personality_notes) {
+          setSelectedTraits(existing.personality_notes.split(", ").filter(Boolean));
+        }
+        setSelectedInterests(existing.interests || []);
+        if (existing.humor_tolerance) {
+          const match = HUMOR_LEVELS.find((h) => h.label === existing.humor_tolerance);
+          setHumorTolerance(match?.id || "");
+        }
+        setPersonalDates(existing.important_dates || []);
+        setMilestones((existing.milestones || []).join("\n"));
+
+        const resumeStep = existing.setup_step as RecipientStep | undefined;
+        if (resumeStep && ["who", "personality", "preferences", "review"].includes(resumeStep)) {
+          setStep(resumeStep);
+        }
+      }
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -268,17 +323,14 @@ export default function NewRecipientPage() {
     }
   }
 
-  function handleSave() {
-    const milestonesArray = milestones
-      .split("\n")
-      .map((m) => m.trim())
-      .filter(Boolean);
+  function buildRecipientData() {
+    const milestonesArray = milestones.split("\n").map((m) => m.trim()).filter(Boolean);
     const nameForSave = displayName || "Unnamed";
     const mailingAddr = [addressStreet, addressCity, addressState, addressPostal].some((s) => s.trim())
       ? [addressStreet.trim(), addressCity.trim(), addressState.trim(), addressPostal.trim()].join("|")
       : null;
-
-    saveRecipient({
+    return {
+      id: recipientIdRef.current,
       user_id: "local",
       name: nameForSave,
       display_name: nameForSave,
@@ -288,13 +340,34 @@ export default function NewRecipientPage() {
       nickname: nickname.trim() || null,
       mailing_address: mailingAddr,
       lifestyle: lifestyle.trim() || null,
-      relationship_type: resolvedRelationship,
+      relationship_type: resolvedRelationship || "",
       personality_notes: selectedTraits.join(", ") || null,
       interests: selectedInterests,
       humor_tolerance: humorTolerance ? (HUMOR_LEVELS.find((h) => h.id === humorTolerance)?.label ?? humorTolerance) : null,
       tone_preference: "Not specified",
       important_dates: personalDates,
       milestones: milestonesArray,
+    };
+  }
+
+  function saveDraft(nextStep: RecipientStep) {
+    saveRecipient({
+      ...buildRecipientData(),
+      setup_complete: false,
+      setup_step: nextStep,
+    });
+  }
+
+  function advanceStep(nextStep: RecipientStep) {
+    saveDraft(nextStep);
+    setStep(nextStep);
+  }
+
+  function handleSave() {
+    saveRecipient({
+      ...buildRecipientData(),
+      setup_complete: true,
+      setup_step: undefined,
     });
     setCompleted(true);
   }
@@ -314,6 +387,7 @@ export default function NewRecipientPage() {
           </p>
           <button
             onClick={() => {
+              recipientIdRef.current = crypto.randomUUID();
               setCompleted(false);
               setStep("who");
               setFirstName("");
@@ -527,7 +601,7 @@ export default function NewRecipientPage() {
                 &larr; Circle of People
               </button>
               <button
-                onClick={() => setStep("personality")}
+                onClick={() => advanceStep("personality")}
                 disabled={!displayName.trim() || !resolvedRelationship}
                 className="btn-primary flex-1 disabled:opacity-40 disabled:cursor-not-allowed"
               >
@@ -540,67 +614,69 @@ export default function NewRecipientPage() {
         {/* ─── Step 2: Personality & Interests ─── */}
         {step === "personality" && (
           <div className="flex gap-6 min-h-[calc(100vh-12rem)]">
-            <div className="flex-1 max-w-xl flex flex-col overflow-y-auto">
-              <h2 className="text-2xl font-bold text-charcoal mb-2">
-                What is {displayName} like?
-              </h2>
-              <p className="text-xl text-warm-gray mb-6 leading-relaxed">
-                This helps Nuuge write messages that feel right for them.
-              </p>
+            <div className="flex-1 max-w-xl flex flex-col">
+              <div className="flex-1 overflow-y-auto">
+                <h2 className="text-2xl font-bold text-charcoal mb-2">
+                  What is {displayName} like?
+                </h2>
+                <p className="text-xl text-warm-gray mb-6 leading-relaxed">
+                  This helps Nuuge write messages that feel right for them.
+                </p>
 
-              <div className="mb-8">
-                <p className="text-xl font-semibold text-charcoal mb-3">Personality — tap the ones that fit {displayName}</p>
-                <TraitPickerWheel
-                  items={PERSONALITY_TRAITS}
-                  selected={selectedTraits}
-                  onToggle={toggleTrait}
-                />
-                <div className="flex gap-2 mt-4">
-                  <input
-                    value={customTrait}
-                    onChange={(e) => setCustomTrait(e.target.value)}
-                    onKeyDown={(e) => e.key === "Enter" && addCustomTrait()}
-                    placeholder="Add your own..."
-                    className="input-field flex-1"
+                <div className="mb-8">
+                  <p className="text-xl font-semibold text-charcoal mb-6">Personality — tap the ones that fit {displayName}</p>
+                  <TraitPickerWheel
+                    items={PERSONALITY_TRAITS}
+                    selected={selectedTraits}
+                    onToggle={toggleTrait}
                   />
-                  <button
-                    onClick={addCustomTrait}
-                    disabled={!customTrait.trim()}
-                    className="text-sm font-medium px-3 disabled:text-warm-gray"
-                    style={{ color: "var(--color-brand)" }}
-                  >
-                    Add
-                  </button>
+                  <div className="flex gap-2 mt-4">
+                    <input
+                      value={customTrait}
+                      onChange={(e) => setCustomTrait(e.target.value)}
+                      onKeyDown={(e) => e.key === "Enter" && addCustomTrait()}
+                      placeholder="Add your own..."
+                      className="input-field flex-1"
+                    />
+                    <button
+                      onClick={addCustomTrait}
+                      disabled={!customTrait.trim()}
+                      className="text-sm font-medium px-3 disabled:text-warm-gray"
+                      style={{ color: "var(--color-brand)" }}
+                    >
+                      Add
+                    </button>
+                  </div>
+                </div>
+
+                <div className="mb-8">
+                  <p className="text-xl font-semibold text-charcoal mb-6">{displayName}&apos;s interests — tap the ones that fit</p>
+                  <TraitPickerWheel
+                    items={ALL_INTERESTS}
+                    selected={selectedInterests}
+                    onToggle={toggleInterest}
+                  />
+                  <div className="flex gap-2 mt-4">
+                    <input
+                      value={customInterest}
+                      onChange={(e) => setCustomInterest(e.target.value)}
+                      onKeyDown={(e) => e.key === "Enter" && addCustomInterest()}
+                      placeholder="Add your own interest..."
+                      className="input-field flex-1"
+                    />
+                    <button
+                      onClick={addCustomInterest}
+                      disabled={!customInterest.trim()}
+                      className="text-sm font-medium px-3 disabled:text-warm-gray"
+                      style={{ color: "var(--color-brand)" }}
+                    >
+                      Add
+                    </button>
+                  </div>
                 </div>
               </div>
 
-              <div className="mb-8">
-                <p className="text-xl font-semibold text-charcoal mb-3">{displayName}&apos;s interests — tap the ones that fit</p>
-                <TraitPickerWheel
-                  items={ALL_INTERESTS}
-                  selected={selectedInterests}
-                  onToggle={toggleInterest}
-                />
-                <div className="flex gap-2 mt-4">
-                  <input
-                    value={customInterest}
-                    onChange={(e) => setCustomInterest(e.target.value)}
-                    onKeyDown={(e) => e.key === "Enter" && addCustomInterest()}
-                    placeholder="Add your own interest..."
-                    className="input-field flex-1"
-                  />
-                  <button
-                    onClick={addCustomInterest}
-                    disabled={!customInterest.trim()}
-                    className="text-sm font-medium px-3 disabled:text-warm-gray"
-                    style={{ color: "var(--color-brand)" }}
-                  >
-                    Add
-                  </button>
-                </div>
-              </div>
-
-              <div className="flex justify-between items-center gap-3">
+              <div className="flex-shrink-0 flex justify-between items-center gap-3 pt-4 relative z-20">
                 <button
                   onClick={() => setStep("who")}
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium transition-colors"
@@ -610,7 +686,7 @@ export default function NewRecipientPage() {
                   Back
                 </button>
                 <button
-                  onClick={() => setStep("preferences")}
+                  onClick={() => advanceStep("preferences")}
                   className="btn-primary"
                 >
                   Next
@@ -725,7 +801,8 @@ export default function NewRecipientPage() {
         {/* ─── Step 3: Card Preferences ─── */}
         {step === "preferences" && (
           <div className="flex gap-6 min-h-[calc(100vh-12rem)]">
-            <div className="flex-1 max-w-xl flex flex-col overflow-y-auto">
+            <div className="flex-1 max-w-xl flex flex-col">
+              <div className="flex-1 overflow-y-auto">
               <h2 className="text-2xl font-bold text-charcoal mb-2">
                 Card preferences for {displayName}
               </h2>
@@ -734,7 +811,7 @@ export default function NewRecipientPage() {
               </p>
 
               <div className="mb-8">
-                <p className="text-xl font-semibold text-charcoal mb-3">How much humor in their cards?</p>
+                <p className="text-xl font-semibold text-charcoal mb-6">How much humor in their cards?</p>
                 <TraitPickerWheel
                   items={HUMOR_LEVELS.map((h) => h.label)}
                   selected={humorTolerance ? [HUMOR_LEVELS.find((h) => h.id === humorTolerance)?.label ?? ""].filter(Boolean) : []}
@@ -853,7 +930,9 @@ export default function NewRecipientPage() {
                 <p className="text-base text-warm-gray mt-2">Optional — one per line. These help Nuuge remind you when a meaningful moment is coming up.</p>
               </div>
 
-              <div className="flex justify-between items-center gap-3">
+              </div>
+
+              <div className="flex-shrink-0 flex justify-between items-center gap-3 pt-4 relative z-20">
                 <button
                   onClick={() => setStep("personality")}
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium transition-colors"
@@ -863,7 +942,7 @@ export default function NewRecipientPage() {
                   Back
                 </button>
                 <button
-                  onClick={() => setStep("review")}
+                  onClick={() => advanceStep("review")}
                   className="btn-primary"
                 >
                   Review

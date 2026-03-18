@@ -44,6 +44,9 @@ usage-log.json
 # vercel
 .vercel
 
+# Cursor AI transcripts (local dev)
+Cursor transcripts/
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts

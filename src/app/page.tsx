@@ -201,6 +201,14 @@ export default function Dashboard() {
   const [dataBannerDismissed, setDataBannerDismissed] = useState(true);
 
   useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false);
+    }
+    if (menuOpen) document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [menuOpen]);
+
+  useEffect(() => {
     setMounted(true);
     const p = getUserProfile();
     const r = getRecipients();
@@ -247,8 +255,8 @@ export default function Dashboard() {
           >
             Nuuge
           </h1>
-          {previewLanding && (
-            <div className="relative" ref={menuRef}>
+          <div className="relative" ref={menuRef}>
+            {previewLanding ? (
               <button
                 onClick={() => setMenuOpen(!menuOpen)}
                 className="flex items-center gap-2 rounded-full pl-3 pr-1 py-1 transition-colors"
@@ -264,32 +272,48 @@ export default function Dashboard() {
                   {getInitials(profile?.display_name || "U")}
                 </div>
               </button>
-              {menuOpen && (
-                <div
-                  className="absolute right-0 mt-2 w-48 rounded-xl shadow-lg py-1 z-50"
-                  style={{ background: "var(--color-white)", border: "1px solid var(--color-light-gray)" }}
+            ) : (
+              <button
+                onClick={() => setMenuOpen(!menuOpen)}
+                className="w-9 h-9 rounded-full flex items-center justify-center transition-colors hover:bg-faint-gray"
+                aria-label="Settings"
+              >
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: "var(--color-warm-gray)" }}>
+                  <circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+                </svg>
+              </button>
+            )}
+            {menuOpen && (
+              <div
+                className="absolute right-0 mt-2 w-48 rounded-xl shadow-lg py-1 z-50"
+                style={{ background: "var(--color-white)", border: "1px solid var(--color-light-gray)" }}
+              >
+                {previewLanding && (
+                  <>
+                    <button
+                      onClick={() => { setMenuOpen(false); setPreviewLanding(false); }}
+                      className="w-full text-left px-4 py-2.5 text-sm text-charcoal hover:bg-faint-gray transition-colors flex items-center gap-2"
+                    >
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+                      Circle of People
+                    </button>
+                    <button
+                      onClick={() => { setMenuOpen(false); setPreviewLanding(false); router.push("/profile"); }}
+                      className="w-full text-left px-4 py-2.5 text-sm text-charcoal hover:bg-faint-gray transition-colors flex items-center gap-2"
+                    >
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+                      My profile
+                    </button>
+                  </>
+                )}
+                <button
+                  onClick={() => { setMenuOpen(false); setPreviewLanding(false); router.push("/backup"); }}
+                  className="w-full text-left px-4 py-2.5 text-sm text-charcoal hover:bg-faint-gray transition-colors flex items-center gap-2"
                 >
-                  <button
-                    onClick={() => { setMenuOpen(false); setPreviewLanding(false); }}
-                    className="w-full text-left px-4 py-2.5 text-sm text-charcoal hover:bg-faint-gray transition-colors flex items-center gap-2"
-                  >
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
-                    Circle of People
-                  </button>
-                  <button
-                    onClick={() => { setMenuOpen(false); setPreviewLanding(false); router.push("/profile"); }}
-                    className="w-full text-left px-4 py-2.5 text-sm text-charcoal hover:bg-faint-gray transition-colors flex items-center gap-2"
-                  >
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-                    My profile
-                  </button>
-                  <button
-                    onClick={() => { setMenuOpen(false); setPreviewLanding(false); router.push("/backup"); }}
-                    className="w-full text-left px-4 py-2.5 text-sm text-charcoal hover:bg-faint-gray transition-colors flex items-center gap-2"
-                  >
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-                    Backup data
-                  </button>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                  Restore backup
+                </button>
+                {previewLanding && (
                   <button
                     onClick={async () => {
                       setMenuOpen(false);
@@ -302,10 +326,10 @@ export default function Dashboard() {
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21.21 15.89A10 10 0 1 1 8 2.83"/><path d="M22 12A10 10 0 0 0 12 2v10z"/></svg>
                     Usage stats
                   </button>
-                </div>
-              )}
-            </div>
-          )}
+                )}
+              </div>
+            )}
+          </div>
           </div>
         </nav>
 
@@ -631,9 +655,12 @@ export default function Dashboard() {
   const upcomingDates = getUpcomingDates(recipients);
   const upcomingHolidays = getUpcomingHolidays();
   const nextEventPerRecipient = getNextEventPerRecipient(recipients);
-  const recipientsSortedByName = [...recipients].sort((a, b) =>
-    a.name.localeCompare(b.name, undefined, { sensitivity: "base" })
-  );
+  const recipientsSortedByName = [...recipients].sort((a, b) => {
+    const aDraft = a.setup_complete === false;
+    const bDraft = b.setup_complete === false;
+    if (aDraft !== bDraft) return aDraft ? -1 : 1;
+    return a.name.localeCompare(b.name, undefined, { sensitivity: "base" });
+  });
 
   return (
     <div className="min-h-screen bg-cream">
@@ -873,13 +900,20 @@ export default function Dashboard() {
               </p>
               <ul className="divide-y" style={{ borderColor: "var(--color-sage-light)" }}>
               {recipientsSortedByName.map((r) => {
+                const isDraft = r.setup_complete === false;
                 const nextEv = nextEventPerRecipient.get(r.id);
                 return (
                   <li key={r.id} className="py-4 flex flex-wrap items-center gap-x-1 gap-y-2">
                     <span className="font-medium text-charcoal">{r.name}</span>
                     <span className="text-warm-gray"> </span>
-                    <span className="text-warm-gray capitalize">({r.relationship_type})</span>
-                    {nextEv && (
+                    {isDraft ? (
+                      <span className="text-xs font-medium px-2 py-0.5 rounded-full" style={{ background: "var(--color-amber-light, #FFF8EE)", color: "var(--color-amber, #C4841D)", border: "1px solid var(--color-amber, #C4841D)" }}>
+                        draft
+                      </span>
+                    ) : (
+                      <span className="text-warm-gray capitalize">({r.relationship_type})</span>
+                    )}
+                    {!isDraft && nextEv && (
                       <>
                         <span className="text-warm-gray"> · </span>
                         <span className="text-warm-gray">
@@ -889,30 +923,43 @@ export default function Dashboard() {
                     )}
                     <span className="flex-1" />
                     <div className="flex flex-wrap gap-2">
-                      <button
-                        type="button"
-                        onClick={() => router.push(`/cards/create/${r.id}`)}
-                        className="text-xs font-medium px-3 py-1 rounded-full transition-colors hover:opacity-80"
-                        style={{ color: "var(--color-brand)", border: "1.5px solid var(--color-sage)" }}
-                      >
-                        Create a card
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => router.push(`/recipients/${r.id}`)}
-                        className="text-xs font-medium px-3 py-1 rounded-full text-warm-gray hover:text-charcoal transition-colors"
-                        style={{ border: "1.5px solid var(--color-sage)" }}
-                      >
-                        View profile
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => router.push(`/recipients/${r.id}?edit=1`)}
-                        className="text-xs font-medium px-3 py-1 rounded-full text-warm-gray hover:text-charcoal transition-colors"
-                        style={{ border: "1.5px solid var(--color-sage)" }}
-                      >
-                        Edit
-                      </button>
+                      {isDraft ? (
+                        <button
+                          type="button"
+                          onClick={() => router.push(`/recipients/new?resumeId=${r.id}`)}
+                          className="text-xs font-medium px-3 py-1 rounded-full transition-colors hover:opacity-80"
+                          style={{ color: "var(--color-brand)", border: "1.5px solid var(--color-sage)" }}
+                        >
+                          Continue setup
+                        </button>
+                      ) : (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => router.push(`/cards/create/${r.id}`)}
+                            className="text-xs font-medium px-3 py-1 rounded-full transition-colors hover:opacity-80"
+                            style={{ color: "var(--color-brand)", border: "1.5px solid var(--color-sage)" }}
+                          >
+                            Create a card
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => router.push(`/recipients/${r.id}`)}
+                            className="text-xs font-medium px-3 py-1 rounded-full text-warm-gray hover:text-charcoal transition-colors"
+                            style={{ border: "1.5px solid var(--color-sage)" }}
+                          >
+                            View profile
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => router.push(`/recipients/${r.id}?edit=1`)}
+                            className="text-xs font-medium px-3 py-1 rounded-full text-warm-gray hover:text-charcoal transition-colors"
+                            style={{ border: "1.5px solid var(--color-sage)" }}
+                          >
+                            Edit
+                          </button>
+                        </>
+                      )}
                     </div>
                   </li>
                 );

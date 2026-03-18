@@ -39,13 +39,24 @@ There are **two separate tracking systems**:
 - **Persistence:** None — resets to zero every time you start a new card or refresh the page.
 - **Purpose:** Gives the user a rough sense of AI cost during creation.
 
-### 2. Usage log (IndexedDB, persistent)
+### 2. Usage log (IndexedDB + Supabase, persistent)
 
-- **What:** Every API call is logged with endpoint, model, call type, estimated cost, card ID, and recipient ID.
-- **Where:** Browser's IndexedDB, database named `nuuge_usage`, object store named `events`.
-- **Code:** `src/lib/usage-store.ts` — the `logApiCall()` function writes events, `getUsageStats()` reads and aggregates them.
-- **Persistence:** Survives page refreshes and browser restarts. Lives in the browser until cleared.
-- **Purpose:** Powers the usage stats modal on the dashboard (total calls, total estimated cost, per-endpoint breakdown, per-card cost, average cost per card).
+- **What:** Every API call is logged with endpoint, model, call type, estimated cost, card ID, recipient ID, and session ID.
+- **Where:** Dual-write — browser's IndexedDB (database `nuuge_usage`, object store `events`) **and** Supabase (`usage_events` table).
+- **Code:** `src/lib/usage-store.ts` — the `logApiCall()` function writes events to both stores, `getUsageStats()` reads from IndexedDB for the local dashboard.
+- **Persistence:** IndexedDB survives page refreshes. Supabase persists server-side across all devices and users.
+- **Purpose:** Powers the usage stats modal on the dashboard locally, and enables cross-user analytics, cost-per-card reporting, and abandoned session detection via Supabase SQL queries.
+
+### 3. Session tracking (per card creation flow)
+
+- **What:** A unique `session_id` is generated each time a user enters the card creation flow. Every AI call during that session is tagged with it.
+- **Where:** React `useRef` in the create card page, stored alongside each usage event in IndexedDB and Supabase.
+- **How it works:**
+  - On page load, a `ses_` prefixed UUID is created.
+  - All `logApiCall()` calls during creation pass this session ID.
+  - When the card is saved, `tagSessionWithCardId()` batch-updates all events for that session with the new card ID — in both IndexedDB and Supabase.
+  - If the user abandons (never saves), the events remain with a session ID but no card ID — making abandoned sessions visible in analytics.
+- **Purpose:** Enables cost-per-card tracking (even though the card ID doesn't exist until save) and identifies wasted spend from abandoned sessions.
 
 #### How to view the IndexedDB data directly
 
@@ -66,11 +77,12 @@ This is the raw data behind the usage stats modal. Each entry looks like:
   "callType": "image_generate",
   "estimatedCost": 0.08,
   "cardId": "card-uuid-here",
-  "recipientId": "recipient-uuid-here"
+  "recipientId": "recipient-uuid-here",
+  "sessionId": "ses_1708012345678_a1b2c3d4"
 }
 ```
 
-**Important:** This data is stored only in *your browser*. It is included in Nuuge backups (export/import) but is not sent to any server. If you clear browser data or switch browsers, the usage log is lost (unless you have a backup).
+**Note:** IndexedDB data is local to your browser. Supabase data persists server-side and can be queried across all users. See `SUPABASE_SETUP.md` for the full set of analytics queries (cost per session, abandoned sessions, excessive regeneration, etc.).
 
 ### Neither system reads actual usage from OpenAI
 
@@ -159,9 +171,10 @@ Multiply by published per-token rates to get exact cost per call. This is how yo
 
 | File | Purpose |
 |------|---------|
-| `src/lib/usage-store.ts` | IndexedDB usage logging — `logApiCall()`, `getUsageStats()`, cost estimates |
+| `src/lib/usage-store.ts` | Dual-write usage logging (IndexedDB + Supabase) — `logApiCall()`, `tagSessionWithCardId()`, `getUsageStats()`, `backfillToSupabase()`, cost estimates |
 | `src/lib/usage.ts` | Server-side usage tracking (writes to filesystem locally, console on Vercel) |
-| `src/app/cards/create/[recipientId]/page.tsx` | Session cost counter (`sessionCost` state), all `logApiCall()` calls |
+| `src/app/cards/create/[recipientId]/page.tsx` | Session cost counter (`sessionCost` state), session ID generation, all `logApiCall()` calls, card ID backfill on save |
+| `SUPABASE_SETUP.md` | Table schema, RLS policies, migration steps, and analytics SQL queries for `usage_events` |
 | `.env.local` | Contains `OPENAI_API_KEY` — the key that gets billed |
 
 ---

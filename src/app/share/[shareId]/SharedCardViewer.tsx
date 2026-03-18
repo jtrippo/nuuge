@@ -1,8 +1,8 @@
 "use client";
 
 import { useState, useCallback, useEffect } from "react";
-import { fontCSS, positionCSS, textStyleCSS, frontTextAlign, messageSizing } from "@/lib/card-ui-helpers";
-import type { TextStyleChoice } from "@/lib/card-ui-helpers";
+import { fontCSS, positionCSS, textStyleCSS, frontTextAlign, messageSizing, msgSizeOptions, isAccentPosition, defaultAccentSlots, cornerStyle, cornerImgStyle, edgeStyle, edgeImgStyle, frameImgStyle } from "@/lib/card-ui-helpers";
+import type { TextStyleChoice, AccentPosition } from "@/lib/card-ui-helpers";
 
 type ViewStage = "envelope_front" | "envelope_back" | "front" | "inside" | "letter";
 
@@ -24,11 +24,13 @@ export default function SharedCardViewer({ cardJson, frontImageUrl, insideImageU
   const frontText = (card.front_text as string) || "";
   const frontTextPosition = (card.front_text_position as string) || "bottom-right";
   const frontTextFont = card.front_text_font as string | undefined;
-  const frontTextStyleChoice = ((card.front_text_style as string) || "dark_box") as TextStyleChoice;
+  const frontTextStyleChoice = ((card.front_text_style as string) || "plain_black") as TextStyleChoice;
   const insideImagePosition = (card.inside_image_position as string) || "top";
   const fontChoice = card.font as string | undefined;
   const ftScale = (card.ft_font_scale as number) ?? 1;
-  const msgScale = (card.msg_font_scale as number) ?? 1.5;
+  const rawMsgScale = (card.msg_font_scale as number) ?? 0;
+  const msgAutoValue = msgSizeOptions(messageText.length).find((o) => o.label === "Auto")!.value;
+  const msgScale = rawMsgScale === 0 ? msgAutoValue : rawMsgScale;
   const letterText = (card.letter_text as string) || "";
   const letterFont = (card.letter_font as string) || "handwritten";
 
@@ -42,12 +44,12 @@ export default function SharedCardViewer({ cardJson, frontImageUrl, insideImageU
   const ftPos = positionCSS(frontTextPosition);
   const ftStyle = textStyleCSS(frontTextStyleChoice);
   const baseSizing = messageSizing(messageText.length);
-  const scaleRem = (rem: string, scale: number) => `${(parseFloat(rem) * scale).toFixed(3)}rem`;
+  const remToCqw = (rem: string, scale: number) => `${(parseFloat(rem) * scale * 3.81).toFixed(2)}cqw`;
   const sizing = {
-    greetingSize: scaleRem(baseSizing.greetingSize, msgScale),
-    bodySize: scaleRem(baseSizing.bodySize, msgScale),
-    closingSize: scaleRem(baseSizing.closingSize, msgScale),
-    gap: scaleRem(baseSizing.gap, msgScale),
+    greetingSize: remToCqw(baseSizing.greetingSize, msgScale),
+    bodySize: remToCqw(baseSizing.bodySize, msgScale),
+    closingSize: remToCqw(baseSizing.closingSize, msgScale),
+    gap: remToCqw(baseSizing.gap, msgScale),
   };
 
   const hasLetter = Boolean(letterText.trim());
@@ -117,7 +119,7 @@ export default function SharedCardViewer({ cardJson, frontImageUrl, insideImageU
         .slide-up { animation: cardSlideUp 0.6s ease-out forwards; }
         .card-fade-in { animation: cardFadeIn 0.5s ease-out forwards; }
         .letter-fall { animation: letterFallOut 0.6s ease-out forwards; }
-        .ecard-panel { width: min(90vw, 420px); }
+        .ecard-panel { width: min(90vw, 420px); container-type: inline-size; }
       `}</style>
 
       {/* Envelope */}
@@ -206,8 +208,16 @@ export default function SharedCardViewer({ cardJson, frontImageUrl, insideImageU
                 <img src={insideImageUrl} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
               </div>
             )}
+            {insidePos === "top_edge_accent" && insideImageUrl && (() => {
+              const slots = (cardJson as { accent_positions?: number[] }).accent_positions ?? defaultAccentSlots("top_edge_accent");
+              return slots.includes(1) ? (
+                <div style={edgeStyle(1)}>
+                  <img src={insideImageUrl} alt="" style={edgeImgStyle()} />
+                </div>
+              ) : null;
+            })()}
 
-            <div className="flex flex-col justify-center items-center text-center" style={{ flex: 1, padding: insidePos === "left" || insidePos === "right" ? "1rem 0.6rem" : "1.25rem", overflow: "hidden", position: "relative", zIndex: 1, gap: sizing.gap }}>
+            <div className="flex flex-col justify-center items-center text-center" style={{ flex: 1, padding: insidePos === "left" || insidePos === "right" ? "6% 4%" : "8% 10%", overflow: "hidden", position: "relative", zIndex: 1, gap: sizing.gap }}>
               {insidePos === "middle" && insideImageUrl && (
                 <div style={{ width: "100%", height: "14%", flexShrink: 0 }}>
                   <img src={insideImageUrl} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: "0.25rem" }} />
@@ -231,6 +241,28 @@ export default function SharedCardViewer({ cardJson, frontImageUrl, insideImageU
               <div style={{ width: "20%", flexShrink: 0, height: "100%" }}>
                 <img src={insideImageUrl} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
               </div>
+            )}
+            {/* Bottom edge accent (slot 2) */}
+            {insidePos === "top_edge_accent" && insideImageUrl && (() => {
+              const slots = (cardJson as { accent_positions?: number[] }).accent_positions ?? defaultAccentSlots("top_edge_accent");
+              return slots.includes(2) ? (
+                <div style={edgeStyle(2)}>
+                  <img src={insideImageUrl} alt="" style={edgeImgStyle()} />
+                </div>
+              ) : null;
+            })()}
+            {/* Corner flourish — per selected corner */}
+            {insidePos === "corner_flourish" && insideImageUrl && (() => {
+              const slots = (cardJson as { accent_positions?: number[] }).accent_positions ?? defaultAccentSlots("corner_flourish");
+              return slots.map((slot: number) => (
+                <div key={slot} style={cornerStyle(slot)}>
+                  <img src={insideImageUrl} alt="" style={cornerImgStyle()} />
+                </div>
+              ));
+            })()}
+            {/* Frame — portrait fill */}
+            {insidePos === "frame" && insideImageUrl && (
+              <img src={insideImageUrl} alt="" style={frameImgStyle()} />
             )}
           </div>
 
