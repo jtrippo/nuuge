@@ -9,7 +9,7 @@ import { ALL_OCCASIONS, OTHER_OCCASION_VALUE, OTHER_OCCASION_LABEL, getDisplayOc
 import { fontCSS, positionCSS, textStyleCSS, frontTextAlign, messageSizing, msgSizeOptions, FONT_OPTIONS, isAccentPosition, defaultAccentSlots, cornerStyle, cornerImgStyle, edgeStyle, edgeImgStyle, frameImgStyle } from "@/lib/card-ui-helpers";
 import type { FontChoice, TextStyleChoice } from "@/lib/card-ui-helpers";
 import { STYLE_RECIPES } from "@/lib/card-recipes";
-import { formatSignerNames, getSignerNameList } from "@/lib/signer-helpers";
+import { formatSignerNames, getSignerNameList, getDefaultUserDisplayName, getDefaultDisplayName, USER_KEY, MAX_SIGNERS } from "@/lib/signer-helpers";
 
 const FRONT_TEXT_STYLES: { id: TextStyleChoice; label: string }[] = [
   { id: "plain_black", label: "Plain black" },
@@ -150,6 +150,9 @@ export default function EditCardPage() {
   const [artStyle, setArtStyle] = useState("");
   const [imageSubject, setImageSubject] = useState("");
   const [signerRecipientIds, setSignerRecipientIds] = useState<string[]>([]);
+  const [signerDisplayOverrides, setSignerDisplayOverrides] = useState<Record<string, string>>({});
+  const [signerGroupName, setSignerGroupName] = useState("");
+  const [useGroupSignature, setUseGroupSignature] = useState(false);
   const [allRecipients, setAllRecipients] = useState<Recipient[]>([]);
   const [regenerating, setRegenerating] = useState(false);
   const [regenError, setRegenError] = useState<string | null>(null);
@@ -209,9 +212,15 @@ export default function EditCardPage() {
         if (hydrated.ft_font_scale != null) setFtSizeScale(hydrated.ft_font_scale);
         if (hydrated.letter_font_scale != null) setLetterSizeScale(hydrated.letter_font_scale);
         const signerIds = (hydrated as { signer_recipient_ids?: string[] }).signer_recipient_ids;
-        if (signerIds?.length) {
-          setSignerRecipientIds(signerIds);
-        } else if (hydrated.co_signed_with?.trim()) {
+        const overrides = (hydrated as { signer_display_overrides?: Record<string, string> }).signer_display_overrides;
+        const groupName = (hydrated as { signer_group_name?: string | null }).signer_group_name;
+        if (signerIds?.length) setSignerRecipientIds(signerIds);
+        if (overrides && Object.keys(overrides).length) setSignerDisplayOverrides(overrides);
+        if (groupName?.trim()) {
+          setSignerGroupName(groupName.trim());
+          setUseGroupSignature(true);
+        }
+        if (!signerIds?.length && hydrated.co_signed_with?.trim()) {
           const recipients = getRecipients();
           const r = recipients.find((rec) => rec.id === c.recipient_id);
           const coName = hydrated.co_signed_with.trim().toLowerCase();
@@ -322,6 +331,8 @@ export default function EditCardPage() {
       ft_font_scale: ftSizeScale,
       letter_font_scale: letterSizeScale,
       signer_recipient_ids: signerRecipientIds.length ? signerRecipientIds : undefined,
+      signer_display_overrides: Object.keys(signerDisplayOverrides).length ? signerDisplayOverrides : undefined,
+      signer_group_name: useGroupSignature && signerGroupName.trim() ? signerGroupName.trim() : null,
       ...(signerRecipientIds.length ? { co_signed_with: null } : {}),
     };
   }
@@ -709,61 +720,106 @@ export default function EditCardPage() {
               <p className="text-xs text-warm-gray mt-0.5">Put the sender name(s) on a new line below the phrase.</p>
             </div>
 
-            {/* Who's signing — affects e-card envelope and can pre-fill closing */}
-            {recipient && (recipient.links?.length ?? 0) > 0 && (
-              <div>
-                <label className="block text-sm font-medium text-charcoal mb-2">Signed from</label>
-                <p className="text-xs text-warm-gray mb-2">
-                  Include linked people on the e-card envelope? You can also add their names to the closing above.
-                </p>
-                <div className="flex flex-wrap gap-3">
-                  {recipient.links!.map((link) => {
-                    const linked = allRecipients.find((r) => r.id === link.recipient_id);
-                    if (!linked) return null;
-                    const checked = signerRecipientIds.includes(link.recipient_id);
-                    const displayName = linked.nickname || linked.first_name || linked.display_name || linked.name || "?";
-                    return (
-                      <label key={link.recipient_id} className="flex items-center gap-2 cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={checked}
-                          onChange={() => {
-                            setSaved(false);
-                            setSignerRecipientIds((prev) =>
-                              checked ? prev.filter((id) => id !== link.recipient_id) : [...prev, link.recipient_id]
-                            );
-                          }}
-                          className="rounded border-warm-gray"
-                        />
-                        <span className="text-sm text-charcoal">
-                          {displayName}
-                          <span className="text-warm-gray font-normal capitalize"> ({link.label})</span>
-                        </span>
-                      </label>
-                    );
-                  })}
+            {/* Signed from — You (always) + linked people with overrides */}
+            <div>
+              <label className="block text-sm font-medium text-charcoal mb-2">Signed from</label>
+              <p className="text-xs text-warm-gray mb-3">Name shown on the e-card envelope and in the sign-off.</p>
+              <div className="space-y-3">
+                <div className="flex items-center gap-3">
+                  <span className="text-sm font-medium text-charcoal shrink-0" style={{ minWidth: 80 }}>You</span>
+                  <input
+                    type="text"
+                    value={signerDisplayOverrides[USER_KEY] ?? getDefaultUserDisplayName(getUserProfile())}
+                    onChange={(e) => { setSignerDisplayOverrides((prev) => ({ ...prev, [USER_KEY]: e.target.value })); setSaved(false); }}
+                    placeholder={getDefaultUserDisplayName(getUserProfile()) || "Your name"}
+                    className="flex-1 input-field rounded-lg px-3 py-1.5 text-sm max-w-[180px]"
+                  />
                 </div>
-                {signerRecipientIds.length > 0 && (
+                {recipient && (recipient.links?.length ?? 0) > 0 && recipient.links!.map((link) => {
+                  const linked = allRecipients.find((r) => r.id === link.recipient_id);
+                  if (!linked) return null;
+                  const checked = signerRecipientIds.includes(link.recipient_id);
+                  const atLimit = !checked && signerRecipientIds.length >= MAX_SIGNERS - 1;
+                  const defaultName = getDefaultDisplayName(linked);
+                  return (
+                    <div key={link.recipient_id} className="flex items-center gap-3">
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        disabled={atLimit}
+                        onChange={() => {
+                          setSaved(false);
+                          setSignerRecipientIds((prev) =>
+                            checked ? prev.filter((id) => id !== link.recipient_id) : [...prev, link.recipient_id]
+                          );
+                          if (checked) setUseGroupSignature(false);
+                        }}
+                        className="rounded shrink-0"
+                        style={{ accentColor: "var(--color-brand)" }}
+                      />
+                      <span className="text-sm text-charcoal shrink-0" style={{ minWidth: 80 }}>
+                        {defaultName}
+                        <span className="text-warm-gray font-normal capitalize"> ({link.label})</span>
+                      </span>
+                      <input
+                        type="text"
+                        value={checked ? (signerDisplayOverrides[link.recipient_id] ?? defaultName) : ""}
+                        onChange={(e) => { setSignerDisplayOverrides((prev) => ({ ...prev, [link.recipient_id]: e.target.value })); setSaved(false); }}
+                        placeholder={defaultName}
+                        disabled={!checked}
+                        className="flex-1 input-field rounded-lg px-3 py-1.5 text-sm max-w-[180px] disabled:opacity-50 disabled:bg-gray-100 disabled:cursor-not-allowed"
+                      />
+                    </div>
+                  );
+                })}
+                {signerRecipientIds.length >= 2 && (
+                  <div className="pt-2 border-t border-gray-200">
+                    <label className="flex items-center gap-2 cursor-pointer mb-1">
+                      <input
+                        type="checkbox"
+                        checked={useGroupSignature}
+                        onChange={(e) => {
+                          setUseGroupSignature(e.target.checked);
+                          if (!e.target.checked) setSignerGroupName("");
+                          setSaved(false);
+                        }}
+                        className="rounded"
+                        style={{ accentColor: "var(--color-brand)" }}
+                      />
+                      <span className="text-sm text-charcoal">Use group name (e.g. The Tripp&apos;s)</span>
+                    </label>
+                    {useGroupSignature && (
+                      <input
+                        type="text"
+                        value={signerGroupName}
+                        onChange={(e) => { setSignerGroupName(e.target.value); setSaved(false); }}
+                        placeholder="The Tripp's"
+                        className="mt-1 input-field rounded-lg px-3 py-1.5 text-sm w-full max-w-[200px]"
+                      />
+                    )}
+                  </div>
+                )}
+                {signerRecipientIds.length > 0 && !useGroupSignature && (
                   <button
                     type="button"
                     onClick={() => {
                       const profile = getUserProfile();
-                      const virtualCard = { ...card!, signer_recipient_ids: signerRecipientIds } as Card;
-                      const names = getSignerNameList(virtualCard, recipient, allRecipients, profile);
+                      const virtualCard = { ...card!, signer_recipient_ids: signerRecipientIds, signer_display_overrides: signerDisplayOverrides } as Card;
+                      const names = getSignerNameList(virtualCard, recipient!, allRecipients, profile);
                       const formatted = formatSignerNames(names);
                       if (formatted && !closing.includes(formatted)) {
                         setClosing(closing.trim() ? `${closing.trim()}\n\n${formatted}` : formatted);
                         setSaved(false);
                       }
                     }}
-                    className="mt-2 text-xs font-medium"
+                    className="text-xs font-medium"
                     style={{ color: "var(--color-brand)" }}
                   >
                     Insert these names into closing
                   </button>
                 )}
               </div>
-            )}
+            </div>
 
             <div className="grid gap-3 grid-cols-3">
               <div>

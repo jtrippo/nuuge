@@ -132,9 +132,11 @@ export default function SharedCardViewer({ cardJson, frontImageUrl, insideImageU
             <div className={`envelope-flip-inner ${flipVisible ? "flipped" : ""}`}>
               <div className="envelope-face shadow-lg" style={{ background: "#faf7f2", border: "1px solid #e8e0d4" }}>
                 {senderName && (
-                  <p className="absolute top-4 left-5 text-xs" style={{ color: "#8b7d6b", fontFamily: "var(--font-handwritten), cursive" }}>
-                    {senderName}
-                  </p>
+                  <div className="absolute top-4 left-5 text-xs leading-relaxed max-w-[45%]" style={{ color: "#8b7d6b", fontFamily: "var(--font-handwritten), cursive" }}>
+                    {senderName.split("\n").map((line, i) => (
+                      <span key={i}>{line}{i < senderName.split("\n").length - 1 ? <br /> : null}</span>
+                    ))}
+                  </div>
                 )}
                 <div className="absolute top-3 right-4" style={{ width: 36, height: 44, border: "1.5px solid #c4b8a8", borderRadius: 2, display: "flex", alignItems: "center", justifyContent: "center", background: "#fefcf8" }}>
                   <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="#c4b8a8" strokeWidth="1.5">

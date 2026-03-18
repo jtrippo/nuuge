@@ -23,7 +23,7 @@ import {
   calculateAge,
   getBirthdayForAge,
 } from "@/lib/card-recipes";
-import { formatSignerNames } from "@/lib/signer-helpers";
+import { formatSignerNames, getDefaultUserDisplayName, getDefaultDisplayName, USER_KEY, MAX_SIGNERS } from "@/lib/signer-helpers";
 import { fontCSS, textStyleCSS, FONT_OPTIONS as CARD_FONT_OPTIONS, isAccentPosition, defaultAccentSlots, cornerStyle, cornerImgStyle, edgeStyle, edgeImgStyle, frameImgStyle } from "@/lib/card-ui-helpers";
 import type { FontChoice, TextStyleChoice } from "@/lib/card-ui-helpers";
 import { saveImage, getImage } from "@/lib/image-store";
@@ -139,6 +139,9 @@ interface CardDraft {
   sharedWith: string[];
   coSign: boolean;
   signerRecipientIds: string[];
+  signerDisplayOverrides: Record<string, string>;
+  signerGroupName: string;
+  useGroupSignature: boolean;
   activeProfileElements: Record<string, boolean>;
   selected: CardMessage | null;
   editedMessage: CardMessage | null;
@@ -254,6 +257,9 @@ function CreateCardPage() {
   const [sharedWith, setSharedWith] = useState<string[]>([]);
   const [coSign, setCoSign] = useState(false);
   const [signerRecipientIds, setSignerRecipientIds] = useState<string[]>([]);
+  const [signerDisplayOverrides, setSignerDisplayOverrides] = useState<Record<string, string>>({});
+  const [signerGroupName, setSignerGroupName] = useState("");
+  const [useGroupSignature, setUseGroupSignature] = useState(false);
   const [messages, setMessages] = useState<CardMessage[]>([]);
   const [rejectedMessages, setRejectedMessages] = useState<string[]>([]);
   const [regenerationCount, setRegenerationCount] = useState(0);
@@ -412,7 +418,10 @@ function CreateCardPage() {
       notes,
       sharedWith,
       coSign,
-      signerRecipientIds: signerRecipientIds,
+      signerRecipientIds,
+      signerDisplayOverrides,
+      signerGroupName,
+      useGroupSignature,
       activeProfileElements,
       selected,
       editedMessage,
@@ -441,7 +450,7 @@ function CreateCardPage() {
     }
   }, [
     mounted, recipientId, editMode, editCardId, showResumePrompt, pendingDraft, step,
-    occasion, occasionCustom, includeFaithBased, tone, notes, sharedWith, coSign, signerRecipientIds, activeProfileElements,
+    occasion, occasionCustom, includeFaithBased, tone, notes, sharedWith, coSign, signerRecipientIds, signerDisplayOverrides, signerGroupName, useGroupSignature, activeProfileElements,
     selected, editedMessage, imageSubject, subjectDetail, artStyle, personalContext,
     currentSceneDescription, selectedDesign, insideImagePosition, accentPositions, imageInterests, frontText, frontTextPosition, frontTextStyle, cardSize,
     generatedImageUrl, insideImageUrl,
@@ -485,6 +494,9 @@ function CreateCardPage() {
     setSharedWith(d.sharedWith);
     setCoSign(d.coSign);
     setSignerRecipientIds(d.signerRecipientIds ?? []);
+    setSignerDisplayOverrides(d.signerDisplayOverrides ?? {});
+    setSignerGroupName(d.signerGroupName ?? "");
+    setUseGroupSignature(d.useGroupSignature ?? false);
     setActiveProfileElements(normalizeProfileElements(d.activeProfileElements));
     setSelected(d.selected);
     setEditedMessage(d.editedMessage);
@@ -720,15 +732,22 @@ Humor tolerance: ${r.humor_tolerance || "Not specified"}`.replace(/\n{2,}/g, "\n
           additionalNotes: notes,
           cardHistory,
           coSignWith: (() => {
+            if (useGroupSignature && signerGroupName.trim()) return signerGroupName.trim();
             if (signerRecipientIds.length) {
-              const names = signerRecipientIds
-                .map((id) => allRecipients.find((r) => r.id === id))
-                .filter(Boolean)
-                .map((r) => r!.nickname || r!.first_name || r!.display_name || r!.name || "")
-                .filter(Boolean);
+              const userVal = signerDisplayOverrides[USER_KEY]?.trim() || getDefaultUserDisplayName(profile);
+              const names = [userVal, ...signerRecipientIds
+                .map((id) => {
+                  const r = allRecipients.find((rec) => rec.id === id);
+                  return signerDisplayOverrides[id]?.trim() || getDefaultDisplayName(r ?? null);
+                })
+                .filter(Boolean)];
               return names.length ? formatSignerNames(names) : null;
             }
-            return coSign ? profile?.partner_name ?? null : null;
+            if (coSign) {
+              const userVal = signerDisplayOverrides[USER_KEY]?.trim() || getDefaultUserDisplayName(profile);
+              return formatSignerNames([userVal, profile?.partner_name || ""]);
+            }
+            return null;
           })(),
           relationshipType: recipient!.relationship_type,
           regenerationCount,
@@ -1092,6 +1111,8 @@ Humor tolerance: ${r.humor_tolerance || "Not specified"}`.replace(/\n{2,}/g, "\n
       sent: false,
       co_signed_with: signerRecipientIds.length ? null : (coSign ? profile?.partner_name || null : null),
       signer_recipient_ids: signerRecipientIds.length ? signerRecipientIds : undefined,
+      signer_display_overrides: Object.keys(signerDisplayOverrides).length ? signerDisplayOverrides : undefined,
+      signer_group_name: useGroupSignature && signerGroupName.trim() ? signerGroupName.trim() : null,
       card_size: cardSize,
       msg_font_scale: 0,
       ft_font_scale: 1,
@@ -1410,66 +1431,107 @@ Humor tolerance: ${r.humor_tolerance || "Not specified"}`.replace(/\n{2,}/g, "\n
                 ))}
               </div>
             )}
-            {/* Signed from — linked people (preferred) or partner_name */}
-            {linkedRecipients.length > 0 ? (
-              <div className="rounded-xl p-4 mb-4" style={{ background: "var(--color-faint-gray)", border: "1px solid var(--color-light-gray)" }}>
-                <p className="text-base font-medium text-charcoal mb-2">Signed from</p>
-                <p className="text-xs text-warm-gray mb-2">Include these people on the e-card envelope and in the sign-off.</p>
-                <div className="flex flex-wrap gap-3">
-                  {linkedRecipients.map((lr) => {
+            {/* Signed from — You (always) + linked people or partner */}
+            <div className="rounded-xl p-4 mb-4" style={{ background: "var(--color-faint-gray)", border: "1px solid var(--color-light-gray)" }}>
+              <p className="text-base font-medium text-charcoal mb-2">Signed from</p>
+              <p className="text-xs text-warm-gray mb-3">Name shown on the e-card envelope and in the sign-off.</p>
+              <div className="space-y-3">
+                <div className="flex items-center gap-3">
+                  <span className="text-sm font-medium text-charcoal shrink-0" style={{ minWidth: 80 }}>You</span>
+                  <input
+                    type="text"
+                    value={signerDisplayOverrides[USER_KEY] ?? getDefaultUserDisplayName(profile)}
+                    onChange={(e) => setSignerDisplayOverrides((prev) => ({ ...prev, [USER_KEY]: e.target.value }))}
+                    placeholder={getDefaultUserDisplayName(profile) || "Your name"}
+                    className="flex-1 input-field rounded-lg px-3 py-1.5 text-sm max-w-[180px]"
+                  />
+                </div>
+                {linkedRecipients.length > 0 ? (
+                  linkedRecipients.map((lr) => {
                     const checked = signerRecipientIds.includes(lr.id);
+                    const atLimit = !checked && signerRecipientIds.length >= MAX_SIGNERS - 1;
+                    const defaultName = getDefaultDisplayName(lr);
                     return (
-                      <label key={lr.id} className="flex items-center gap-2 cursor-pointer">
+                      <div key={lr.id} className="flex items-center gap-3">
                         <input
                           type="checkbox"
                           checked={checked}
+                          disabled={atLimit}
                           onChange={() => {
                             setSignerRecipientIds((prev) =>
                               checked ? prev.filter((id) => id !== lr.id) : [...prev, lr.id]
                             );
+                            if (checked) setUseGroupSignature(false);
                           }}
-                          className="rounded"
+                          className="rounded shrink-0"
                           style={{ accentColor: "var(--color-brand)" }}
                         />
-                        <span className="text-sm text-charcoal">
-                          {lr.nickname || lr.first_name || lr.display_name || lr.name}
+                        <span className="text-sm text-charcoal shrink-0" style={{ minWidth: 80 }}>
+                          {defaultName}
                           <span className="text-warm-gray font-normal capitalize"> ({lr.linkLabel})</span>
                         </span>
-                      </label>
+                        <input
+                          type="text"
+                          value={checked ? (signerDisplayOverrides[lr.id] ?? defaultName) : ""}
+                          onChange={(e) => setSignerDisplayOverrides((prev) => ({ ...prev, [lr.id]: e.target.value }))}
+                          placeholder={defaultName}
+                          disabled={!checked}
+                          className="flex-1 input-field rounded-lg px-3 py-1.5 text-sm max-w-[180px] disabled:opacity-50 disabled:bg-gray-100 disabled:cursor-not-allowed"
+                        />
+                      </div>
                     );
-                  })}
-                </div>
-                {(signerRecipientIds.length > 0 || coSign) && (
-                  <p className="text-xs text-warm-gray mt-2">
-                    The message will use &ldquo;we&rdquo; and &ldquo;our&rdquo; and sign from all of you.
-                  </p>
+                  })
+                ) : profile?.partner_name ? (
+                  <label className="flex items-center gap-3 cursor-pointer">
+                    <span className="text-base text-charcoal">Co-sign with {profile.partner_name}</span>
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={coSign}
+                      onClick={() => setCoSign(!coSign)}
+                      className="relative inline-flex h-6 w-11 items-center rounded-full transition-colors"
+                      style={{ background: coSign ? "var(--color-brand)" : "var(--color-light-gray)" }}
+                    >
+                      <span
+                        className="inline-block h-4 w-4 rounded-full bg-white transition-transform"
+                        style={{ transform: coSign ? "translateX(1.375rem)" : "translateX(0.25rem)" }}
+                      />
+                    </button>
+                  </label>
+                ) : null}
+                {signerRecipientIds.length >= 2 && (
+                  <div className="pt-2 border-t border-gray-200">
+                    <label className="flex items-center gap-2 cursor-pointer mb-1">
+                      <input
+                        type="checkbox"
+                        checked={useGroupSignature}
+                        onChange={(e) => {
+                          setUseGroupSignature(e.target.checked);
+                          if (!e.target.checked) setSignerGroupName("");
+                        }}
+                        className="rounded"
+                        style={{ accentColor: "var(--color-brand)" }}
+                      />
+                      <span className="text-sm text-charcoal">Use group name (e.g. The Tripp&apos;s)</span>
+                    </label>
+                    {useGroupSignature && (
+                      <input
+                        type="text"
+                        value={signerGroupName}
+                        onChange={(e) => setSignerGroupName(e.target.value)}
+                        placeholder="The Tripp's"
+                        className="mt-1 input-field rounded-lg px-3 py-1.5 text-sm w-full max-w-[200px]"
+                      />
+                    )}
+                  </div>
                 )}
               </div>
-            ) : profile?.partner_name ? (
-              <div className="rounded-xl p-4 mb-4" style={{ background: "var(--color-faint-gray)", border: "1px solid var(--color-light-gray)" }}>
-                <label className="flex items-center gap-3 cursor-pointer">
-                  <span className="text-base text-charcoal">Co-sign with {profile.partner_name}</span>
-                  <button
-                    type="button"
-                    role="switch"
-                    aria-checked={coSign}
-                    onClick={() => setCoSign(!coSign)}
-                    className="relative inline-flex h-6 w-11 items-center rounded-full transition-colors"
-                    style={{ background: coSign ? "var(--color-brand)" : "var(--color-light-gray)" }}
-                  >
-                    <span
-                      className="inline-block h-4 w-4 rounded-full bg-white transition-transform"
-                      style={{ transform: coSign ? "translateX(1.375rem)" : "translateX(0.25rem)" }}
-                    />
-                  </button>
-                </label>
-                {coSign && (
-                  <p className="text-xs text-warm-gray mt-1">
-                    The message will use &ldquo;we&rdquo; and &ldquo;our&rdquo; and sign from both of you.
-                  </p>
-                )}
-              </div>
-            ) : null}
+              {(signerRecipientIds.length > 0 || coSign) && !useGroupSignature && (
+                <p className="text-xs text-warm-gray mt-2">
+                  The message will use &ldquo;we&rdquo; and &ldquo;our&rdquo; and sign from all of you.
+                </p>
+              )}
+            </div>
             {/* Profile topics to include — split into Interests (opt-in) and Personality (opt-out) */}
             {recipient && (() => {
               const raw = Object.keys(activeProfileElements).length > 0

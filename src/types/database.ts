@@ -151,6 +151,10 @@ export interface Card {
   co_signed_with: string | null;
   /** Recipient IDs of linked people co-signing (replaces co_signed_with when set). */
   signer_recipient_ids?: string[];
+  /** Override display name per signer. Keys: "__user__" for primary, recipient_id for linked. */
+  signer_display_overrides?: Record<string, string>;
+  /** When set, replaces all signer names with this group label (e.g. "The Tripp's"). */
+  signer_group_name?: string | null;
   /** When true, card is hidden from default history list (can show via "Show hidden") */
   hidden?: boolean;
   /** Print size: 4x6 or 5x7 inches (folded card). Used for image aspect ratio and print layout. */

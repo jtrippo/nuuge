@@ -228,11 +228,13 @@ export default function CardViewerPage() {
                 className="envelope-face shadow-lg"
                 style={{ background: "#faf7f2", border: "1px solid #e8e0d4" }}
               >
-                {/* Sender name — upper left */}
+                {/* Sender name — upper left (supports line breaks) */}
                 {senderNames && (
-                  <p className="absolute top-4 left-5 text-xs" style={{ color: "#8b7d6b", fontFamily: "var(--font-handwritten), cursive" }}>
-                    {senderNames}
-                  </p>
+                  <div className="absolute top-4 left-5 text-xs leading-relaxed max-w-[45%]" style={{ color: "#8b7d6b", fontFamily: "var(--font-handwritten), cursive" }}>
+                    {senderNames.split("\n").map((line, i) => (
+                      <span key={i}>{line}{i < senderNames.split("\n").length - 1 ? <br /> : null}</span>
+                    ))}
+                  </div>
                 )}
 
                 {/* Stamp — upper right */}
