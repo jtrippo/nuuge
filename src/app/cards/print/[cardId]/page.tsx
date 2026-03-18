@@ -10,7 +10,7 @@ import { fontCSS, positionCSS, textStyleCSS, frontTextAlign, messageSizing, maxM
 import type { FontChoice, TextStyleChoice } from "@/lib/card-ui-helpers";
 import { shareCard } from "@/lib/share-card";
 import { copyToClipboard } from "@/lib/clipboard";
-import { getSenderNames } from "@/lib/signer-helpers";
+import { getSenderNames, getRecipientDisplayName } from "@/lib/signer-helpers";
 
 const POSITION_OPTIONS: { value: string; label: string }[] = [
   { value: "center", label: "Center" },
@@ -356,7 +356,7 @@ export default function PrintCardPage() {
             try {
               const profile = getUserProfile();
               const recipients = getRecipients();
-              const rName = recipient?.first_name || recipient?.display_name || recipient?.name || "";
+              const rName = recipient ? getRecipientDisplayName(card, recipient) : "";
               const sName = recipient ? getSenderNames(card, recipient, recipients, profile) : (profile?.first_name || profile?.display_name || "");
               const hydrated = await hydrateCardImages(card);
               const result = await shareCard(hydrated, rName, sName);

@@ -23,7 +23,7 @@ import {
   calculateAge,
   getBirthdayForAge,
 } from "@/lib/card-recipes";
-import { formatSignerNames, getDefaultUserDisplayName, getDefaultDisplayName, USER_KEY, MAX_SIGNERS } from "@/lib/signer-helpers";
+import { formatSignerNames, getDefaultUserDisplayName, getDefaultDisplayName, getRecipientDisplayName, USER_KEY, MAX_SIGNERS } from "@/lib/signer-helpers";
 import { fontCSS, textStyleCSS, FONT_OPTIONS as CARD_FONT_OPTIONS, isAccentPosition, defaultAccentSlots, cornerStyle, cornerImgStyle, edgeStyle, edgeImgStyle, frameImgStyle } from "@/lib/card-ui-helpers";
 import type { FontChoice, TextStyleChoice } from "@/lib/card-ui-helpers";
 import { saveImage, getImage } from "@/lib/image-store";
@@ -142,6 +142,7 @@ interface CardDraft {
   signerDisplayOverrides: Record<string, string>;
   signerGroupName: string;
   useGroupSignature: boolean;
+  recipientDisplayNameOverride: string;
   activeProfileElements: Record<string, boolean>;
   selected: CardMessage | null;
   editedMessage: CardMessage | null;
@@ -260,6 +261,7 @@ function CreateCardPage() {
   const [signerDisplayOverrides, setSignerDisplayOverrides] = useState<Record<string, string>>({});
   const [signerGroupName, setSignerGroupName] = useState("");
   const [useGroupSignature, setUseGroupSignature] = useState(false);
+  const [recipientDisplayNameOverride, setRecipientDisplayNameOverride] = useState("");
   const [messages, setMessages] = useState<CardMessage[]>([]);
   const [rejectedMessages, setRejectedMessages] = useState<string[]>([]);
   const [regenerationCount, setRegenerationCount] = useState(0);
@@ -422,6 +424,7 @@ function CreateCardPage() {
       signerDisplayOverrides,
       signerGroupName,
       useGroupSignature,
+      recipientDisplayNameOverride,
       activeProfileElements,
       selected,
       editedMessage,
@@ -450,7 +453,7 @@ function CreateCardPage() {
     }
   }, [
     mounted, recipientId, editMode, editCardId, showResumePrompt, pendingDraft, step,
-    occasion, occasionCustom, includeFaithBased, tone, notes, sharedWith, coSign, signerRecipientIds, signerDisplayOverrides, signerGroupName, useGroupSignature, activeProfileElements,
+    occasion, occasionCustom, includeFaithBased, tone, notes, sharedWith, coSign, signerRecipientIds, signerDisplayOverrides, signerGroupName, useGroupSignature, recipientDisplayNameOverride, activeProfileElements,
     selected, editedMessage, imageSubject, subjectDetail, artStyle, personalContext,
     currentSceneDescription, selectedDesign, insideImagePosition, accentPositions, imageInterests, frontText, frontTextPosition, frontTextStyle, cardSize,
     generatedImageUrl, insideImageUrl,
@@ -497,6 +500,7 @@ function CreateCardPage() {
     setSignerDisplayOverrides(d.signerDisplayOverrides ?? {});
     setSignerGroupName(d.signerGroupName ?? "");
     setUseGroupSignature(d.useGroupSignature ?? false);
+    setRecipientDisplayNameOverride(d.recipientDisplayNameOverride ?? "");
     setActiveProfileElements(normalizeProfileElements(d.activeProfileElements));
     setSelected(d.selected);
     setEditedMessage(d.editedMessage);
@@ -1113,6 +1117,7 @@ Humor tolerance: ${r.humor_tolerance || "Not specified"}`.replace(/\n{2,}/g, "\n
       signer_recipient_ids: signerRecipientIds.length ? signerRecipientIds : undefined,
       signer_display_overrides: Object.keys(signerDisplayOverrides).length ? signerDisplayOverrides : undefined,
       signer_group_name: useGroupSignature && signerGroupName.trim() ? signerGroupName.trim() : null,
+      recipient_display_name: recipientDisplayNameOverride.trim() || null,
       card_size: cardSize,
       msg_font_scale: 0,
       ft_font_scale: 1,
@@ -1431,11 +1436,22 @@ Humor tolerance: ${r.humor_tolerance || "Not specified"}`.replace(/\n{2,}/g, "\n
                 ))}
               </div>
             )}
-            {/* Signed from — You (always) + linked people or partner */}
+            {/* Envelope — Going to + Signed from */}
             <div className="rounded-xl p-4 mb-4" style={{ background: "var(--color-faint-gray)", border: "1px solid var(--color-light-gray)" }}>
-              <p className="text-base font-medium text-charcoal mb-2">Signed from</p>
-              <p className="text-xs text-warm-gray mb-3">Name shown on the e-card envelope and in the sign-off.</p>
+              <p className="text-base font-medium text-charcoal mb-2">Envelope</p>
+              <p className="text-xs text-warm-gray mb-3">Names shown on the e-card envelope.</p>
               <div className="space-y-3">
+                <div className="flex items-center gap-3">
+                  <span className="text-sm font-medium text-charcoal shrink-0" style={{ minWidth: 80 }}>Going to</span>
+                  <input
+                    type="text"
+                    value={recipientDisplayNameOverride}
+                    onChange={(e) => setRecipientDisplayNameOverride(e.target.value)}
+                    placeholder={getDefaultDisplayName(recipient) || "Recipient name"}
+                    className="flex-1 input-field rounded-lg px-3 py-1.5 text-sm max-w-[180px]"
+                  />
+                </div>
+                <p className="text-xs text-warm-gray -mt-1">Signed from</p>
                 <div className="flex items-center gap-3">
                   <span className="text-sm font-medium text-charcoal shrink-0" style={{ minWidth: 80 }}>You</span>
                   <input

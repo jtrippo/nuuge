@@ -50,6 +50,16 @@ export function getDefaultUserDisplayName(profile: Partial<UserProfile> | null):
 }
 
 /**
+ * Recipient display name for envelope center.
+ * Uses recipient_display_name override if set; else nickname → first_name → display_name → name.
+ */
+export function getRecipientDisplayName(card: Card, recipient: Recipient | null): string {
+  const override = (card as { recipient_display_name?: string | null }).recipient_display_name?.trim();
+  if (override) return override;
+  return getDefaultDisplayName(recipient);
+}
+
+/**
  * Get the formatted sender string for a card, for envelope and share.
  * Uses signer_group_name if set; else signer_display_overrides + signer_recipient_ids (or co_signed_with legacy).
  * Returns string with \n for envelope line breaks when 3+ names.

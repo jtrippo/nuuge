@@ -9,7 +9,7 @@ import { ALL_OCCASIONS, OTHER_OCCASION_VALUE, OTHER_OCCASION_LABEL, getDisplayOc
 import { fontCSS, positionCSS, textStyleCSS, frontTextAlign, messageSizing, msgSizeOptions, FONT_OPTIONS, isAccentPosition, defaultAccentSlots, cornerStyle, cornerImgStyle, edgeStyle, edgeImgStyle, frameImgStyle } from "@/lib/card-ui-helpers";
 import type { FontChoice, TextStyleChoice } from "@/lib/card-ui-helpers";
 import { STYLE_RECIPES } from "@/lib/card-recipes";
-import { formatSignerNames, getSignerNameList, getDefaultUserDisplayName, getDefaultDisplayName, USER_KEY, MAX_SIGNERS } from "@/lib/signer-helpers";
+import { formatSignerNames, getSignerNameList, getDefaultUserDisplayName, getDefaultDisplayName, getRecipientDisplayName, USER_KEY, MAX_SIGNERS } from "@/lib/signer-helpers";
 
 const FRONT_TEXT_STYLES: { id: TextStyleChoice; label: string }[] = [
   { id: "plain_black", label: "Plain black" },
@@ -153,6 +153,7 @@ export default function EditCardPage() {
   const [signerDisplayOverrides, setSignerDisplayOverrides] = useState<Record<string, string>>({});
   const [signerGroupName, setSignerGroupName] = useState("");
   const [useGroupSignature, setUseGroupSignature] = useState(false);
+  const [recipientDisplayNameOverride, setRecipientDisplayNameOverride] = useState("");
   const [allRecipients, setAllRecipients] = useState<Recipient[]>([]);
   const [regenerating, setRegenerating] = useState(false);
   const [regenError, setRegenError] = useState<string | null>(null);
@@ -220,6 +221,8 @@ export default function EditCardPage() {
           setSignerGroupName(groupName.trim());
           setUseGroupSignature(true);
         }
+        const recDisplay = (hydrated as { recipient_display_name?: string | null }).recipient_display_name;
+        if (recDisplay?.trim()) setRecipientDisplayNameOverride(recDisplay.trim());
         if (!signerIds?.length && hydrated.co_signed_with?.trim()) {
           const recipients = getRecipients();
           const r = recipients.find((rec) => rec.id === c.recipient_id);
@@ -333,6 +336,7 @@ export default function EditCardPage() {
       signer_recipient_ids: signerRecipientIds.length ? signerRecipientIds : undefined,
       signer_display_overrides: Object.keys(signerDisplayOverrides).length ? signerDisplayOverrides : undefined,
       signer_group_name: useGroupSignature && signerGroupName.trim() ? signerGroupName.trim() : null,
+      recipient_display_name: recipientDisplayNameOverride.trim() || null,
       ...(signerRecipientIds.length ? { co_signed_with: null } : {}),
     };
   }
@@ -720,11 +724,22 @@ export default function EditCardPage() {
               <p className="text-xs text-warm-gray mt-0.5">Put the sender name(s) on a new line below the phrase.</p>
             </div>
 
-            {/* Signed from — You (always) + linked people with overrides */}
+            {/* Envelope — Going to + Signed from */}
             <div>
-              <label className="block text-sm font-medium text-charcoal mb-2">Signed from</label>
-              <p className="text-xs text-warm-gray mb-3">Name shown on the e-card envelope and in the sign-off.</p>
+              <label className="block text-sm font-medium text-charcoal mb-2">Envelope</label>
+              <p className="text-xs text-warm-gray mb-3">Names shown on the e-card envelope.</p>
               <div className="space-y-3">
+                <div className="flex items-center gap-3">
+                  <span className="text-sm font-medium text-charcoal shrink-0" style={{ minWidth: 80 }}>Going to</span>
+                  <input
+                    type="text"
+                    value={recipientDisplayNameOverride}
+                    onChange={(e) => { setRecipientDisplayNameOverride(e.target.value); setSaved(false); }}
+                    placeholder={getDefaultDisplayName(recipient) || "Recipient name"}
+                    className="flex-1 input-field rounded-lg px-3 py-1.5 text-sm max-w-[180px]"
+                  />
+                </div>
+                <p className="text-xs text-warm-gray -mt-1">Signed from</p>
                 <div className="flex items-center gap-3">
                   <span className="text-sm font-medium text-charcoal shrink-0" style={{ minWidth: 80 }}>You</span>
                   <input

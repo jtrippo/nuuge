@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { getCards, getRecipients, getUserProfile, hydrateCardImages } from "@/lib/store";
 import type { Card } from "@/types/database";
-import { getSenderNames } from "@/lib/signer-helpers";
+import { getSenderNames, getRecipientDisplayName } from "@/lib/signer-helpers";
 import { fontCSS, positionCSS, textStyleCSS, frontTextAlign, messageSizing, msgSizeOptions, isAccentPosition, defaultAccentSlots, cornerStyle, cornerImgStyle, edgeStyle, edgeImgStyle, frameImgStyle } from "@/lib/card-ui-helpers";
 import type { TextStyleChoice } from "@/lib/card-ui-helpers";
 import { shareCard } from "@/lib/share-card";
@@ -17,7 +17,7 @@ export default function CardViewerPage() {
   const router = useRouter();
   const cardId = params.cardId as string;
   const [card, setCard] = useState<Card | null>(null);
-  const [recipientFirstName, setRecipientFirstName] = useState<string>("");
+  const [recipientDisplayName, setRecipientDisplayName] = useState<string>("");
   const [senderNames, setSenderNames] = useState<string>("");
   const [recipientId, setRecipientId] = useState<string>("");
   const [recipientName, setRecipientName] = useState<string>("");
@@ -38,7 +38,7 @@ export default function CardViewerPage() {
       const recipients = getRecipients();
       const r = recipients.find((rec) => rec.id === found.recipient_id);
       if (r) {
-        setRecipientFirstName(r.first_name || r.display_name || r.name || "");
+        setRecipientDisplayName(getRecipientDisplayName(found, r));
         setRecipientId(r.id);
         setRecipientName(r.name || r.display_name || r.first_name || "");
       }
@@ -122,7 +122,7 @@ export default function CardViewerPage() {
     setShareError(null);
     try {
       const hydrated = await hydrateCardImages(card);
-      const result = await shareCard(hydrated, recipientFirstName, senderNames);
+      const result = await shareCard(hydrated, recipientDisplayName, senderNames);
       if ("error" in result) {
         setShareError(result.error);
       } else {
@@ -256,7 +256,7 @@ export default function CardViewerPage() {
                       fontWeight: 500,
                     }}
                   >
-                    {recipientFirstName}
+                    {recipientDisplayName}
                   </p>
                 </div>
 

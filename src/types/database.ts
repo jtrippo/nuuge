@@ -149,6 +149,8 @@ export interface Card {
   sent: boolean;
   feedback_rating: number | null;
   co_signed_with: string | null;
+  /** Override for recipient name on envelope center (e.g. "Scooter" for buddy Michael). */
+  recipient_display_name?: string | null;
   /** Recipient IDs of linked people co-signing (replaces co_signed_with when set). */
   signer_recipient_ids?: string[];
   /** Override display name per signer. Keys: "__user__" for primary, recipient_id for linked. */
