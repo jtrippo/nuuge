@@ -6,10 +6,11 @@ import { getCardById, updateCard, saveCard, getRecipients, getUserProfile, hydra
 import AppHeader from "@/components/AppHeader";
 import type { Card, Recipient } from "@/types/database";
 import { ALL_OCCASIONS, OTHER_OCCASION_VALUE, OTHER_OCCASION_LABEL, getDisplayOccasion } from "@/lib/occasions";
-import { fontCSS, positionCSS, textStyleCSS, frontTextAlign, messageSizing, msgSizeOptions, FONT_OPTIONS, isAccentPosition, defaultAccentSlots, cornerStyle, cornerImgStyle, edgeStyle, edgeImgStyle, frameImgStyle } from "@/lib/card-ui-helpers";
+import { fontCSS, positionCSS, textStyleCSS, frontTextAlign, messageSizing, msgSizeOptions, FONT_OPTIONS, isAccentPosition, defaultAccentSlots, cornerStyle, cornerImgStyle, edgeStyle, edgeImgStyle, frameImgStyle, DEFAULT_ACCENT_OPACITY, DEFAULT_FRAME_OPACITY } from "@/lib/card-ui-helpers";
 import type { FontChoice, TextStyleChoice } from "@/lib/card-ui-helpers";
 import { STYLE_RECIPES } from "@/lib/card-recipes";
 import { formatSignerNames, getSignerNameList, getDefaultUserDisplayName, getDefaultDisplayName, getRecipientDisplayName, USER_KEY, MAX_SIGNERS } from "@/lib/signer-helpers";
+import { logApiCall } from "@/lib/usage-store";
 
 const FRONT_TEXT_STYLES: { id: TextStyleChoice; label: string }[] = [
   { id: "plain_black", label: "Plain black" },
@@ -141,6 +142,7 @@ export default function EditCardPage() {
   const [occasion, setOccasion] = useState("");
   const [insideImagePosition, setInsideImagePosition] = useState("top");
   const [accentPositions, setAccentPositions] = useState<number[]>([3]);
+  const [accentOpacity, setAccentOpacity] = useState<number | null>(null);
   const [cardSize, setCardSize] = useState<"4x6" | "5x7">("5x7");
   const [letterText, setLetterText] = useState("");
   const [letterFont, setLetterFont] = useState<string>("handwritten");
@@ -162,6 +164,8 @@ export default function EditCardPage() {
   const isNewsCard = card?.card_type === "news";
   const isBeyondCard = card?.card_type === "beyond";
   const isNonCircleCard = isNewsCard || isBeyondCard;
+
+  const [stickyTop, setStickyTop] = useState(0);
 
   // Cache the original inside image so switching back is free
   const [originalInsideImageUrl, setOriginalInsideImageUrl] = useState<string | null>(null);
@@ -211,6 +215,8 @@ export default function EditCardPage() {
           setAccentPositions(ap);
           setOriginalAccentPositions(ap);
         }
+        const savedOpacity = (hydrated as { accent_opacity?: number }).accent_opacity;
+        if (savedOpacity != null) setAccentOpacity(savedOpacity);
         setCardSize(hydrated.card_size ?? "5x7");
         setLetterText(hydrated.letter_text ?? "");
         setLetterFont(hydrated.letter_font ?? "handwritten");
@@ -275,6 +281,18 @@ export default function EditCardPage() {
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [greeting, body, closing, frontText, frontTextPosition, frontTextStyle, frontTextFont, insideFont, msgSizeScale, ftSizeScale, cardSize, letterText, letterFont, letterSizeScale]);
+
+  const cardLoaded = !!card;
+  useEffect(() => {
+    if (!mounted || !cardLoaded) return;
+    const header = document.querySelector("header.no-print");
+    if (!header) return;
+    const measure = () => setStickyTop(header.getBoundingClientRect().height);
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(header);
+    return () => ro.disconnect();
+  }, [mounted, cardLoaded]);
 
   if (!mounted) return null;
 
@@ -341,6 +359,7 @@ export default function EditCardPage() {
       inside_image_position: (insideImagePosition === "none" ? undefined : (card!.inside_image_url ? insideImagePosition : card!.inside_image_position)) as Card["inside_image_position"],
       ...(insideImagePosition === "none" ? { inside_image_url: null } : {}),
       accent_positions: isAccentPosition(insideImagePosition) ? accentPositions : undefined,
+      accent_opacity: accentOpacity ?? undefined,
       card_size: cardSize,
       letter_text: letterText.trim() || null,
       letter_font: letterText.trim() ? letterFont : null,
@@ -437,6 +456,7 @@ export default function EditCardPage() {
         throw new Error(errData.error || "Failed to generate decoration");
       }
       const data = await res.json();
+      logApiCall("generate-image", { model: "gpt-image-1", callType: "image_generate", recipientId: card.recipient_id, cardId, sessionId: `edit_${cardId}` });
       updateCard(cardId, {
         inside_image_url: data.imageUrl,
         inside_image_position: newPos as Card["inside_image_position"],
@@ -471,75 +491,57 @@ export default function EditCardPage() {
       >
         <button
           onClick={() => { handleSave(); recipient && !isNonCircleCard ? router.push(`/recipients/${recipient.id}`) : router.push("/"); }}
-          className="flex items-center gap-1.5 px-4 py-1.5 rounded-full text-sm text-warm-gray hover:text-charcoal transition-colors"
-          style={{ border: "1.5px solid var(--color-sage)" }}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium"
+          style={{ color: "var(--color-brand)", border: "1.5px solid var(--color-sage)" }}
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
           {recipient?.name ?? "Home"}
         </button>
+        <span className="flex-1" />
+        <button
+          onClick={handleSaveAsNew}
+          className="px-4 py-1.5 rounded-full text-sm text-warm-gray hover:text-charcoal transition-colors"
+          style={{ border: "1.5px solid var(--color-sage)" }}
+        >
+          Save as new
+        </button>
+        <button
+          onClick={() => { handleSave(); window.location.href = `/cards/view/${card.id}`; }}
+          className="px-4 py-1.5 rounded-full text-sm text-warm-gray hover:text-charcoal transition-colors"
+          style={{ border: "1.5px solid var(--color-sage)" }}
+        >
+          View E-card
+        </button>
+        <button
+          onClick={() => { handleSave(); window.location.href = `/cards/print/${card.id}`; }}
+          className="btn-primary px-5 py-2 rounded-full text-sm font-medium"
+        >
+          Print Preview
+        </button>
       </AppHeader>
 
-      <main className="max-w-2xl mx-auto px-6 py-8">
-
-        {/* ─── Actions (top) ─── */}
-        <div className="flex flex-wrap items-center gap-3 mb-8">
-          <button
-            onClick={handleSaveAsNew}
-            className="px-5 py-2.5 rounded-full text-sm font-medium text-warm-gray hover:text-charcoal transition-colors"
-            style={{ border: "1.5px solid var(--color-sage)" }}
-          >
-            Save as new card
-          </button>
-          <button
-            onClick={() => { handleSave(); window.location.href = `/cards/view/${card.id}`; }}
-            className="px-5 py-2.5 rounded-full text-sm font-medium text-warm-gray hover:text-charcoal transition-colors"
-            style={{ border: "1.5px solid var(--color-sage)" }}
-          >
-            View e-card
-          </button>
-          <button
-            onClick={() => { handleSave(); window.location.href = `/cards/print/${card.id}`; }}
-            className="px-5 py-2.5 rounded-full text-sm font-medium text-warm-gray hover:text-charcoal transition-colors"
-            style={{ border: "1.5px solid var(--color-sage)" }}
-          >
-            Print preview
-          </button>
-          <span className="flex-1" />
-          <button
-            onClick={() => { handleSave(); recipient && router.push(`/cards/create/${recipient.id}`); }}
-            className="btn-primary px-5 py-2.5 rounded-full text-sm font-medium"
-          >
-            Create card
-          </button>
-        </div>
-
-        {saved && (
-          <div className="mb-6 p-4 rounded-xl text-sm" style={{ background: "var(--color-brand-light)", border: "1px solid var(--color-sage-light)", color: "var(--color-brand)" }}>
-            Changes saved.
+      {/* ─── Sticky Card Preview ─── */}
+      <div
+        className="sticky z-20 border-b"
+        style={{ top: stickyTop, background: "var(--color-cream)", borderColor: "var(--color-light-gray)" }}
+      >
+        {(saved || savedAsNew) && (
+          <div className="text-center py-1.5 text-xs font-medium" style={{ background: "var(--color-brand-light)", color: "var(--color-brand)" }}>
+            {savedAsNew ? (
+              <>
+                Saved as new card.{" "}
+                <button onClick={() => router.push(`/cards/edit/${savedAsNew}`)} className="underline" style={{ color: "var(--color-brand)" }}>Edit it</button>
+                {" · "}
+                <button onClick={() => { window.location.href = `/cards/view/${savedAsNew}`; }} className="underline" style={{ color: "var(--color-brand)" }}>View it</button>
+              </>
+            ) : "Changes saved."}
           </div>
         )}
-        {savedAsNew && (
-          <div className="mb-6 p-4 rounded-xl text-sm" style={{ background: "var(--color-brand-light)", border: "1px solid var(--color-sage-light)", color: "var(--color-brand)" }}>
-            Saved as a new card.{" "}
-            <button onClick={() => router.push(`/cards/edit/${savedAsNew}`)} className="underline font-medium" style={{ color: "var(--color-brand)" }}>
-              Edit the new card
-            </button>{" "}
-            or{" "}
-            <button onClick={() => { window.location.href = `/cards/view/${savedAsNew}`; }} className="underline font-medium" style={{ color: "var(--color-brand)" }}>
-              view it
-            </button>.
-          </div>
-        )}
-
-        {/* ─── Card Preview ─── */}
-        <div className="mb-8">
-          <p className="section-label mb-3">Preview</p>
-          <div className="flex gap-4 justify-center">
-            {/* Front panel — container-type for cqw font sizing (matches print/view) */}
-            <div
-              className="relative card-surface rounded-xl shadow-lg overflow-hidden"
-              style={{ width: "45%", maxWidth: 240, aspectRatio: "5 / 7", containerType: "inline-size" }}
-            >
+        <div className="flex gap-4 justify-center py-3 px-4">
+          <div
+            className="relative card-surface rounded-xl shadow-lg overflow-hidden"
+            style={{ width: "45%", maxWidth: 240, aspectRatio: "5 / 7", containerType: "inline-size" }}
+          >
               {card.image_url ? (
                 <>
                   <img src={card.image_url} alt="Card front" className="w-full h-full object-cover" />
@@ -626,7 +628,7 @@ export default function EditCardPage() {
               {/* Top edge accent (slot 1) */}
               {insideImagePosition === "top_edge_accent" && card.inside_image_url && accentPositions.includes(1) && (
                 <div style={edgeStyle(1)}>
-                  <img src={card.inside_image_url} alt="" style={edgeImgStyle()} />
+                  <img src={card.inside_image_url} alt="" style={edgeImgStyle(accentOpacity ?? undefined)} />
                 </div>
               )}
 
@@ -680,20 +682,20 @@ export default function EditCardPage() {
               {/* Bottom edge accent (slot 2) */}
               {insideImagePosition === "top_edge_accent" && card.inside_image_url && accentPositions.includes(2) && (
                 <div style={edgeStyle(2)}>
-                  <img src={card.inside_image_url} alt="" style={edgeImgStyle()} />
+                  <img src={card.inside_image_url} alt="" style={edgeImgStyle(accentOpacity ?? undefined)} />
                 </div>
               )}
 
               {/* Corner flourish — per selected corner */}
               {insideImagePosition === "corner_flourish" && card.inside_image_url && accentPositions.map((slot) => (
                 <div key={slot} style={cornerStyle(slot)}>
-                  <img src={card.inside_image_url!} alt="" style={cornerImgStyle()} />
+                  <img src={card.inside_image_url!} alt="" style={cornerImgStyle(accentOpacity ?? undefined)} />
                 </div>
               ))}
 
               {/* Frame — portrait fill */}
               {insideImagePosition === "frame" && card.inside_image_url && (
-                <img src={card.inside_image_url!} alt="" style={frameImgStyle()} />
+                <img src={card.inside_image_url!} alt="" style={frameImgStyle(accentOpacity ?? undefined)} />
               )}
 
               <div className="absolute bottom-0 left-0 right-0 bg-black/40 text-white text-[0.55rem] text-center py-0.5" style={{ zIndex: 2 }}>
@@ -702,6 +704,9 @@ export default function EditCardPage() {
             </div>
           </div>
         </div>
+
+      {/* ─── Scrollable Edit Controls ─── */}
+      <main className="max-w-2xl mx-auto px-6 py-6">
 
         {/* ─── Message ─── */}
         <div className="card-surface p-5 mb-4">
@@ -966,6 +971,24 @@ export default function EditCardPage() {
                         className={`px-3 py-1 rounded text-xs font-medium border ${accentPositions.includes(s) ? "border-brand bg-brand-light text-charcoal" : "border-light-gray text-warm-gray"}`}
                       >{l}</button>
                     ))}
+                  </div>
+                </div>
+              )}
+              {isAccentPosition(insideImagePosition) && card.inside_image_url && (
+                <div className="mt-3">
+                  <label className="block text-xs text-warm-gray mb-1">Intensity</label>
+                  <div className="flex items-center gap-3">
+                    <span className="text-xs text-warm-gray">Light</span>
+                    <input
+                      type="range"
+                      min={5}
+                      max={100}
+                      value={Math.round((accentOpacity ?? (insideImagePosition === "frame" ? DEFAULT_FRAME_OPACITY : DEFAULT_ACCENT_OPACITY)) * 100)}
+                      onChange={(e) => { setAccentOpacity(Number(e.target.value) / 100); setSaved(false); }}
+                      className="flex-1 accent-brand"
+                      style={{ accentColor: "var(--color-brand)" }}
+                    />
+                    <span className="text-xs text-warm-gray">Bold</span>
                   </div>
                 </div>
               )}

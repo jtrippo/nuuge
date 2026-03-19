@@ -646,4 +646,48 @@ General:
 
 ---
 
+---
+
+## 11. Future: Style Reference Images for Art Styles
+
+> Status: Documented for future consideration. Not implemented.
+
+### Problem
+
+Text-only prompts for art styles hit a ceiling in specificity. For example, the "Cut Paper Folk" style (inspired by Charley Harper / Scandinavian folk art) requires dense geometric patterning *inside* shapes — cross-hatching, lattice grids, sunburst fans. Through iterative prompt tuning we achieved good folk-art results, but the internal pattern density remains inconsistent because the image model interprets text descriptions loosely.
+
+### Approach: Self-Generated Style References
+
+Rather than referencing any artist's original work (which raises ethical concerns about derivative output), the approach would be:
+
+1. **Generate a "gold standard" image** for each style using the current text-prompt system
+2. **Curate the best output** — pick the one that most closely matches the intended style
+3. **Store it as a style reference** — associate it with the style recipe (e.g., `cut_paper.reference.png`)
+4. **Pass it to the image API** alongside the text prompt — the model uses the reference to understand texture density, pattern complexity, color relationships, and compositional principles
+
+### Why This Is Ethically Clean
+
+- The reference image is AI-generated output from *our own* prompts, not sourced from any artist
+- We're referencing style characteristics (texture, pattern density, color palette), not copying composition or subject matter
+- Named artist references (e.g., "Charley Harper") remain in the text prompt as stylistic shorthand, which is standard practice — the same as saying "Art Deco" or "Impressionist"
+- No artist's specific work is used as input to the model
+
+### What It Would Require
+
+- **Storage**: A reference image per style recipe (~10 images, stored as static assets or in a CDN)
+- **API changes**: The `generate-image` API route would need to accept an optional `style_reference_url` and pass it to the image generation model (OpenAI's gpt-image-1 supports image inputs)
+- **Recipe schema**: Add an optional `referenceImage?: string` field to `StyleRecipe`
+- **Prompt builder**: When a style has a reference image, include it in the API call alongside the text prompt
+
+### When to Implement
+
+This becomes worthwhile when:
+- Multiple styles struggle with text-only specificity (currently only Cut Paper Folk shows this limitation)
+- User feedback indicates art style inconsistency is a pain point
+- The image API's style reference capabilities mature (better style extraction, less content leakage)
+
+For now, the text-only prompt approach produces good results across all styles and avoids the complexity of managing reference image assets.
+
+---
+
 *This document will evolve as decisions are made. Next step: pick the decisions in Section 9 and start Phase 1 implementation.*

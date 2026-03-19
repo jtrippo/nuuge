@@ -2901,12 +2901,12 @@ Humor tolerance: ${r.humor_tolerance || "Not specified"}`.replace(/\n{2,}/g, "\n
                       </div>
                     </div>
                   )}
-                  {/* Corner flourish — render per selected corner */}
+                  {/* Corner flourish — render per selected corner (no blend mode in preview) */}
                   {insideImagePosition === "corner_flourish" && (
                     <div className="relative h-full">
                       {accentPositions.map((slot) => (
                         <div key={slot} style={cornerStyle(slot)}>
-                          <img src={insideImageUrl} alt="" style={cornerImgStyle()} />
+                          <img src={insideImageUrl} alt="" style={{ width: "100%", height: "100%", objectFit: "contain", opacity: 0.85 }} />
                         </div>
                       ))}
                       <div className="relative flex flex-col items-center justify-center h-full px-4" style={{ padding: accentPositions.length > 2 ? "2.5rem 1.5rem" : "1rem" }}>
@@ -2916,10 +2916,10 @@ Humor tolerance: ${r.humor_tolerance || "Not specified"}`.replace(/\n{2,}/g, "\n
                       </div>
                     </div>
                   )}
-                  {/* Frame — portrait fill */}
+                  {/* Frame — portrait fill (no blend mode in preview) */}
                   {insideImagePosition === "frame" && (
                     <div className="relative h-full">
-                      <img src={insideImageUrl} alt="" style={frameImgStyle()} />
+                      <img src={insideImageUrl} alt="" style={{ position: "absolute", top: 0, left: 0, width: "100%", height: "100%", objectFit: "fill", opacity: 0.35, pointerEvents: "none" }} />
                       <div className="relative flex flex-col items-center justify-center h-full" style={{ padding: "15% 12%" }}>
                         <div className="w-3/4 space-y-1.5">
                           {[1,2,3,4].map(l => <div key={l} className="h-1.5 rounded bg-light-gray" style={{ width: l === 4 ? "50%" : "100%" }} />)}
@@ -2927,12 +2927,12 @@ Humor tolerance: ${r.humor_tolerance || "Not specified"}`.replace(/\n{2,}/g, "\n
                       </div>
                     </div>
                   )}
-                  {/* Top/bottom edge motif */}
+                  {/* Top/bottom edge motif (no blend mode in preview) */}
                   {insideImagePosition === "top_edge_accent" && (
                     <div className="flex flex-col h-full">
                       {accentPositions.includes(1) && (
                         <div style={edgeStyle(1)}>
-                          <img src={insideImageUrl} alt="" style={edgeImgStyle()} />
+                          <img src={insideImageUrl} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", opacity: 0.85 }} />
                         </div>
                       )}
                       <div className="flex-1 flex flex-col items-center justify-center px-4">
@@ -2942,7 +2942,7 @@ Humor tolerance: ${r.humor_tolerance || "Not specified"}`.replace(/\n{2,}/g, "\n
                       </div>
                       {accentPositions.includes(2) && (
                         <div style={edgeStyle(2)}>
-                          <img src={insideImageUrl} alt="" style={edgeImgStyle()} />
+                          <img src={insideImageUrl} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", opacity: 0.85 }} />
                         </div>
                       )}
                     </div>

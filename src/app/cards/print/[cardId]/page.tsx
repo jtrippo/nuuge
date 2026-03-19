@@ -6,7 +6,7 @@ import { getCards, getRecipients, getUserProfile, hydrateCardImages, updateCard,
 import AppHeader from "@/components/AppHeader";
 import type { Card, Recipient } from "@/types/database";
 import { getDisplayOccasion } from "@/lib/occasions";
-import { fontCSS, positionCSS, textStyleCSS, frontTextAlign, messageSizing, maxMsgScale, msgSizeOptions, FONT_OPTIONS, isAccentPosition, defaultAccentSlots, cornerStyle, cornerImgStyle, edgeStyle, edgeImgStyle, frameImgStyle } from "@/lib/card-ui-helpers";
+import { fontCSS, positionCSS, textStyleCSS, frontTextAlign, messageSizing, maxMsgScale, msgSizeOptions, FONT_OPTIONS, isAccentPosition, defaultAccentSlots, cornerStyle, cornerImgStyle, edgeStyle, edgeImgStyle, frameImgStyle, DEFAULT_ACCENT_OPACITY, DEFAULT_FRAME_OPACITY } from "@/lib/card-ui-helpers";
 import type { FontChoice, TextStyleChoice } from "@/lib/card-ui-helpers";
 import { shareCard } from "@/lib/share-card";
 import { copyToClipboard } from "@/lib/clipboard";
@@ -332,6 +332,7 @@ export default function PrintCardPage() {
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
           {recipient?.name ?? "Home"}
         </button>
+        <span className="flex-1" />
         <button
           onClick={() => { saveSettings(); window.location.href = `/cards/edit/${cardId}`; }}
           className="px-4 py-1.5 rounded-full text-sm text-warm-gray hover:text-charcoal transition-colors"
@@ -671,9 +672,10 @@ export default function PrintCardPage() {
             )}
             {insidePos === "top_edge_accent" && card.inside_image_url && (() => {
               const slots = (card as { accent_positions?: number[] }).accent_positions ?? defaultAccentSlots("top_edge_accent");
+              const ao = (card as { accent_opacity?: number }).accent_opacity;
               return slots.includes(1) ? (
                 <div style={edgeStyle(1)}>
-                  <img src={card.inside_image_url!} alt="" style={edgeImgStyle()} />
+                  <img src={card.inside_image_url!} alt="" style={edgeImgStyle(ao ?? undefined)} />
                 </div>
               ) : null;
             })()}
@@ -738,20 +740,22 @@ export default function PrintCardPage() {
             )}
             {insidePos === "corner_flourish" && card.inside_image_url && (() => {
               const slots = (card as { accent_positions?: number[] }).accent_positions ?? defaultAccentSlots("corner_flourish");
+              const ao = (card as { accent_opacity?: number }).accent_opacity;
               return slots.map((slot) => (
                 <div key={slot} style={cornerStyle(slot)}>
-                  <img src={card.inside_image_url!} alt="" style={cornerImgStyle()} />
+                  <img src={card.inside_image_url!} alt="" style={cornerImgStyle(ao ?? undefined)} />
                 </div>
               ));
             })()}
             {insidePos === "frame" && card.inside_image_url && (
-              <img src={card.inside_image_url} alt="" style={frameImgStyle()} />
+              <img src={card.inside_image_url} alt="" style={frameImgStyle((card as { accent_opacity?: number }).accent_opacity ?? undefined)} />
             )}
             {insidePos === "top_edge_accent" && card.inside_image_url && (() => {
               const slots = (card as { accent_positions?: number[] }).accent_positions ?? defaultAccentSlots("top_edge_accent");
+              const ao = (card as { accent_opacity?: number }).accent_opacity;
               return slots.includes(2) ? (
                 <div style={edgeStyle(2)}>
-                  <img src={card.inside_image_url!} alt="" style={edgeImgStyle()} />
+                  <img src={card.inside_image_url!} alt="" style={edgeImgStyle(ao ?? undefined)} />
                 </div>
               ) : null;
             })()}

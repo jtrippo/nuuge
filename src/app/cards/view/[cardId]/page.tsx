@@ -384,9 +384,10 @@ export default function CardViewerPage() {
             )}
             {insidePos === "top_edge_accent" && card.inside_image_url && (() => {
               const slots = (card as { accent_positions?: number[] }).accent_positions ?? defaultAccentSlots("top_edge_accent");
+              const ao = (card as { accent_opacity?: number }).accent_opacity;
               return slots.includes(1) ? (
                 <div style={edgeStyle(1)}>
-                  <img src={card.inside_image_url} alt="" style={edgeImgStyle()} />
+                  <img src={card.inside_image_url} alt="" style={edgeImgStyle(ao ?? undefined)} />
                 </div>
               ) : null;
             })()}
@@ -434,20 +435,22 @@ export default function CardViewerPage() {
             )}
             {insidePos === "corner_flourish" && card.inside_image_url && (() => {
               const slots = (card as { accent_positions?: number[] }).accent_positions ?? defaultAccentSlots("corner_flourish");
+              const ao = (card as { accent_opacity?: number }).accent_opacity;
               return slots.map((slot) => (
                 <div key={slot} style={cornerStyle(slot)}>
-                  <img src={card.inside_image_url!} alt="" style={cornerImgStyle()} />
+                  <img src={card.inside_image_url!} alt="" style={cornerImgStyle(ao ?? undefined)} />
                 </div>
               ));
             })()}
             {insidePos === "frame" && card.inside_image_url && (
-              <img src={card.inside_image_url} alt="" style={frameImgStyle()} />
+              <img src={card.inside_image_url} alt="" style={frameImgStyle((card as { accent_opacity?: number }).accent_opacity ?? undefined)} />
             )}
             {insidePos === "top_edge_accent" && card.inside_image_url && (() => {
               const slots = (card as { accent_positions?: number[] }).accent_positions ?? defaultAccentSlots("top_edge_accent");
+              const ao = (card as { accent_opacity?: number }).accent_opacity;
               return slots.includes(2) ? (
                 <div style={edgeStyle(2)}>
-                  <img src={card.inside_image_url!} alt="" style={edgeImgStyle()} />
+                  <img src={card.inside_image_url!} alt="" style={edgeImgStyle(ao ?? undefined)} />
                 </div>
               ) : null;
             })()}

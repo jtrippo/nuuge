@@ -26,6 +26,7 @@ export default function SharedCardViewer({ cardJson, frontImageUrl, insideImageU
   const frontTextFont = card.front_text_font as string | undefined;
   const frontTextStyleChoice = ((card.front_text_style as string) || "plain_black") as TextStyleChoice;
   const insideImagePosition = (card.inside_image_position as string) || "top";
+  const ao = card.accent_opacity as number | undefined;
   const fontChoice = card.font as string | undefined;
   const ftScale = (card.ft_font_scale as number) ?? 1;
   const rawMsgScale = (card.msg_font_scale as number) ?? 0;
@@ -214,7 +215,7 @@ export default function SharedCardViewer({ cardJson, frontImageUrl, insideImageU
               const slots = (cardJson as { accent_positions?: number[] }).accent_positions ?? defaultAccentSlots("top_edge_accent");
               return slots.includes(1) ? (
                 <div style={edgeStyle(1)}>
-                  <img src={insideImageUrl} alt="" style={edgeImgStyle()} />
+                  <img src={insideImageUrl} alt="" style={edgeImgStyle(ao)} />
                 </div>
               ) : null;
             })()}
@@ -249,7 +250,7 @@ export default function SharedCardViewer({ cardJson, frontImageUrl, insideImageU
               const slots = (cardJson as { accent_positions?: number[] }).accent_positions ?? defaultAccentSlots("top_edge_accent");
               return slots.includes(2) ? (
                 <div style={edgeStyle(2)}>
-                  <img src={insideImageUrl} alt="" style={edgeImgStyle()} />
+                  <img src={insideImageUrl} alt="" style={edgeImgStyle(ao)} />
                 </div>
               ) : null;
             })()}
@@ -258,13 +259,13 @@ export default function SharedCardViewer({ cardJson, frontImageUrl, insideImageU
               const slots = (cardJson as { accent_positions?: number[] }).accent_positions ?? defaultAccentSlots("corner_flourish");
               return slots.map((slot: number) => (
                 <div key={slot} style={cornerStyle(slot)}>
-                  <img src={insideImageUrl} alt="" style={cornerImgStyle()} />
+                  <img src={insideImageUrl} alt="" style={cornerImgStyle(ao)} />
                 </div>
               ));
             })()}
             {/* Frame — portrait fill */}
             {insidePos === "frame" && insideImageUrl && (
-              <img src={insideImageUrl} alt="" style={frameImgStyle()} />
+              <img src={insideImageUrl} alt="" style={frameImgStyle(ao)} />
             )}
           </div>
 

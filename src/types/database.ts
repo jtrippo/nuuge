@@ -182,6 +182,8 @@ export interface Card {
   inside_image_position?: "top" | "middle" | "bottom" | "left" | "right" | "behind" | "corner_flourish" | "top_edge_accent" | "frame";
   /** Which positions are active for accent decorations (corners: 1-4, edges: 1-2) */
   accent_positions?: number[];
+  /** Opacity for inside decoration images (0-1, default varies by position type) */
+  accent_opacity?: number;
   /** Font style for the front cover text overlay */
   front_text_font?: string;
   /** Visual style of the front text overlay */

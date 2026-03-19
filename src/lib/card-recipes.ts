@@ -886,6 +886,15 @@ export const STYLE_RECIPES: StyleRecipe[] = [
     lineQuality: ["shapes defined by color contrast, not outlines", "crisp silhouettes", "occasional thin outline accents"],
     renderingNotes: ["bold flat areas of color with confident placement", "contemporary and fresh — like a modern book or magazine illustration"],
   },
+  {
+    id: "cut_paper",
+    label: "Cut Paper Folk",
+    desc: "Layered paper collage with geometric shapes and Scandinavian folk charm",
+    technique: ["physically layered cut paper collage — each shape is a separate piece of textured paper stacked on others with visible depth between layers", "CRITICAL: every major shape (bird wings, tree canopy, flower petals, animal body) MUST contain decorative geometric patterning inside it — cross-hatching, lattice grids, sunburst fans, diamond patterns, folk motifs carved into the paper cutout", "geometric simplified forms built from angular flat paper pieces in the style of Charley Harper minimal realism", "Scandinavian folk art decorative sensibility with repeating ornamental motifs"],
+    texture: ["each paper layer shows visible craft-paper fiber and grain texture", "subtle shadow or depth between stacked paper layers", "matte handmade paper finish — NOT smooth digital rendering"],
+    lineQuality: ["NO outlines and NO gradients — form comes from overlapping opaque paper cutouts with clean angular cut edges", "decorative geometric patterns WITHIN every major shape are the signature of this style — without them it is wrong", "shapes have internal detail and pattern complexity, NOT plain flat fills"],
+    renderingNotes: ["each paper cutout layer should be a distinct color — use variety, not monochrome", "decorative patterned fills inside major shapes are the defining feature — a plain flat bird silhouette is a failure of this style", "the result should look like a handcrafted paper collage you could build with scissors, patterned paper, and glue"],
+  },
 ];
 
 // ─── Helpers ─────────────────────────────────────────────────────────
@@ -1058,10 +1067,10 @@ export function buildRecipePrompt(opts: {
     `Atmosphere: ${pickRandom(mood.promptSnippets, 2).join(". ")}.`,
 
     // Style technique
-    `\nArt style: ${style.label} — ${pickRandom(style.technique, 2).join(", ")}.`,
+    `\nArt style: ${style.label} — ${pickRandom(style.technique, 3).join(", ")}.`,
     `Texture: ${pickRandom(style.texture, 2).join(", ")}.`,
-    `Line quality: ${pickRandom(style.lineQuality, 1).join(", ")}.`,
-    pickRandom(style.renderingNotes, 1).join(". ") + ".",
+    `Line quality: ${pickRandom(style.lineQuality, 2).join(". ")}.`,
+    pickRandom(style.renderingNotes, 2).join(". ") + ".",
 
     // Mood composition guidelines
     `\nComposition feel: ${pickRandom(mood.composition, 2).join(". ")}.`,

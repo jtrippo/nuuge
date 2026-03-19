@@ -206,14 +206,16 @@ export function cornerStyle(slot: number): CSSProperties {
   };
 }
 
-export function cornerImgStyle(): CSSProperties {
+export const DEFAULT_ACCENT_OPACITY = 0.55;
+export const DEFAULT_FRAME_OPACITY = 0.25;
+
+export function cornerImgStyle(opacity?: number): CSSProperties {
   return {
     width: "100%",
     height: "100%",
     objectFit: "contain" as const,
-    mixBlendMode: "multiply" as const,
+    opacity: opacity ?? DEFAULT_ACCENT_OPACITY,
     pointerEvents: "none" as const,
-    filter: "contrast(1.4) brightness(1.08)",
   };
 }
 
@@ -224,17 +226,16 @@ export function edgeStyle(slot: number): CSSProperties {
   return { width: "100%", height: "12%", flexShrink: 0 };
 }
 
-export function edgeImgStyle(): CSSProperties {
+export function edgeImgStyle(opacity?: number): CSSProperties {
   return {
     width: "100%",
     height: "100%",
     objectFit: "cover" as const,
-    mixBlendMode: "multiply" as const,
-    filter: "contrast(1.4) brightness(1.08)",
+    opacity: opacity ?? DEFAULT_ACCENT_OPACITY,
   };
 }
 
-export function frameImgStyle(): CSSProperties {
+export function frameImgStyle(opacity?: number): CSSProperties {
   return {
     position: "absolute" as const,
     top: 0,
@@ -242,8 +243,7 @@ export function frameImgStyle(): CSSProperties {
     width: "100%",
     height: "100%",
     objectFit: "fill" as const,
-    mixBlendMode: "multiply" as const,
+    opacity: opacity ?? DEFAULT_FRAME_OPACITY,
     pointerEvents: "none" as const,
-    filter: "contrast(1.4) brightness(1.08)",
   };
 }
