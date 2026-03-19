@@ -127,7 +127,7 @@ export default function PrintCardPage() {
       <div className="flex flex-col items-center justify-center h-screen" style={{ background: "var(--color-cream)" }}>
         <p className="text-warm-gray mb-4">Card not found.</p>
         <button onClick={() => router.push("/")} style={{ color: "var(--color-brand)" }} className="font-medium">
-          Back to Circle of People
+          Back to Home
         </button>
       </div>
     );
@@ -317,14 +317,20 @@ export default function PrintCardPage() {
         }
       `}</style>
 
-      <AppHeader title={card ? `${getDisplayOccasion(card)} card for ${recipient?.name ?? "recipient"}` : undefined}>
+      <AppHeader title={card ? (() => {
+        const ct = (card as Card & { card_type?: string }).card_type;
+        const qName = (card as Card & { quick_recipient_name?: string | null }).quick_recipient_name;
+        if (ct === "news") return `${getDisplayOccasion(card)} — Share a moment`;
+        if (ct === "beyond" && qName) return `${getDisplayOccasion(card)} card for ${qName}`;
+        return `${getDisplayOccasion(card)} card for ${recipient?.name ?? "recipient"}`;
+      })() : undefined}>
         <button
-          onClick={() => { saveSettings(); recipient ? router.push(`/recipients/${recipient.id}`) : router.push("/"); }}
+          onClick={() => { saveSettings(); const ct = (card as Card & { card_type?: string })?.card_type; (ct === "news" || ct === "beyond") ? router.push("/") : (recipient ? router.push(`/recipients/${recipient.id}`) : router.push("/")); }}
           className="flex items-center gap-1.5 px-4 py-1.5 rounded-full text-sm text-warm-gray hover:text-charcoal transition-colors"
           style={{ border: "1.5px solid var(--color-sage)" }}
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
-          {recipient?.name ?? "Circle of People"}
+          {recipient?.name ?? "Home"}
         </button>
         <button
           onClick={() => { saveSettings(); window.location.href = `/cards/edit/${cardId}`; }}
@@ -356,8 +362,8 @@ export default function PrintCardPage() {
             try {
               const profile = getUserProfile();
               const recipients = getRecipients();
-              const rName = recipient ? getRecipientDisplayName(card, recipient) : "";
-              const sName = recipient ? getSenderNames(card, recipient, recipients, profile) : (profile?.first_name || profile?.display_name || "");
+              const rName = getRecipientDisplayName(card, recipient);
+              const sName = getSenderNames(card, recipient, recipients, profile);
               const hydrated = await hydrateCardImages(card);
               const result = await shareCard(hydrated, rName, sName);
               if ("error" in result) { setShareError(result.error); }

@@ -88,7 +88,7 @@ export default function RecipientDetailPage() {
           onClick={() => router.push("/")}
           className="font-medium" style={{ color: "var(--color-brand)" }}
         >
-          Back to Circle of People
+          Back to Home
         </button>
       </div>
     );
@@ -246,7 +246,7 @@ export default function RecipientDetailPage() {
           style={{ border: "1.5px solid var(--color-sage)" }}
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
-          Circle of People
+          Home
         </button>
         <span className="font-medium text-charcoal text-sm">{recipient.name}</span>
         {editing ? (

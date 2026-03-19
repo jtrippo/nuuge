@@ -26,8 +26,13 @@ function ChooseRecipientContent() {
     <div className="min-h-screen" style={{ background: "var(--color-cream)" }}>
       <header className="sticky top-0 z-20 px-6 py-4 border-b bg-white/95 backdrop-blur" style={{ borderColor: "var(--color-light-gray)", boxShadow: "0 1px 3px rgba(0,0,0,0.04)" }}>
         <div className="max-w-2xl mx-auto flex items-center justify-between">
-          <Link href="/" className="text-warm-gray hover:text-charcoal text-sm font-medium">
-            ← Circle of People
+          <Link
+            href="/"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium"
+            style={{ color: "var(--color-brand)", border: "1.5px solid var(--color-sage)" }}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+            Home
           </Link>
         </div>
       </header>
@@ -58,6 +63,51 @@ function ChooseRecipientContent() {
           </div>
         ) : (
           <>
+            {/* Share a moment */}
+            <div
+              className="rounded-xl overflow-hidden mb-4"
+              style={{ border: "1px solid var(--color-light-gray)", background: "var(--color-white)" }}
+            >
+              <button
+                type="button"
+                onClick={() => router.push("/cards/create/share")}
+                className="w-full text-left px-5 py-4 flex items-center justify-between gap-3 hover:opacity-90 transition-opacity"
+                style={{ background: "var(--color-white)" }}
+              >
+                <div>
+                  <span className="font-medium text-charcoal block">Share a moment</span>
+                  <span className="text-sm text-warm-gray">Send to multiple people — announcements, thank yous, and more</span>
+                </div>
+                <span className="text-sm font-medium shrink-0" style={{ color: "var(--color-brand)" }}>
+                  Create shared →
+                </span>
+              </button>
+            </div>
+
+            {/* Someone beyond my circle */}
+            <div
+              className="rounded-xl overflow-hidden mb-6"
+              style={{ border: "1px solid var(--color-light-gray)", background: "var(--color-white)" }}
+            >
+              <button
+                type="button"
+                onClick={() => router.push("/cards/create/quick")}
+                className="w-full text-left px-5 py-4 flex items-center justify-between gap-3 hover:opacity-90 transition-opacity"
+                style={{ background: "var(--color-white)" }}
+              >
+                <div>
+                  <span className="font-medium text-charcoal block">Someone beyond my circle</span>
+                  <span className="text-sm text-warm-gray">Create a card without a full profile — just a name and a few details</span>
+                </div>
+                <span className="text-sm font-medium shrink-0" style={{ color: "var(--color-brand)" }}>
+                  Quick card →
+                </span>
+              </button>
+            </div>
+
+            <h2 className="text-lg font-semibold text-charcoal mb-3" style={{ fontFamily: "var(--font-heading)" }}>
+              For someone in your circle
+            </h2>
             <ul className="divide-y rounded-xl overflow-hidden" style={{ border: "1px solid var(--color-light-gray)", background: "var(--color-white)" }}>
               {recipients.map((r) => (
                 <li key={r.id}>
@@ -77,8 +127,8 @@ function ChooseRecipientContent() {
               ))}
             </ul>
             <p className="mt-6 text-center">
-              <Link href="/recipients/new" className="text-sm font-medium hover:opacity-80" style={{ color: "var(--color-brand)" }}>
-                Someone not in my circle? Add them first →
+              <Link href="/recipients/new" className="px-4 py-2 rounded-full text-sm font-medium hover:opacity-80 inline-block" style={{ color: "var(--color-brand)", border: "1.5px solid var(--color-sage)" }}>
+                + Add to circle
               </Link>
             </p>
           </>

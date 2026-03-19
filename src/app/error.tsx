@@ -49,7 +49,7 @@ export default function Error({
           onClick={() => (window.location.href = "/")}
           className="btn-primary px-5 py-2 rounded-full text-sm"
         >
-          Circle of People
+          Home
         </button>
       </div>
     </div>

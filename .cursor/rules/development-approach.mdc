@@ -1,0 +1,22 @@
+---
+description: Reference existing implementations before adding features; achieve parity by reuse
+alwaysApply: true
+---
+
+# Development Approach
+
+## When building a new path (flow) that parallels an existing one
+
+**Default: treat the existing path as the design template. Achieve parity by reuse, not by documenting gaps first.**
+
+1. **Inspect the existing implementation before writing any new flow code** — Read the reference flow (e.g. Create/Circle at `src/app/cards/create/[recipientId]/page.tsx`) end-to-end. Understand: step order, state shape, API usage, prompt building, UX copy, and UI patterns.
+
+2. **Reuse by default** — New paths should take on the *exact same characteristics* as the reference path: same UX (steps, inputs, buttons, previews), same prompt-building logic, same APIs, same state structures. Copy and adapt; do not invent parallel implementations.
+
+3. **Parity first, divergence only when required** — Only deviate from the reference when the use case explicitly demands it (e.g. news category vs occasion). Do not document gaps and defer implementation — implement alignment from the start.
+
+4. **One reference, many paths** — When in doubt, the most complete path (e.g. Circle) is the canonical design. New paths should mirror it unless there is a clear, stated reason not to.
+
+## When adding a feature that exists in one path but not another
+
+- Implement by porting from the path that has it. Do not design from scratch.

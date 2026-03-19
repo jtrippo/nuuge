@@ -1,4 +1,5 @@
 import type { Card, Recipient, UserProfile } from "@/types/database";
+import { NEWS_RECIPIENT_ID } from "@/types/database";
 
 export const USER_KEY = "__user__" as const;
 export const MAX_SIGNERS = 6;
@@ -52,10 +53,13 @@ export function getDefaultUserDisplayName(profile: Partial<UserProfile> | null):
 /**
  * Recipient display name for envelope center.
  * Uses recipient_display_name override if set; else nickname → first_name → display_name → name.
+ * For news/shared-moment cards (no recipient), returns "To someone special".
  */
 export function getRecipientDisplayName(card: Card, recipient: Recipient | null): string {
   const override = (card as { recipient_display_name?: string | null }).recipient_display_name?.trim();
   if (override) return override;
+  const isNews = (card as { card_type?: string }).card_type === "news" || card.recipient_id === NEWS_RECIPIENT_ID;
+  if (isNews || !recipient) return "To someone special";
   return getDefaultDisplayName(recipient);
 }
 
@@ -63,10 +67,11 @@ export function getRecipientDisplayName(card: Card, recipient: Recipient | null)
  * Get the formatted sender string for a card, for envelope and share.
  * Uses signer_group_name if set; else signer_display_overrides + signer_recipient_ids (or co_signed_with legacy).
  * Returns string with \n for envelope line breaks when 3+ names.
+ * For news cards, recipient may be null (only user signs).
  */
 export function getSenderNames(
   card: Card,
-  recipient: Recipient,
+  recipient: Recipient | null,
   allRecipients: Recipient[],
   userProfile: Partial<UserProfile> | null
 ): string {
@@ -105,10 +110,11 @@ export function getSenderNames(
 /**
  * Get signer names as array for pre-filling the closing line.
  * Uses overrides when present. Does not apply group name (closing uses individual names).
+ * For news cards, recipient may be null.
  */
 export function getSignerNameList(
   card: Card,
-  recipient: Recipient,
+  recipient: Recipient | null,
   allRecipients: Recipient[],
   userProfile: Partial<UserProfile> | null
 ): string[] {

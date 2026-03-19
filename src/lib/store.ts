@@ -1,4 +1,5 @@
 import type { UserProfile, Recipient, Card, ConversationMessage } from "@/types/database";
+import { NEWS_RECIPIENT_ID } from "@/types/database";
 import { saveImage, getImage, getAllImages, isLargeDataUrl } from "./image-store";
 import { getAllUsage, putUsageEvent, type UsageEvent } from "./usage-store";
 
@@ -87,6 +88,16 @@ export function getCardsForRecipient(recipientId: string): Card[] {
   );
 }
 
+/** Cards created via "Share a moment" (sender-centric, no specific recipient). */
+export function getSharedMomentCards(): Card[] {
+  return getCards().filter((c) => (c as Card & { card_type?: string }).card_type === "news");
+}
+
+/** Cards created for people beyond the circle (quick profile, no persistent Recipient). */
+export function getBeyondCircleCards(): Card[] {
+  return getCards().filter((c) => (c as Card & { card_type?: string }).card_type === "beyond");
+}
+
 /** Per-recipient: which cards are expanded in the profile. Persisted so it survives navigation. */
 export function getCardExpandedState(recipientId: string): Record<string, boolean> {
   if (!isBrowser()) return {};
@@ -108,14 +119,19 @@ export function setCardExpanded(
   );
 }
 
-export function saveCard(card: Partial<Card>) {
+export async function saveCard(card: Partial<Card>) {
   if (!isBrowser()) return;
   const existing = getCards();
   const id = card.id || crypto.randomUUID();
+  const isNews = (card as Card & { card_type?: string }).card_type === "news";
+  const isBeyond = (card as Card & { card_type?: string }).card_type === "beyond";
+  const recipientId = isNews ? NEWS_RECIPIENT_ID : (card.recipient_id || "");
+  const recipientIds = (isNews || isBeyond) ? [] : (card.recipient_ids || [recipientId].filter(Boolean));
   const full = {
     ...card,
     id,
-    recipient_ids: card.recipient_ids || [card.recipient_id || ""],
+    recipient_id: recipientId,
+    recipient_ids: recipientIds,
     created_at: card.created_at || new Date().toISOString(),
   };
 
@@ -124,17 +140,22 @@ export function saveCard(card: Partial<Card>) {
     "inside_image_url",
   ];
   const toStore = { ...full } as Record<string, unknown>;
+  const imageSaves: Promise<void>[] = [];
 
   for (const field of imageFields) {
     const val = toStore[field] as string | null | undefined;
     if (isLargeDataUrl(val)) {
       const imgKey = `card_${id}_${field}`;
-      saveImage(imgKey, val!).catch((err) =>
-        console.error(`Failed to save ${field} to IndexedDB:`, err)
+      imageSaves.push(
+        saveImage(imgKey, val!).catch((err) =>
+          console.error(`Failed to save ${field} to IndexedDB:`, err)
+        )
       );
       toStore[field] = `idb:${imgKey}`;
     }
   }
+
+  await Promise.all(imageSaves);
 
   const idx = existing.findIndex((c) => c.id === id);
   if (idx >= 0) {

@@ -275,7 +275,7 @@ export default function OnboardingPage() {
             onClick={() => router.push("/")}
             className="btn-secondary"
           >
-            Go to Circle of People
+            Go to Home
           </button>
         </div>
       </div>

@@ -28,6 +28,7 @@ import { fontCSS, textStyleCSS, FONT_OPTIONS as CARD_FONT_OPTIONS, isAccentPosit
 import type { FontChoice, TextStyleChoice } from "@/lib/card-ui-helpers";
 import { saveImage, getImage } from "@/lib/image-store";
 import { logApiCall, tagSessionWithCardId } from "@/lib/usage-store";
+import { loadQuickRecipient, clearQuickRecipient, type QuickRecipientData } from "@/app/cards/create/quick/page";
 import AppHeader from "@/components/AppHeader";
 import {
   OCCASION_CATEGORIES,
@@ -240,6 +241,8 @@ function CreateCardPage() {
   const startStep = searchParams.get("startStep") as Step | null;
   const presetOccasion = searchParams.get("occasion");
 
+  const isQuickCard = recipientId === "__quick__";
+  const [quickData, setQuickData] = useState<QuickRecipientData | null>(null);
   const [profile, setProfile] = useState<Partial<UserProfile> | null>(null);
   const [recipient, setRecipient] = useState<Recipient | null>(null);
   const [allRecipients, setAllRecipients] = useState<Recipient[]>([]);
@@ -322,8 +325,24 @@ function CreateCardPage() {
     setProfile(getUserProfile());
     const all = getRecipients();
     setAllRecipients(all);
-    const found = all.find((r) => r.id === recipientId);
-    if (found) setRecipient(found);
+    let found: Recipient | undefined;
+    if (isQuickCard) {
+      const qd = loadQuickRecipient();
+      if (!qd) { router.push("/cards/create/quick"); return; }
+      setQuickData(qd);
+      found = {
+        id: "__quick__",
+        name: qd.name,
+        personality: qd.traits.join(", "),
+        relationship_type: qd.relationship || "other",
+        setup_complete: true,
+      } as unknown as Recipient;
+      setRecipient(found);
+      setRecipientDisplayNameOverride(qd.name);
+    } else {
+      found = all.find((r) => r.id === recipientId);
+      if (found) setRecipient(found);
+    }
 
     if (editCardId) {
       const existing = getCardById(editCardId);
@@ -469,7 +488,7 @@ function CreateCardPage() {
           onClick={() => router.push("/")}
           className="btn-link"
         >
-          Back to Circle of People
+          Back to Home
         </button>
       </div>
     );
@@ -1084,14 +1103,26 @@ Humor tolerance: ${r.humor_tolerance || "Not specified"}`.replace(/\n{2,}/g, "\n
     setStep("front_text");
   }
 
-  function handleSave(options?: { deliveryMethodOverride?: "digital" | "print_at_home" | "mail" }) {
+  async function handleSave(options?: { deliveryMethodOverride?: "digital" | "print_at_home" | "mail" }) {
     if (!editedMessage || !recipient) return;
     const method = options?.deliveryMethodOverride ?? deliveryMethod;
-    const fullText = `${editedMessage.greeting}\n\n${editedMessage.body}\n\n${editedMessage.closing}`;
+    const overriddenName = signerDisplayOverrides[USER_KEY]?.trim();
+    const profileName = profile?.display_name || profile?.first_name || "";
+    let closingText = editedMessage.closing;
+    if (overriddenName && profileName && overriddenName !== profileName && closingText.includes(profileName)) {
+      closingText = closingText.replace(new RegExp(profileName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g"), overriddenName);
+    }
+    const fullText = `${editedMessage.greeting}\n\n${editedMessage.body}\n\n${closingText}`;
     const cardData: Partial<import("@/types/database").Card> = {
       user_id: "local",
-      recipient_id: recipient.id,
-      recipient_ids: [recipient.id, ...sharedWith],
+      recipient_id: isQuickCard ? "__quick__" : recipient.id,
+      recipient_ids: isQuickCard ? [] : [recipient.id, ...sharedWith],
+      ...(isQuickCard && quickData ? {
+        card_type: "beyond" as const,
+        quick_recipient_name: quickData.name,
+        quick_recipient_relationship: quickData.relationship || null,
+        quick_recipient_traits: quickData.traits.length ? quickData.traits : null,
+      } : {}),
       occasion,
       occasion_custom: (occasion === OTHER_OCCASION_VALUE && occasionCustom.trim()) ? occasionCustom.trim() : null,
       message_text: fullText,
@@ -1137,7 +1168,7 @@ Humor tolerance: ${r.humor_tolerance || "Not specified"}`.replace(/\n{2,}/g, "\n
         return;
       }
     } else {
-      const saved = saveCard(cardData) as { id: string } | undefined;
+      const saved = await saveCard(cardData) as { id: string } | undefined;
       if (saved) {
         setSavedCardId(saved.id);
         tagSessionWithCardId(sessionIdRef.current, saved.id);
@@ -1150,6 +1181,7 @@ Humor tolerance: ${r.humor_tolerance || "Not specified"}`.replace(/\n{2,}/g, "\n
       }
     }
     clearDraft(recipientId);
+    if (isQuickCard) clearQuickRecipient();
     setStep("saved");
   }
 
@@ -1167,7 +1199,7 @@ Humor tolerance: ${r.humor_tolerance || "Not specified"}`.replace(/\n{2,}/g, "\n
             style={{ color: "var(--color-brand)", border: "1.5px solid var(--color-sage)" }}
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
-            {editMode ? "Back to edit" : "Circle of People"}
+            {editMode ? "Back to edit" : "Home"}
           </button>
           <h1
             className="absolute inset-0 flex items-center justify-center text-lg font-semibold pointer-events-none"
@@ -1355,7 +1387,7 @@ Humor tolerance: ${r.humor_tolerance || "Not specified"}`.replace(/\n{2,}/g, "\n
                 <div>
                   <h2 className="text-2xl font-bold text-charcoal mb-4">What tone should this card have?</h2>
                   <div className="flex flex-wrap gap-2">
-                    {((includeFaithBased || occasion === "Apology")
+                    {((includeFaithBased || ["Apology", "Sympathy", "Get Well"].includes(occasion))
                       ? TONES.filter((t) => !["Funny and playful", "Sarcastic and edgy"].includes(t))
                       : TONES
                     ).map((t) => (
@@ -3466,7 +3498,7 @@ Humor tolerance: ${r.humor_tolerance || "Not specified"}`.replace(/\n{2,}/g, "\n
                 onClick={() => router.push("/")}
                 className="btn-secondary"
               >
-                Back to Circle of People
+                Back to Home
               </button>
             </div>
           </div>

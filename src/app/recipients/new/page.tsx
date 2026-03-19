@@ -414,7 +414,7 @@ function NewRecipientPageInner() {
             onClick={() => router.push("/")}
             className="btn-secondary"
           >
-            Go to Circle of People
+            Go to Home
           </button>
         </div>
       </div>
@@ -598,7 +598,7 @@ function NewRecipientPageInner() {
                 onClick={() => router.push("/")}
                 className="text-sm text-warm-gray hover:text-charcoal px-4 py-2"
               >
-                &larr; Circle of People
+                &larr; Home
               </button>
               <button
                 onClick={() => advanceStep("personality")}

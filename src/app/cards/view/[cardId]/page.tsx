@@ -37,14 +37,28 @@ export default function CardViewerPage() {
     if (found) {
       const recipients = getRecipients();
       const r = recipients.find((rec) => rec.id === found.recipient_id);
-      if (r) {
-        setRecipientDisplayName(getRecipientDisplayName(found, r));
-        setRecipientId(r.id);
-        setRecipientName(r.name || r.display_name || r.first_name || "");
+      const cardType = (found as { card_type?: string }).card_type;
+      const isNews = cardType === "news";
+      const isBeyond = cardType === "beyond";
+      const envLabel = (found as { envelope_label?: string | null }).envelope_label;
+      const quickName = (found as { quick_recipient_name?: string | null }).quick_recipient_name;
+      if (isNews && envLabel?.trim()) {
+        setRecipientDisplayName(envLabel.trim());
+        setRecipientName("");
+      } else if (isBeyond && quickName?.trim()) {
+        setRecipientDisplayName(quickName.trim());
+        setRecipientName("");
+      } else {
+        setRecipientDisplayName(getRecipientDisplayName(found, r ?? null));
+        if (r) {
+          setRecipientId(r.id);
+          setRecipientName(r.name || r.display_name || r.first_name || "");
+        } else {
+          setRecipientName(isNews || isBeyond ? "" : "");
+        }
       }
       const profile = getUserProfile();
-      const names = r ? getSenderNames(found, r, recipients, profile) : (profile?.first_name || profile?.display_name || "");
-      setSenderNames(names);
+      setSenderNames(getSenderNames(found, r ?? null, recipients, profile));
       hydrateCardImages(found).then((hydrated) => setCard(hydrated));
     }
   }, [cardId]);
@@ -485,7 +499,7 @@ export default function CardViewerPage() {
                 style={{ border: "1.5px solid var(--color-sage)" }}
               >
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
-                {recipientName || "Circle of People"}
+                {recipientName || "Home"}
               </button>
             </div>
             {shareUrl && (
@@ -591,7 +605,7 @@ export default function CardViewerPage() {
                 style={{ border: "1.5px solid var(--color-sage)" }}
               >
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
-                {recipientName || "Circle of People"}
+                {recipientName || "Home"}
               </button>
             </div>
             {shareUrl && (

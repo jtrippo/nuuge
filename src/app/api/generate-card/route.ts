@@ -4,6 +4,17 @@ import { checkRateLimit } from "@/lib/rate-limit";
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
+/** Occasions/categories where humor and playfulness are inappropriate. Use sincere variants only. */
+const GENTLE_OCCASION_LABELS = [
+  "Sympathy",
+  "Get Well",
+  "Apology",
+  "Loss of a pet",
+  "Loss of a loved one",
+  "Health update",
+  "Difficult transition",
+];
+
 export async function POST(req: NextRequest) {
   if (!process.env.OPENAI_API_KEY?.trim()) {
     return NextResponse.json(
@@ -33,28 +44,43 @@ export async function POST(req: NextRequest) {
       relationshipType,
       regenerationCount,
       rejectedMessages,
+      mode = "circle",
+      newsCategory,
+      newsDescription,
     }: {
       senderContext: string;
-      recipientContext: string;
-      occasion: string;
+      recipientContext?: string;
+      occasion?: string;
       tone: string;
       includeFaithBased?: boolean;
-      additionalNotes: string;
-      cardHistory: string[];
-      coSignWith: string | null;
+      additionalNotes?: string;
+      cardHistory?: string[];
+      coSignWith?: string | null;
       relationshipType?: string;
       regenerationCount?: number;
       rejectedMessages?: string[];
+      mode?: "circle" | "news";
+      newsCategory?: string;
+      newsDescription?: string;
     } = body;
 
+    const isNews = mode === "news";
+    const effectiveOccasion = isNews ? (newsCategory || "Life update") : (occasion || "");
+    const isGentleOccasion =
+      includeFaithBased ||
+      GENTLE_OCCASION_LABELS.some((l) => effectiveOccasion.trim().toLowerCase() === l.toLowerCase());
+    const effectiveNotes = additionalNotes ?? "";
+    const effectiveHistory = cardHistory ?? [];
+    const effectiveRejected = rejectedMessages ?? [];
+
     const historySection =
-      cardHistory.length > 0
-        ? `\nPREVIOUS CARDS SENT TO THIS PERSON (do NOT repeat or closely resemble these):\n${cardHistory.map((c, i) => `${i + 1}. ${c}`).join("\n")}`
+      effectiveHistory.length > 0
+        ? `\nPREVIOUS CARDS SENT TO THIS PERSON (do NOT repeat or closely resemble these):\n${effectiveHistory.map((c, i) => `${i + 1}. ${c}`).join("\n")}`
         : "";
 
     const rejectedSection =
-      rejectedMessages && rejectedMessages.length > 0
-        ? `\nREJECTED MESSAGES (the sender already saw these and didn't like them — write something DIFFERENT, using different details and angles):\n${rejectedMessages.map((m, i) => `${i + 1}. ${m}`).join("\n")}\n`
+      effectiveRejected.length > 0
+        ? `\nREJECTED MESSAGES (the sender already saw these and didn't like them — write something DIFFERENT, using different details and angles):\n${effectiveRejected.map((m, i) => `${i + 1}. ${m}`).join("\n")}\n`
         : "";
 
     const rel = (relationshipType || "").toLowerCase();
@@ -67,7 +93,15 @@ export async function POST(req: NextRequest) {
       /partner|spouse|wife|husband|boyfriend|girlfriend|fiancé|fiancée|significant other|lover/i.test(rel);
 
     let relationshipGuardrail = "";
-    if (isFamilyChild) {
+    if (isNews) {
+      relationshipGuardrail = `
+SHARE-A-MOMENT CARD (sender-centric):
+This card is about the SENDER's news/event — not about a specific recipient. The sender is sharing their story with multiple people (announcement, thank you, life update, etc.).
+- Frame the message as "I wanted to share..." or "We wanted to let you know..." — from the sender's perspective
+- Do NOT assume or reference a specific recipient (no "you", "your birthday", etc. — unless it's a thank-you where "you" is appropriate)
+- Match the tone to the news category: celebratory for joyful announcements, gentle for difficult news, warm for thank yous
+- Sign off with just the sender's name (single signer; no co-signing for this type)`;
+    } else if (isFamilyChild) {
       relationshipGuardrail = `
 RELATIONSHIP GUARDRAIL — THIS IS CRITICAL:
 The recipient is the sender's ${relationshipType}. This is a family relationship with a younger family member.
@@ -89,7 +123,17 @@ The recipient is the sender's ${relationshipType}. Keep the tone appropriate for
 
     const regenCount = regenerationCount ?? 0;
     let contextEmphasis = "";
-    if (regenCount === 0) {
+    if (isNews) {
+      if (regenCount === 0) {
+        contextEmphasis = `Draw on the sender's profile and the news description (${newsDescription || "general update"}) — weave in the sender's voice and the specifics of their story.`;
+      } else if (regenCount === 1) {
+        contextEmphasis = `The sender didn't like the first batch. Use DIFFERENT profile details than the rejected messages. If any profile details were removed by the sender, do NOT reference them at all. Put more weight on the occasion and tone.`;
+      } else if (regenCount === 2) {
+        contextEmphasis = `The sender has regenerated and is reducing specific interests/factual details. Use FEWER interests and concrete details from the profile — but KEEP matching the REQUESTED TONE and the sender's personality/humor style. Focus on occasion and tone; only lightly reference interests or hobbies.`;
+      } else {
+        contextEmphasis = `The sender has regenerated ${regenCount} times. Focus primarily on OCCASION and TONE. You may write something more universal and minimal; profile details (including personality/humor) are now de-emphasized. Still match the requested tone where possible. Try a simple, honest, human message — a short punchy observation or heartfelt universal sentiment. Less is more.`;
+      }
+    } else if (regenCount === 0) {
       contextEmphasis = `Draw on the recipient's profile details shown above — weave in specifics naturally without over-indexing on any single interest.`;
     } else if (regenCount === 1) {
       contextEmphasis = `The sender didn't like the first batch. Use DIFFERENT profile details than the rejected messages. If any profile details were removed by the sender, do NOT reference them at all. Put more weight on the occasion and tone.`;
@@ -109,40 +153,62 @@ The sender chose to include faith-based or spiritual themes. You MUST:
 - All 3 options should feel appropriate for a faith-based card; vary the angle (e.g. blessing, comfort, gratitude, hope) but stay within that range.`
       : "";
 
+    const gentleModifier =
+      isGentleOccasion && !includeFaithBased
+        ? `
+GENTLE OCCASION MODIFIER:
+This is a sympathy, get-well, apology, or difficult-news card. You MUST:
+- Do NOT use humor, sarcasm, or playful wit. Keep the tone sincere, warm, and appropriate for the occasion.
+- Energy should be comforting, supportive, or reflective — never flippant or edgy.
+- All 3 options should feel appropriate; vary the angle (e.g. direct support, warmth, quiet reflection) but stay within that range.`
+        : "";
+
     const optionsInstruction = includeFaithBased
       ? `Make the 3 options meaningfully different from each other, but ALL must stay sincere and faith-appropriate (no humor or sarcasm):
 - Option 1: A straightforward, heartfelt version — warm and personal
 - Option 2: A version that emphasizes blessing, gratitude, or hope
 - Option 3: Another sincere angle — perhaps comfort, peace, or connection — still respectful and non-denominational`
-      : `Make the 3 options meaningfully different from each other:
+      : isGentleOccasion
+        ? `Make the 3 options meaningfully different from each other, but ALL must stay sincere (no humor, sarcasm, or playfulness):
+- Option 1: A straightforward, direct version — clear and gentle
+- Option 2: A version that adds warmth or comforting support
+- Option 3: Another sincere angle — perhaps reflection, peace, or connection`
+        : isNews
+          ? `Make the 3 options meaningfully different from each other:
+- Option 1: The most straightforward, heartfelt version — clear and direct
+- Option 2: A version that adds warmth or a personal touch
+- Option 3: A creative or unexpected angle — perhaps a memorable detail or a gentle twist`
+          : `Make the 3 options meaningfully different from each other:
 - Option 1: The most straightforward, heartfelt version
 - Option 2: A version that leans into humor or playfulness (using the recipient's interests or personality)
 - Option 3: A creative or unexpected angle — maybe a reference to a shared interest, an inside-joke-style observation, or a clever twist`;
 
-    const systemPrompt = `You are Nuuge's card writing engine. Your job is to generate personal, specific greeting card messages based on deep context about the sender and recipient.
+    const recipientSection = isNews
+      ? `\nNEWS CATEGORY: ${newsCategory || "Life update"}\nSENDER'S STORY / DESCRIPTION: ${newsDescription || "General life update to share with others"}\n\n(No specific recipient — this card will be shared with multiple people.)`
+      : `\nABOUT THE RECIPIENT:\n${recipientContext || "No recipient context"}${historySection}`;
+
+    const systemPrompt = `You are Nuuge's card writing engine. Your job is to generate personal, specific greeting card messages based on deep context about the sender${isNews ? " and their news/event" : " and recipient"}.
 
 ABOUT THE SENDER:
 ${senderContext}
-
-ABOUT THE RECIPIENT:
-${recipientContext}
-${historySection}
+${recipientSection}
 ${rejectedSection}
-OCCASION: ${occasion}
+OCCASION/NEWS: ${effectiveOccasion}
 REQUESTED TONE: ${tone}
-${additionalNotes ? `ADDITIONAL NOTES FROM SENDER: ${additionalNotes}` : ""}
-${coSignWith ? `CO-SIGNING: This card is from BOTH the sender and ${coSignWith} together. Throughout the entire message, use "we", "our", and "us" instead of "I", "my", and "me". The greeting, body, and closing should all reflect that two people are writing — e.g. "We love you", "We're so proud", "Our favorite memory". Sign off with both names.` : ""}
+${effectiveNotes ? `ADDITIONAL NOTES FROM SENDER: ${effectiveNotes}` : ""}
+${!isNews && coSignWith ? `CO-SIGNING: This card is from BOTH the sender and ${coSignWith} together. Throughout the entire message, use "we", "our", and "us" instead of "I", "my", and "me". The greeting, body, and closing should all reflect that two people are writing — e.g. "We love you", "We're so proud", "Our favorite memory". Sign off with both names.` : ""}
 ${relationshipGuardrail}
 ${faithModifier}
+${gentleModifier}
 
 CONTEXT EMPHASIS: ${contextEmphasis}
 
 YOUR TASK:
 Generate exactly 3 different card message options. Each should:
 - Sound like it was written by the sender, not by an AI
-- Reference specific details about the recipient — but spread across DIFFERENT details, not all repeating the same one
+${isNews ? "- Reflect the sender's news/event and their voice — spread across DIFFERENT angles, not all repeating the same one" : "- Reference specific details about the recipient — but spread across DIFFERENT details, not all repeating the same one"}
 - Match the requested tone
-- Be appropriate for both the occasion AND the relationship type
+- Be appropriate for the occasion/news category
 - Feel personal and specific — never generic
 
 Each message should have:
@@ -152,7 +218,7 @@ Each message should have:
 
 ${optionsInstruction}
 
-Each option should draw from DIFFERENT details in the profile. If option 1 mentions dancing, options 2 and 3 should NOT mention dancing.
+${isNews ? "Each option should take a DIFFERENT angle on the sender's news. Vary the framing and focus." : "Each option should draw from DIFFERENT details in the profile. If option 1 mentions dancing, options 2 and 3 should NOT mention dancing."}
 
 Keep messages concise. Real card messages are not essays.
 
@@ -160,19 +226,19 @@ Respond with ONLY valid JSON in this exact format:
 {
   "messages": [
     {
-      "label": "Heartfelt",
+      "label": "${isGentleOccasion ? "Direct" : "Heartfelt"}",
       "greeting": "the greeting line",
       "body": "the message body",
       "closing": "closing phrase,\\nSender Name"
     },
     {
-      "label": "Playful",
+      "label": "${isGentleOccasion ? "Warm" : "Playful"}",
       "greeting": "...",
       "body": "...",
       "closing": "..."
     },
     {
-      "label": "Creative",
+      "label": "${isGentleOccasion ? "Reflective" : "Creative"}",
       "greeting": "...",
       "body": "...",
       "closing": "..."

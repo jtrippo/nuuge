@@ -20,7 +20,7 @@ Nuuge is a greeting-card app (Next.js, Vercel). Users create personalized AI-gen
 | `src/app/cards/print/[cardId]/page.tsx` | Print preview, text size dropdown, print-to-PDF. Uses `cqw` font sizing, `container-type: inline-size` on `.card-panel`. |
 | `src/app/cards/view/[cardId]/page.tsx` | E-card view (tap to open). Same `cqw` + percentage padding as print. |
 | `src/app/share/[shareId]/SharedCardViewer.tsx` | Shared link viewer. Same layout/sizing as view page. |
-| `src/app/cards/edit/[cardId]/page.tsx` | Edit existing cards. Has preview (uses different sizing — see backlog). Navigation buttons call `handleSave()` before routing. |
+| `src/app/cards/edit/[cardId]/page.tsx` | Edit existing cards. Preview uses same cqw + percentage padding as print/view. Navigation buttons call `handleSave()` before routing. |
 | `src/app/cards/create/[recipientId]/page.tsx` | Card creation wizard. Saves `msg_font_scale`, `ft_font_scale`, etc. on completion. |
 | `src/lib/card-ui-helpers.ts` | Shared: `messageSizing()`, `msgSizeOptions()`, `fontCSS()`, `maxMsgScale()`, accent helpers. |
 | `LAUNCH_ARCHITECTURE.md` | Long-term launch plan: auth, billing, print fulfillment, migration path. |
@@ -58,8 +58,9 @@ Planned improvements not yet built:
 1. **My News** — Sender-centric announcement cards (one card, multiple recipients)
 2. **Image Library** — Reuse AI-generated images across cards
 3. **Occasion Picker redesign** — Cleaner layout, less pill clutter
-4. **Edit page preview** — Currently uses hardcoded `clamp()` font sizes, doesn’t respect Text size dropdown; could be updated to match print/view
-5. **Cross-account card copy** — Preserve decoration metadata (low priority)
+4. **Cross-account card copy** — Preserve decoration metadata (low priority)
+
+**Recently completed:** Landing page account menu (gear icon → Restore backup, Circle of People, My profile, Usage stats); Edit page preview (cqw + remToCqw, matches print/view)
 
 ---
 

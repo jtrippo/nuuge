@@ -94,7 +94,7 @@ export default function BackupPage() {
           onClick={() => router.push("/")}
           className="text-sm text-warm-gray hover:text-charcoal mb-8 transition-colors"
         >
-          &larr; Circle of People
+          &larr; Home
         </button>
 
         <h1 className="text-2xl font-semibold text-charcoal mb-2">

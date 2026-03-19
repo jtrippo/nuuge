@@ -3,12 +3,14 @@
 import { useEffect, useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import AppHeader from "@/components/AppHeader";
-import { getUserProfile, getRecipients, getCardsForRecipient, getCards } from "@/lib/store";
+import { getUserProfile, getRecipients, getCardsForRecipient, getCards, getSharedMomentCards, getBeyondCircleCards, hydrateCardImages } from "@/lib/store";
 import type { UserProfile, Recipient, Card } from "@/types/database";
 import { getUsageStats, type UsageStats } from "@/lib/usage-store";
 import { HOLIDAYS_2026 } from "@/lib/holidays-2026";
+import { NEWS_CATEGORIES } from "@/lib/news-categories";
 
 const DRAFT_KEY_PREFIX = "nuuge_card_draft_";
+const SHARE_DRAFT_KEY = "nuuge_share_draft";
 
 interface DraftSummary {
   key: string;
@@ -43,6 +45,24 @@ function getAllDrafts(recipients: Recipient[]): DraftSummary[] {
     } catch { /* ignore corrupt entries */ }
   }
   return drafts.sort((a, b) => b.updatedAt - a.updatedAt);
+}
+
+function getShareDraftSummary(): { key: string; occasion: string; step: string; updatedAt: number } | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = localStorage.getItem(SHARE_DRAFT_KEY);
+    if (!raw) return null;
+    const d = JSON.parse(raw);
+    const occasion = NEWS_CATEGORIES.find((c) => c.id === d.newsCategory)?.label ?? d.newsCategory ?? "Share a moment";
+    return {
+      key: SHARE_DRAFT_KEY,
+      occasion,
+      step: d.step ?? "",
+      updatedAt: d.updatedAt ?? 0,
+    };
+  } catch {
+    return null;
+  }
 }
 
 function cleanupStaleDrafts(recipients: Recipient[], allCards: Card[]): number {
@@ -196,6 +216,7 @@ export default function Dashboard() {
   const [usageStats, setUsageStats] = useState<UsageStats | null>(null);
   const [showUsage, setShowUsage] = useState(false);
   const [drafts, setDrafts] = useState<DraftSummary[]>([]);
+  const [shareDraft, setShareDraft] = useState<{ key: string; occasion: string; step: string; updatedAt: number } | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const [dataBannerDismissed, setDataBannerDismissed] = useState(true);
@@ -218,6 +239,7 @@ export default function Dashboard() {
 
     cleanupStaleDrafts(r, c);
     setDrafts(getAllDrafts(r));
+    setShareDraft(getShareDraftSummary());
 
     if (typeof window !== "undefined") {
       if (new URLSearchParams(window.location.search).has("landing")) {
@@ -723,32 +745,81 @@ export default function Dashboard() {
             Create something they&apos;ll{" "}
             <span className="italic" style={{ color: "var(--color-brand)" }}>actually keep.</span>
           </h2>
-          <p className="text-lg text-warm-gray mb-8 leading-relaxed">
+          <p className="text-lg text-warm-gray leading-relaxed">
             Pick someone and write a card only you could write — we&apos;ll help with the rest.
           </p>
-          <div className="flex flex-wrap items-center gap-4">
-            {recipients.length === 0 ? (
-              <button
-                onClick={() => router.push("/recipients/new")}
-                className="btn-primary text-lg px-8 py-3.5"
-              >
-                Add your first friend
-              </button>
-            ) : (
-              <>
+        </div>
+      </section>
+
+      {/* Two-card navigation — Circle of People + Moments Shared */}
+      <section className="w-full px-6 py-10" style={{ background: "var(--color-cream)", borderBottom: "1px solid var(--color-sage-light)" }}>
+        <div className="max-w-4xl mx-auto grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div
+            className="rounded-xl p-6 transition-shadow hover:shadow-md"
+            style={{ background: "var(--color-white)", border: "1px solid var(--color-sage-light)" }}
+          >
+            <h3 className="text-lg font-semibold text-charcoal mb-1" style={{ fontFamily: "var(--font-heading)" }}>
+              Circle of People
+            </h3>
+            <p className="text-sm text-warm-gray mb-4">
+              {recipients.length === 0 ? "No one in your circle yet." : `${recipients.length} ${recipients.length === 1 ? "person" : "people"} in your circle`}
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {recipients.length > 0 && (
                 <button
                   onClick={() => router.push("/cards/create/choose")}
-                  className="btn-primary text-lg px-8 py-3.5"
+                  className="btn-primary text-sm px-4 py-2"
                 >
                   Create a card
                 </button>
-                <button
-                  onClick={() => router.push("/recipients/new")}
-                  className="btn-secondary text-base px-6 py-3"
-                >
-                  Add a friend
-                </button>
-              </>
+              )}
+              <button
+                onClick={() => router.push("/recipients/new")}
+                className="btn-secondary text-sm px-4 py-2"
+              >
+                + Add a friend
+              </button>
+            </div>
+            {recipients.length > 0 && (
+              <button
+                onClick={() => {
+                  const el = document.getElementById("circle-section");
+                  if (el) el.scrollIntoView({ behavior: "smooth" });
+                }}
+                className="mt-3 text-sm font-medium"
+                style={{ color: "var(--color-brand)" }}
+              >
+                View circle &rarr;
+              </button>
+            )}
+          </div>
+          <div
+            className="rounded-xl p-6 transition-shadow hover:shadow-md"
+            style={{ background: "var(--color-white)", border: "1px solid var(--color-sage-light)" }}
+          >
+            <h3 className="text-lg font-semibold text-charcoal mb-1" style={{ fontFamily: "var(--font-heading)" }}>
+              Moments Shared
+            </h3>
+            <p className="text-sm text-warm-gray mb-4">
+              {(() => {
+                const count = getSharedMomentCards().length;
+                return count === 0 ? "No moments shared yet." : `${count} card${count === 1 ? "" : "s"} shared`;
+              })()}
+            </p>
+            <button
+              onClick={() => router.push("/cards/create/share")}
+              className="btn-primary text-sm px-4 py-2"
+            >
+              Create shared card
+            </button>
+            {getSharedMomentCards().length > 0 && (
+              <button
+                onClick={() => router.push("/moments")}
+                className="mt-3 block text-sm font-medium"
+                style={{ color: "var(--color-brand)" }}
+              >
+                View moments &rarr;
+              </button>
             )}
           </div>
         </div>
@@ -836,7 +907,7 @@ export default function Dashboard() {
         </section>
 
         {/* In-progress drafts */}
-        {drafts.length > 0 && (
+        {(drafts.length > 0 || shareDraft) && (
           <section className="w-full px-6 py-8" style={{ background: "var(--color-white)", borderTop: "1px solid var(--color-sage-light)" }}>
             <div className="max-w-4xl mx-auto">
               <h3 className="text-2xl sm:text-3xl font-semibold text-charcoal mb-2" style={{ fontFamily: "var(--font-heading)" }}>
@@ -846,6 +917,43 @@ export default function Dashboard() {
                 Cards you started but haven&apos;t finished.
               </p>
               <ul className="divide-y" style={{ borderColor: "var(--color-light-gray)" }}>
+                {shareDraft && (
+                  <li className="py-4 flex flex-wrap items-center gap-x-2 gap-y-2">
+                    <span className="font-medium text-charcoal">Share a moment</span>
+                    <span className="text-warm-gray"> · </span>
+                    <span className="text-warm-gray">{shareDraft.occasion}</span>
+                    <span className="text-warm-gray"> · </span>
+                    <span className="text-xs text-warm-gray">
+                      {Math.floor((Date.now() - shareDraft.updatedAt) / (1000 * 60 * 60 * 24)) === 0
+                        ? "Today"
+                        : Math.floor((Date.now() - shareDraft.updatedAt) / (1000 * 60 * 60 * 24)) === 1
+                          ? "Yesterday"
+                          : `${Math.floor((Date.now() - shareDraft.updatedAt) / (1000 * 60 * 60 * 24))} days ago`}
+                    </span>
+                    <span className="flex-1" />
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => router.push("/cards/create/share")}
+                        className="text-xs font-medium px-3 py-1 rounded-full transition-colors hover:opacity-80"
+                        style={{ color: "var(--color-brand)", border: "1.5px solid var(--color-sage)" }}
+                      >
+                        Resume
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          localStorage.removeItem(shareDraft.key);
+                          setShareDraft(null);
+                        }}
+                        className="text-xs font-medium px-3 py-1 rounded-full transition-colors hover:opacity-80"
+                        style={{ color: "var(--color-error)", border: "1.5px solid var(--color-error)" }}
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  </li>
+                )}
                 {drafts.map((d) => {
                   const occasion = d.occasionCustom || d.occasion || "No occasion";
                   const age = Date.now() - d.updatedAt;
@@ -890,7 +998,7 @@ export default function Dashboard() {
 
         {/* Section 2: People in your circle — full-width banner, white (layer 2) */}
         {recipients.length > 0 && (
-          <section className="w-full px-6 py-10" style={{ background: "var(--color-white)", borderTop: "1px solid var(--color-sage-light)" }}>
+          <section id="circle-section" className="w-full px-6 py-10" style={{ background: "var(--color-white)", borderTop: "1px solid var(--color-sage-light)" }}>
             <div className="max-w-4xl mx-auto">
               <h3 className="text-2xl sm:text-3xl font-semibold text-charcoal mb-2" style={{ fontFamily: "var(--font-heading)" }}>
                 People in your circle
@@ -990,6 +1098,63 @@ export default function Dashboard() {
             </div>
           </section>
         )}
+
+        {/* Section 3: People beyond my circle */}
+        {(() => {
+          const beyondCards = getBeyondCircleCards();
+          if (beyondCards.length === 0) return null;
+          const recent = beyondCards.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()).slice(0, 3);
+          return (
+            <section className="w-full px-6 py-10" style={{ background: "var(--color-cream)", borderTop: "1px solid var(--color-sage-light)" }}>
+              <div className="max-w-4xl mx-auto">
+                <div className="flex flex-wrap items-center justify-between gap-4 mb-4">
+                  <div>
+                    <h3 className="text-2xl sm:text-3xl font-semibold text-charcoal mb-1" style={{ fontFamily: "var(--font-heading)" }}>
+                      People beyond my circle
+                    </h3>
+                    <p className="text-warm-gray">
+                      {beyondCards.length} quick card{beyondCards.length === 1 ? "" : "s"} created
+                    </p>
+                  </div>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => router.push("/cards/create/quick")}
+                      className="btn-primary text-sm px-4 py-2"
+                    >
+                      Create quick card
+                    </button>
+                    <button
+                      onClick={() => router.push("/beyond")}
+                      className="btn-secondary text-sm px-4 py-2"
+                    >
+                      View all
+                    </button>
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  {recent.map((card) => {
+                    const bc = card as Card & { quick_recipient_name?: string | null; quick_recipient_relationship?: string | null };
+                    const name = bc.quick_recipient_name || "Someone";
+                    const rel = bc.quick_recipient_relationship;
+                    return (
+                      <button
+                        key={card.id}
+                        type="button"
+                        onClick={() => router.push(`/cards/view/${card.id}`)}
+                        className="rounded-xl p-4 text-left transition-shadow hover:shadow-md"
+                        style={{ background: "var(--color-white)", border: "1px solid var(--color-light-gray)" }}
+                      >
+                        <p className="text-sm font-semibold text-charcoal">{name}</p>
+                        {rel && <p className="text-xs text-warm-gray mt-0.5">{rel}</p>}
+                        <p className="text-xs text-warm-gray mt-1">{card.occasion || "Card"}</p>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </section>
+          );
+        })()}
       </main>
 
       {/* Usage stats modal */}

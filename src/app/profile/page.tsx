@@ -65,6 +65,14 @@ export default function ProfilePage() {
   return (
     <div className="min-h-screen bg-cream">
       <AppHeader>
+        <button
+          onClick={() => router.push("/")}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium"
+          style={{ color: "var(--color-brand)", border: "1.5px solid var(--color-sage)" }}
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+          Home
+        </button>
         <span className="font-medium text-charcoal">My Profile</span>
         <span className="flex-1" />
         <div className="flex gap-2">
@@ -90,12 +98,13 @@ export default function ProfilePage() {
           ) : (
             <button
               onClick={() => setEditing(true)}
-              className="btn-link text-sm"
-              >
-                Edit
-              </button>
-            )}
-          </div>
+              className="px-4 py-1.5 rounded-full text-sm font-medium text-warm-gray hover:text-charcoal transition-colors"
+              style={{ border: "1.5px solid var(--color-sage)" }}
+            >
+              Edit profile
+            </button>
+          )}
+        </div>
       </AppHeader>
 
       <main className="max-w-2xl mx-auto px-6 py-8">

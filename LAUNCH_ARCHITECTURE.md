@@ -498,7 +498,7 @@ A $9.99/month subscription covers costs with ~92% gross margin.
 - Keep it consistent with the `AppHeader` pattern used on other pages
 - This icon should appear on the landing/onboarding page only (other pages already have navigation)
 
-**Status:** Documented, not yet implemented.
+**Status:** Implemented. Gear icon in top-right opens dropdown with Restore backup, Circle of People, My profile, and Usage stats.
 
 ### 11.1b Cross-account card copy loses decoration metadata
 
@@ -638,8 +638,8 @@ General:
 
 **Fix implemented (Feb 17, 2026):**
 
-- **Unified padding:** All three pages (print, view, SharedCardViewer) use percentage-based padding: `8% 10%` (default) or `6% 4%` (left/right images)
-- **Unified font sizing:** All three use `cqw` with `remToCqw(rem, scale) = parseFloat(rem) * scale * 3.81 + "cqw"` and `container-type: inline-size` on the card panel
+- **Unified padding:** Print, view, SharedCardViewer, and edit preview use percentage-based padding: `8% 10%` (default) or `6% 4%` (left/right images)
+- **Unified font sizing:** All four use `cqw` with `remToCqw(rem, scale)` and `container-type: inline-size` on the card panel
 - **Navigation:** Print and edit pages use `window.location.href` (not `router.push`) when navigating to view/print/edit so destinations load fresh from localStorage
 
 **Status:** Implemented and verified working.

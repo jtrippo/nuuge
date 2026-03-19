@@ -83,7 +83,7 @@ export default function SeedPage() {
             onClick={() => router.push("/")}
             className="btn-primary"
           >
-            Go to Circle of People
+            Go to Home
           </button>
         </div>
       </div>
@@ -178,7 +178,7 @@ export default function SeedPage() {
             onClick={() => router.push("/")}
             className="w-full text-center text-sm text-warm-gray hover:text-charcoal py-2 transition-colors"
           >
-            Cancel — go back to Circle of People
+            Cancel — go back to Home
           </button>
         </div>
       </div>

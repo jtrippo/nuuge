@@ -124,11 +124,20 @@ export interface ImportantDate {
   recurring: boolean;
 }
 
+/** Sentinel used when card has no recipient (e.g. "Share a moment" cards). */
+export const NEWS_RECIPIENT_ID = "__news__";
+
 export interface Card {
   id: string;
   user_id: string;
   recipient_id: string;
   recipient_ids: string[];
+  /** "circle" (default) = for a specific recipient; "news" = share-a-moment / announcement; "beyond" = quick card for someone not in circle */
+  card_type?: "circle" | "news" | "beyond";
+  /** Category for news cards (e.g. "Loss of a pet", "Thank you") */
+  news_category?: string | null;
+  /** Free-text description of the sender's news/event */
+  news_description?: string | null;
   created_at: string;
   occasion: string;
   /** When occasion is "Other", this holds the user-defined label (e.g. "Housewarming"). */
@@ -151,12 +160,20 @@ export interface Card {
   co_signed_with: string | null;
   /** Override for recipient name on envelope center (e.g. "Scooter" for buddy Michael). */
   recipient_display_name?: string | null;
+  /** For share/news cards: label shown on envelope front (e.g. "Friends", "In Memory", "Save the Date"). */
+  envelope_label?: string | null;
   /** Recipient IDs of linked people co-signing (replaces co_signed_with when set). */
   signer_recipient_ids?: string[];
   /** Override display name per signer. Keys: "__user__" for primary, recipient_id for linked. */
   signer_display_overrides?: Record<string, string>;
   /** When set, replaces all signer names with this group label (e.g. "The Tripp's"). */
   signer_group_name?: string | null;
+  /** For "beyond" cards: name of the person the card is for (no persistent Recipient record). */
+  quick_recipient_name?: string | null;
+  /** For "beyond" cards: short relationship descriptor (e.g. "our vet", "neighbor"). */
+  quick_recipient_relationship?: string | null;
+  /** For "beyond" cards: personality/character traits chosen during quick profile (e.g. ["compassionate", "thoughtful"]). */
+  quick_recipient_traits?: string[] | null;
   /** When true, card is hidden from default history list (can show via "Show hidden") */
   hidden?: boolean;
   /** Print size: 4x6 or 5x7 inches (folded card). Used for image aspect ratio and print layout. */
