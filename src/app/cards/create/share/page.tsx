@@ -1909,41 +1909,48 @@ ${otherDetails.join("\n")}`.replace(/\n{2,}/g, "\n");
                     className="flex-1 input-field rounded-lg px-3 py-1.5 text-sm max-w-[180px]"
                   />
                 </div>
-                {allRecipients.length > 0 && (
-                  <>
-                    <p className="text-xs text-warm-gray">Co-sign with people from your circle:</p>
-                    {allRecipients.map((r) => {
-                      const checked = signerRecipientIds.includes(r.id);
-                      const totalSigners = signerRecipientIds.length + customSignerNames.length;
-                      const atLimit = !checked && totalSigners >= MAX_SIGNERS - 1;
-                      const defaultName = getDefaultDisplayName(r);
-                      return (
-                        <div key={r.id} className="flex items-center gap-3">
-                          <input
-                            type="checkbox"
-                            checked={checked}
-                            disabled={atLimit}
-                            onChange={() => {
-                              setSignerRecipientIds((prev) => checked ? prev.filter((id) => id !== r.id) : [...prev, r.id]);
-                              if (checked) setUseGroupSignature(false);
-                            }}
-                            className="rounded shrink-0"
-                            style={{ accentColor: "var(--color-brand)" }}
-                          />
-                          <span className="text-sm text-charcoal shrink-0" style={{ minWidth: 80 }}>{defaultName}</span>
-                          <input
-                            type="text"
-                            value={checked ? (signerDisplayOverrides[r.id] ?? defaultName) : ""}
-                            onChange={(e) => setSignerDisplayOverrides((prev) => ({ ...prev, [r.id]: e.target.value }))}
-                            placeholder={defaultName}
-                            disabled={!checked}
-                            className="flex-1 input-field rounded-lg px-3 py-1.5 text-sm max-w-[180px] disabled:opacity-50 disabled:bg-gray-100 disabled:cursor-not-allowed"
-                          />
-                        </div>
-                      );
-                    })}
-                  </>
-                )}
+                {(() => {
+                  const houseLinks = (profile?.household_links || [])
+                    .map((link) => { const found = allRecipients.find((r) => r.id === link.recipient_id); return found ? { ...found, linkLabel: link.label } : null; })
+                    .filter(Boolean) as (Recipient & { linkLabel: string })[];
+                  return houseLinks.length > 0 ? (
+                    <>
+                      {houseLinks.map((hm) => {
+                        const checked = signerRecipientIds.includes(hm.id);
+                        const totalSigners = signerRecipientIds.length + customSignerNames.length;
+                        const atLimit = !checked && totalSigners >= MAX_SIGNERS - 1;
+                        const defaultName = getDefaultDisplayName(hm);
+                        return (
+                          <div key={hm.id} className="flex items-center gap-3">
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              disabled={atLimit}
+                              onChange={() => {
+                                setSignerRecipientIds((prev) => checked ? prev.filter((id) => id !== hm.id) : [...prev, hm.id]);
+                                if (checked) setUseGroupSignature(false);
+                              }}
+                              className="rounded shrink-0"
+                              style={{ accentColor: "var(--color-brand)" }}
+                            />
+                            <span className="text-sm text-charcoal shrink-0" style={{ minWidth: 80 }}>
+                              {defaultName}
+                              <span className="text-warm-gray font-normal capitalize"> ({hm.linkLabel})</span>
+                            </span>
+                            <input
+                              type="text"
+                              value={checked ? (signerDisplayOverrides[hm.id] ?? defaultName) : ""}
+                              onChange={(e) => setSignerDisplayOverrides((prev) => ({ ...prev, [hm.id]: e.target.value }))}
+                              placeholder={defaultName}
+                              disabled={!checked}
+                              className="flex-1 input-field rounded-lg px-3 py-1.5 text-sm max-w-[180px] disabled:opacity-50 disabled:bg-gray-100 disabled:cursor-not-allowed"
+                            />
+                          </div>
+                        );
+                      })}
+                    </>
+                  ) : null;
+                })()}
                 {customSignerNames.map((name, idx) => (
                   <div key={`custom-${idx}`} className="flex items-center gap-3">
                     <button

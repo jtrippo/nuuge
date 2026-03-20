@@ -265,6 +265,7 @@ function CreateCardPage() {
   const [signerGroupName, setSignerGroupName] = useState("");
   const [useGroupSignature, setUseGroupSignature] = useState(false);
   const [recipientDisplayNameOverride, setRecipientDisplayNameOverride] = useState("");
+  const [goingToLinkedIds, setGoingToLinkedIds] = useState<string[]>([]);
   const [messages, setMessages] = useState<CardMessage[]>([]);
   const [rejectedMessages, setRejectedMessages] = useState<string[]>([]);
   const [regenerationCount, setRegenerationCount] = useState(0);
@@ -803,7 +804,7 @@ Humor tolerance: ${r.humor_tolerance || "Not specified"}`.replace(/\n{2,}/g, "\n
     setStep("preview");
   }
 
-  const linkedRecipients = recipient
+  const recipientLinkedPeople = recipient
     ? (recipient.links || [])
         .map((link) => {
           const linked = allRecipients.find((r) => r.id === link.recipient_id);
@@ -812,9 +813,17 @@ Humor tolerance: ${r.humor_tolerance || "Not specified"}`.replace(/\n{2,}/g, "\n
         .filter(Boolean) as (Recipient & { linkLabel: string })[]
     : [];
 
+  const householdMembers = (profile?.household_links || [])
+    .map((link) => {
+      const found = allRecipients.find((r) => r.id === link.recipient_id);
+      return found ? { ...found, linkLabel: link.label } : null;
+    })
+    .filter(Boolean)
+    .filter((m) => m!.id !== recipient?.id) as (Recipient & { linkLabel: string })[];
+
   const effectiveOccasion = (occasion === OTHER_OCCASION_VALUE && occasionCustom.trim()) ? occasionCustom.trim() : occasion;
   const showShareOption =
-    linkedRecipients.length > 0 && SHARED_OCCASIONS.includes(occasion);
+    recipientLinkedPeople.length > 0 && SHARED_OCCASIONS.includes(occasion);
 
   async function loadDesignSuggestionsBackground() {
     if (!editedMessage || !recipient) return;
@@ -1447,7 +1456,7 @@ Humor tolerance: ${r.humor_tolerance || "Not specified"}`.replace(/\n{2,}/g, "\n
                 <p className="text-xs text-warm-gray mb-3">
                   Since this is a shared occasion, you can save it to both profiles.
                 </p>
-                {linkedRecipients.map((lr) => (
+                {recipientLinkedPeople.map((lr) => (
                   <label key={lr.id} className="flex items-center gap-2 text-sm text-charcoal">
                     <input
                       type="checkbox"
@@ -1473,6 +1482,7 @@ Humor tolerance: ${r.humor_tolerance || "Not specified"}`.replace(/\n{2,}/g, "\n
               <p className="text-base font-medium text-charcoal mb-2">Envelope</p>
               <p className="text-xs text-warm-gray mb-3">Names shown on the e-card envelope.</p>
               <div className="space-y-3">
+                {/* Going to — main recipient + linked people */}
                 <div className="flex items-center gap-3">
                   <span className="text-sm font-medium text-charcoal shrink-0" style={{ minWidth: 80 }}>Going to</span>
                   <input
@@ -1483,6 +1493,38 @@ Humor tolerance: ${r.humor_tolerance || "Not specified"}`.replace(/\n{2,}/g, "\n
                     className="flex-1 input-field rounded-lg px-3 py-1.5 text-sm max-w-[180px]"
                   />
                 </div>
+                {recipientLinkedPeople.length > 0 && recipientLinkedPeople.map((lr) => {
+                  const checked = goingToLinkedIds.includes(lr.id);
+                  const defaultName = getDefaultDisplayName(lr);
+                  return (
+                    <div key={lr.id} className="flex items-center gap-3 ml-2">
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => {
+                          const baseName = recipientDisplayNameOverride || getDefaultDisplayName(recipient) || "";
+                          if (checked) {
+                            setGoingToLinkedIds((prev) => prev.filter((id) => id !== lr.id));
+                            const nameToRemove = defaultName;
+                            const cleaned = baseName.replace(new RegExp(`\\s*[&,]\\s*${nameToRemove}`, "i"), "").replace(new RegExp(`${nameToRemove}\\s*[&,]\\s*`, "i"), "").trim();
+                            setRecipientDisplayNameOverride(cleaned);
+                          } else {
+                            setGoingToLinkedIds((prev) => [...prev, lr.id]);
+                            setRecipientDisplayNameOverride(baseName ? `${baseName} & ${defaultName}` : defaultName);
+                          }
+                        }}
+                        className="rounded shrink-0"
+                        style={{ accentColor: "var(--color-brand)" }}
+                      />
+                      <span className="text-sm text-charcoal">
+                        {defaultName}
+                        <span className="text-warm-gray font-normal capitalize"> ({lr.linkLabel})</span>
+                      </span>
+                    </div>
+                  );
+                })}
+
+                {/* Signed from — user + household members */}
                 <p className="text-xs text-warm-gray -mt-1">Signed from</p>
                 <div className="flex items-center gap-3">
                   <span className="text-sm font-medium text-charcoal shrink-0" style={{ minWidth: 80 }}>You</span>
@@ -1494,20 +1536,20 @@ Humor tolerance: ${r.humor_tolerance || "Not specified"}`.replace(/\n{2,}/g, "\n
                     className="flex-1 input-field rounded-lg px-3 py-1.5 text-sm max-w-[180px]"
                   />
                 </div>
-                {linkedRecipients.length > 0 ? (
-                  linkedRecipients.map((lr) => {
-                    const checked = signerRecipientIds.includes(lr.id);
+                {householdMembers.length > 0 ? (
+                  householdMembers.map((hm) => {
+                    const checked = signerRecipientIds.includes(hm.id);
                     const atLimit = !checked && signerRecipientIds.length >= MAX_SIGNERS - 1;
-                    const defaultName = getDefaultDisplayName(lr);
+                    const defaultName = getDefaultDisplayName(hm);
                     return (
-                      <div key={lr.id} className="flex items-center gap-3">
+                      <div key={hm.id} className="flex items-center gap-3">
                         <input
                           type="checkbox"
                           checked={checked}
                           disabled={atLimit}
                           onChange={() => {
                             setSignerRecipientIds((prev) =>
-                              checked ? prev.filter((id) => id !== lr.id) : [...prev, lr.id]
+                              checked ? prev.filter((id) => id !== hm.id) : [...prev, hm.id]
                             );
                             if (checked) setUseGroupSignature(false);
                           }}
@@ -1516,12 +1558,12 @@ Humor tolerance: ${r.humor_tolerance || "Not specified"}`.replace(/\n{2,}/g, "\n
                         />
                         <span className="text-sm text-charcoal shrink-0" style={{ minWidth: 80 }}>
                           {defaultName}
-                          <span className="text-warm-gray font-normal capitalize"> ({lr.linkLabel})</span>
+                          <span className="text-warm-gray font-normal capitalize"> ({hm.linkLabel})</span>
                         </span>
                         <input
                           type="text"
-                          value={checked ? (signerDisplayOverrides[lr.id] ?? defaultName) : ""}
-                          onChange={(e) => setSignerDisplayOverrides((prev) => ({ ...prev, [lr.id]: e.target.value }))}
+                          value={checked ? (signerDisplayOverrides[hm.id] ?? defaultName) : ""}
+                          onChange={(e) => setSignerDisplayOverrides((prev) => ({ ...prev, [hm.id]: e.target.value }))}
                           placeholder={defaultName}
                           disabled={!checked}
                           className="flex-1 input-field rounded-lg px-3 py-1.5 text-sm max-w-[180px] disabled:opacity-50 disabled:bg-gray-100 disabled:cursor-not-allowed"

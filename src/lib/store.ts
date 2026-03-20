@@ -23,7 +23,13 @@ function isBrowser() {
 export function getUserProfile(): Partial<UserProfile> | null {
   if (!isBrowser()) return null;
   const raw = localStorage.getItem(KEYS.USER_PROFILE);
-  return raw ? JSON.parse(raw) : null;
+  if (!raw) return null;
+  const profile = JSON.parse(raw) as Partial<UserProfile>;
+  if (profile.partner_recipient_id && (!profile.household_links || profile.household_links.length === 0)) {
+    profile.household_links = [{ recipient_id: profile.partner_recipient_id, label: "Spouse" }];
+    localStorage.setItem(KEYS.USER_PROFILE, JSON.stringify({ ...profile, updated_at: new Date().toISOString() }));
+  }
+  return profile;
 }
 
 export function saveUserProfile(profile: Partial<UserProfile>) {
@@ -271,6 +277,22 @@ export function unlinkRecipients(id1: string, id2: string) {
       links: (r2.links || []).filter((l) => l.recipient_id !== id1),
     });
   }
+}
+
+export function addHouseholdLink(recipientId: string, label: string) {
+  if (!isBrowser()) return;
+  const profile = getUserProfile() || {};
+  const links = profile.household_links || [];
+  if (links.some((l) => l.recipient_id === recipientId)) return;
+  links.push({ recipient_id: recipientId, label });
+  saveUserProfile({ household_links: links });
+}
+
+export function removeHouseholdLink(recipientId: string) {
+  if (!isBrowser()) return;
+  const profile = getUserProfile() || {};
+  const links = (profile.household_links || []).filter((l) => l.recipient_id !== recipientId);
+  saveUserProfile({ household_links: links });
 }
 
 export function getOnboardingHistory(): ConversationMessage[] {

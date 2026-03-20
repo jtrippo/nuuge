@@ -90,6 +90,7 @@ export interface UserProfile extends PersonProfile {
   email: string | null;
   partner_name: string | null;
   partner_recipient_id: string | null;
+  household_links?: RecipientLink[];
   context_raw: string | null;
   onboarding_complete: boolean;
 }

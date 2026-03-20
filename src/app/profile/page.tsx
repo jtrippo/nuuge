@@ -2,10 +2,14 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { getUserProfile, saveUserProfile } from "@/lib/store";
+import { getUserProfile, saveUserProfile, getRecipients, addHouseholdLink, removeHouseholdLink } from "@/lib/store";
 import ProfileEditor from "@/components/ProfileEditor";
 import AppHeader from "@/components/AppHeader";
-import type { UserProfile, PersonProfile } from "@/types/database";
+import type { UserProfile, PersonProfile, Recipient } from "@/types/database";
+
+const HOUSEHOLD_LABELS = [
+  "Spouse", "Partner", "Son", "Daughter", "Child", "Parent", "Sibling", "Other",
+];
 
 export default function ProfilePage() {
   const router = useRouter();
@@ -14,6 +18,10 @@ export default function ProfilePage() {
   const [partnerName, setPartnerName] = useState("");
   const [editing, setEditing] = useState(false);
   const [mounted, setMounted] = useState(false);
+  const [allRecipients, setAllRecipients] = useState<Recipient[]>([]);
+  const [showHouseholdModal, setShowHouseholdModal] = useState(false);
+  const [householdTarget, setHouseholdTarget] = useState("");
+  const [householdLabel, setHouseholdLabel] = useState("Spouse");
 
   useEffect(() => {
     setMounted(true);
@@ -23,6 +31,7 @@ export default function ProfilePage() {
       setEditData(p);
       setPartnerName(p.partner_name || "");
     }
+    setAllRecipients(getRecipients().filter((r) => r.setup_complete !== false));
   }, []);
 
   if (!mounted) return null;
@@ -124,31 +133,111 @@ export default function ProfilePage() {
             onChange={setEditData}
           />
 
-          {/* Partner section */}
+          {/* Household / co-signers section */}
           <div className="mt-6 pt-6 border-t border-gray-200">
-            <p className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-1">
-              Partner / co-signer
-            </p>
-            {editing ? (
-              <div>
-                <input
-                  value={partnerName}
-                  onChange={(e) => setPartnerName(e.target.value)}
-                  placeholder="Partner's name (for co-signing cards)"
-                  className="input-field"
-                />
-                <p className="text-xs text-gray-400 mt-1">
-                  If set, you&apos;ll have the option to sign cards from both of you.
-                </p>
-              </div>
-            ) : (
-              <p className="text-sm text-gray-700">
-                {profile.partner_name || (
-                  <span className="text-gray-300 italic">Not set</span>
-                )}
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-xs font-medium text-gray-400 uppercase tracking-wide">
+                My household
               </p>
+              <button
+                onClick={() => { setHouseholdTarget(""); setHouseholdLabel("Spouse"); setShowHouseholdModal(true); }}
+                className="text-xs font-medium px-3 py-1 rounded-full transition-colors hover:opacity-80"
+                style={{ color: "var(--color-brand)", border: "1.5px solid var(--color-sage)" }}
+              >
+                + Add member
+              </button>
+            </div>
+            <p className="text-xs text-gray-400 mb-3">
+              People who co-sign cards with you (spouse, children, etc.)
+            </p>
+            {(!profile.household_links || profile.household_links.length === 0) ? (
+              <p className="text-sm text-gray-300 italic">No household members yet.</p>
+            ) : (
+              <div className="space-y-2">
+                {profile.household_links.map((link) => {
+                  const r = allRecipients.find((rec) => rec.id === link.recipient_id);
+                  if (!r) return null;
+                  return (
+                    <div key={link.recipient_id} className="flex items-center justify-between rounded-lg px-4 py-2.5" style={{ background: "var(--color-faint-gray)", border: "1px solid var(--color-light-gray)" }}>
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-medium text-charcoal">{r.name}</span>
+                        <span className="text-xs text-warm-gray capitalize">({link.label})</span>
+                      </div>
+                      <button
+                        onClick={() => {
+                          removeHouseholdLink(link.recipient_id);
+                          const refreshed = getUserProfile();
+                          if (refreshed) { setProfile(refreshed); setEditData(refreshed); }
+                        }}
+                        className="text-xs text-warm-gray hover:text-charcoal transition-colors"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
             )}
           </div>
+
+          {showHouseholdModal && (
+            <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50 px-4">
+              <div className="card-surface rounded-2xl p-6 max-w-sm w-full shadow-xl">
+                <h3 className="text-lg font-semibold text-charcoal mb-4">Add household member</h3>
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-charcoal mb-1">Person from your circle</label>
+                    <select
+                      value={householdTarget}
+                      onChange={(e) => setHouseholdTarget(e.target.value)}
+                      className="w-full input-field rounded-lg px-3 py-2 text-sm"
+                    >
+                      <option value="">Select a person...</option>
+                      {allRecipients
+                        .filter((r) => !(profile.household_links || []).some((l) => l.recipient_id === r.id))
+                        .map((r) => (
+                          <option key={r.id} value={r.id}>{r.name} ({r.relationship_type})</option>
+                        ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-charcoal mb-1">Relationship to you</label>
+                    <select
+                      value={householdLabel}
+                      onChange={(e) => setHouseholdLabel(e.target.value)}
+                      className="w-full input-field rounded-lg px-3 py-2 text-sm"
+                    >
+                      {HOUSEHOLD_LABELS.map((l) => (
+                        <option key={l} value={l}>{l}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+                <div className="flex justify-end gap-3 mt-6">
+                  <button
+                    onClick={() => setShowHouseholdModal(false)}
+                    className="px-4 py-1.5 rounded-full text-sm text-warm-gray hover:text-charcoal transition-colors"
+                    style={{ border: "1.5px solid var(--color-sage)" }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={() => {
+                      if (!householdTarget) return;
+                      addHouseholdLink(householdTarget, householdLabel);
+                      const refreshed = getUserProfile();
+                      if (refreshed) { setProfile(refreshed); setEditData(refreshed); }
+                      setShowHouseholdModal(false);
+                    }}
+                    disabled={!householdTarget}
+                    className="btn-primary px-4 py-1.5 rounded-full text-sm font-medium disabled:opacity-50"
+                  >
+                    Add
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       </main>
     </div>
