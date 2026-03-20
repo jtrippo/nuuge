@@ -35,11 +35,13 @@ export default function BackupPage() {
 
       const recipientCount = data.recipients?.length ?? 0;
       const cardCount = data.cards?.length ?? 0;
+      const draftCount = Object.keys(data.drafts ?? {}).length;
       const imageCount = Object.keys(data.images ?? {}).length;
       const usageCount = data.usageEvents?.length ?? 0;
       setStatus(
         `Exported: ${recipientCount} recipient${recipientCount !== 1 ? "s" : ""}, ` +
         `${cardCount} card${cardCount !== 1 ? "s" : ""}, ` +
+        `${draftCount} draft${draftCount !== 1 ? "s" : ""}, ` +
         `${imageCount} image${imageCount !== 1 ? "s" : ""}, ` +
         `${usageCount} usage event${usageCount !== 1 ? "s" : ""}.`
       );
@@ -66,12 +68,14 @@ export default function BackupPage() {
 
       const recipientCount = data.recipients?.length ?? 0;
       const cardCount = data.cards?.length ?? 0;
+      const draftCount = Object.keys(data.drafts ?? {}).length;
       const imageCount = Object.keys(data.images ?? {}).length;
       const usageCount = data.usageEvents?.length ?? 0;
       setStatus(
         `Restored from ${new Date(data.exportedAt).toLocaleDateString()}: ` +
         `${recipientCount} recipient${recipientCount !== 1 ? "s" : ""}, ` +
         `${cardCount} card${cardCount !== 1 ? "s" : ""}, ` +
+        `${draftCount} draft${draftCount !== 1 ? "s" : ""}, ` +
         `${imageCount} image${imageCount !== 1 ? "s" : ""}, ` +
         `${usageCount} usage event${usageCount !== 1 ? "s" : ""}. ` +
         `Refresh the page or navigate away to see your data.`

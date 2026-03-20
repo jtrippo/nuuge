@@ -313,6 +313,8 @@ export function clearOnboardingHistory() {
 
 // ─── Export / Import ────────────────────────────────────────────────
 
+const DRAFT_KEY_PREFIX = "nuuge_card_draft_";
+
 export interface NuugeBackup {
   version: 1;
   exportedAt: string;
@@ -322,11 +324,22 @@ export interface NuugeBackup {
   onboardingHistory: ConversationMessage[];
   images: Record<string, string>;
   usageEvents?: UsageEvent[];
+  drafts?: Record<string, string>;
 }
 
 export async function exportAllData(): Promise<NuugeBackup> {
   const images = await getAllImages();
   const usageEvents = await getAllUsage();
+
+  const drafts: Record<string, string> = {};
+  for (let i = 0; i < localStorage.length; i++) {
+    const key = localStorage.key(i);
+    if (key?.startsWith(DRAFT_KEY_PREFIX)) {
+      const val = localStorage.getItem(key);
+      if (val) drafts[key] = val;
+    }
+  }
+
   return {
     version: 1,
     exportedAt: new Date().toISOString(),
@@ -336,6 +349,7 @@ export async function exportAllData(): Promise<NuugeBackup> {
     onboardingHistory: getOnboardingHistory(),
     images,
     usageEvents,
+    drafts,
   };
 }
 
@@ -363,6 +377,11 @@ export async function importAllData(backup: NuugeBackup): Promise<void> {
   if (backup.usageEvents) {
     for (const event of backup.usageEvents) {
       await putUsageEvent(event);
+    }
+  }
+  if (backup.drafts) {
+    for (const [key, value] of Object.entries(backup.drafts)) {
+      localStorage.setItem(key, value);
     }
   }
 }
