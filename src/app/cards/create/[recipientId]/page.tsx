@@ -525,6 +525,8 @@ function CreateCardPage() {
     if (d.step === "inside_design_preview") stepToRestore = "inside_design_pick";
     if (d.step === "front_text_loading") stepToRestore = "inside_design_ask";
     setStep(stepToRestore);
+    setRejectedMessages([]);
+    setRegenerationCount(0);
     setOccasion(d.occasion);
     setOccasionCustom(d.occasionCustom ?? "");
     setIncludeFaithBased(d.includeFaithBased);
@@ -797,6 +799,7 @@ Humor tolerance: ${r.humor_tolerance || "Not specified"}`.replace(/\n{2,}/g, "\n
           regenerationCount,
           rejectedMessages: rejectedMessages.length > 0 ? rejectedMessages : undefined,
           senderDisplayName: signerDisplayOverrides[USER_KEY]?.trim() || undefined,
+          recipientAddressedTo: recipientDisplayNameOverride.trim() || undefined,
         }),
       });
 
@@ -858,6 +861,7 @@ Humor tolerance: ${r.humor_tolerance || "Not specified"}`.replace(/\n{2,}/g, "\n
           coSignWith,
           relationshipType: recipient!.relationship_type,
           senderDisplayName: signerDisplayOverrides[USER_KEY]?.trim() || undefined,
+          recipientAddressedTo: recipientDisplayNameOverride.trim() || undefined,
           userDraft: {
             greeting: byomGreeting,
             body: byomBody,
@@ -1981,7 +1985,7 @@ Humor tolerance: ${r.humor_tolerance || "Not specified"}`.replace(/\n{2,}/g, "\n
 
             <div className="flex items-center gap-3 mt-4">
               <button
-                onClick={() => setStep("notes")}
+                onClick={() => { setRejectedMessages([]); setRegenerationCount(0); setStep("notes"); }}
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium transition-colors"
                 style={{ color: "var(--color-brand)", border: "1.5px solid var(--color-sage)" }}
               >

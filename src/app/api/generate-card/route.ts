@@ -49,6 +49,7 @@ export async function POST(req: NextRequest) {
       newsDescription,
       userDraft,
       senderDisplayName,
+      recipientAddressedTo,
     }: {
       senderContext: string;
       recipientContext?: string;
@@ -66,6 +67,7 @@ export async function POST(req: NextRequest) {
       newsDescription?: string;
       userDraft?: { greeting: string; body: string; closing: string };
       senderDisplayName?: string;
+      recipientAddressedTo?: string;
     } = body;
 
     const isNews = mode === "news";
@@ -84,7 +86,7 @@ export async function POST(req: NextRequest) {
 
     const rejectedSection =
       effectiveRejected.length > 0
-        ? `\nREJECTED MESSAGES (the sender already saw these and didn't like them — write something DIFFERENT, using different details and angles):\n${effectiveRejected.map((m, i) => `${i + 1}. ${m}`).join("\n")}\n`
+        ? `\nREJECTED MESSAGES (the sender already saw these and didn't like them — write something DIFFERENT, using different details and angles). IMPORTANT: Ignore the sign-off names in these rejected messages — they may be outdated. Use ONLY the SIGNED BY or SOLO SIGNER directive above for the closing names:\n${effectiveRejected.map((m, i) => `${i + 1}. ${m}`).join("\n")}\n`
         : "";
 
     const rel = (relationshipType || "").toLowerCase();
@@ -191,6 +193,10 @@ This is a sympathy, get-well, apology, or difficult-news card. You MUST:
       ? `\nSENDER SIGN-OFF NAME: The sender wants to sign as "${senderDisplayName}". Use this exact name in the closing — do NOT use any other name or nickname from the profile.`
       : "";
 
+    const addressingInstruction = recipientAddressedTo
+      ? `\nCARD ADDRESSED TO (RECIPIENTS): This card is addressed to "${recipientAddressedTo}". Use this name in the greeting (e.g., "Dear ${recipientAddressedTo},") and reference both people in the body where appropriate. IMPORTANT: These are the RECIPIENTS — the people RECEIVING the card. They are NOT signers. Do NOT put recipient names in the closing/sign-off.`
+      : "";
+
     const recipientSection = isNews
       ? `\nNEWS CATEGORY: ${newsCategory || "Life update"}\nSENDER'S STORY / DESCRIPTION: ${newsDescription || "General life update to share with others"}\n\n(No specific recipient — this card will be shared with multiple people.)`
       : `\nABOUT THE RECIPIENT:\n${recipientContext || "No recipient context"}${historySection}`;
@@ -206,7 +212,7 @@ ${recipientSection}
 OCCASION: ${effectiveOccasion}
 REQUESTED TONE: ${tone}
 ${effectiveNotes ? `ADDITIONAL NOTES FROM SENDER: ${effectiveNotes}` : ""}
-${coSignWith ? `CO-SIGNING: This card is from BOTH the sender and ${coSignWith} together. Use "we", "our", and "us" instead of "I", "my", and "me". Sign off with both names.` : ""}${senderNameInstruction}
+${coSignWith ? `SIGNED BY: This card is signed by ${coSignWith}. Use "we", "our", and "us" instead of "I", "my", and "me". The closing MUST end with exactly: ${coSignWith}. Do NOT substitute any other names in the sign-off.` : `SOLO SIGNER: This card is from ONLY the sender. The closing must include ONLY the sender's name — do NOT add any other person's name to the sign-off, even if the card is addressed to multiple people.`}${senderNameInstruction}${addressingInstruction}
 ${relationshipGuardrail}
 ${faithModifier}
 ${gentleModifier}
@@ -284,7 +290,7 @@ ${rejectedSection}
 OCCASION/NEWS: ${effectiveOccasion}
 REQUESTED TONE: ${tone}
 ${effectiveNotes ? `ADDITIONAL NOTES FROM SENDER: ${effectiveNotes}` : ""}
-${!isNews && coSignWith ? `CO-SIGNING: This card is from BOTH the sender and ${coSignWith} together. Throughout the entire message, use "we", "our", and "us" instead of "I", "my", and "me". The greeting, body, and closing should all reflect that two people are writing — e.g. "We love you", "We're so proud", "Our favorite memory". Sign off with both names.` : ""}${senderNameInstruction}
+${!isNews && coSignWith ? `SIGNED BY: This card is signed by ${coSignWith}. Throughout the entire message, use "we", "our", and "us" instead of "I", "my", and "me". The greeting, body, and closing should all reflect that two people are writing — e.g. "We love you", "We're so proud", "Our favorite memory". The closing MUST end with exactly: ${coSignWith}. Do NOT substitute any other names in the sign-off.` : !isNews ? `SOLO SIGNER: This card is from ONLY the sender. The closing must include ONLY the sender's name — do NOT add any other person's name to the sign-off, even if the card is addressed to multiple people.` : ""}${senderNameInstruction}${addressingInstruction}
 ${relationshipGuardrail}
 ${faithModifier}
 ${gentleModifier}
