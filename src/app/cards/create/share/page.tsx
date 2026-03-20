@@ -44,6 +44,8 @@ interface CardMessage {
 type Step =
   | "category"
   | "tone"
+  | "message_mode"
+  | "byom_write"
   | "notes"
   | "generating"
   | "select"
@@ -70,7 +72,7 @@ type Step =
 
 type Stage = "message" | "design" | "details" | "deliver";
 const STAGE_STEPS: Record<Stage, Step[]> = {
-  message: ["category", "tone", "notes", "generating", "select", "preview"],
+  message: ["category", "tone", "message_mode", "byom_write", "notes", "generating", "select", "preview"],
   design: ["design_subject", "design_style", "design_confirm_prompt", "design_loading", "design_generating", "design_confirm_refinement", "design_preview"],
   details: ["inside_design_ask", "inside_position_pick", "inside_design_loading", "inside_design_pick", "inside_design_generating", "inside_design_preview", "inside_confirm_refinement", "front_text_loading", "front_text", "letter"],
   deliver: ["delivery", "saved"],
@@ -117,6 +119,10 @@ interface ShareDraft {
   newsDescription: string;
   tone: string;
   notes: string;
+  messageMode: "generate" | "byom";
+  byomGreeting: string;
+  byomBody: string;
+  byomClosing: string;
   rejectedMessages: string[];
   regenerationCount: number;
   activeProfileElements: Record<string, boolean>;
@@ -184,6 +190,10 @@ export default function CreateSharePage() {
   const [newsDescription, setNewsDescription] = useState("");
   const [tone, setTone] = useState("");
   const [notes, setNotes] = useState("");
+  const [messageMode, setMessageMode] = useState<"generate" | "byom">("generate");
+  const [byomGreeting, setByomGreeting] = useState("");
+  const [byomBody, setByomBody] = useState("");
+  const [byomClosing, setByomClosing] = useState("");
   const [rejectedMessages, setRejectedMessages] = useState<string[]>([]);
   const [regenerationCount, setRegenerationCount] = useState(0);
   const [activeProfileElements, setActiveProfileElements] = useState<Record<string, boolean>>({});
@@ -275,6 +285,10 @@ export default function CreateSharePage() {
       newsDescription,
       tone,
       notes,
+      messageMode,
+      byomGreeting,
+      byomBody,
+      byomClosing,
       rejectedMessages,
       regenerationCount,
       activeProfileElements,
@@ -311,7 +325,8 @@ export default function CreateSharePage() {
     }
   }, [
     mounted, showResumePrompt, pendingDraft, step,
-    newsCategory, newsDescription, tone, notes, rejectedMessages, regenerationCount,
+    newsCategory, newsDescription, tone, notes, messageMode, byomGreeting, byomBody, byomClosing,
+    rejectedMessages, regenerationCount,
     activeProfileElements, messages, selected, editedMessage, imageSubject, subjectDetail,
     artStyle, personalContext, currentSceneDescription, pendingSceneDescription, userOriginalPrompt,
     selectedDesign, imageInterests, insideImagePosition, accentPositions, insideDesignGuidance, frontText, frontTextPosition,
@@ -456,6 +471,7 @@ ${otherDetails.join("\n")}`.replace(/\n{2,}/g, "\n");
           cardHistory: [],
           regenerationCount: nextRegenCount,
           rejectedMessages: effectiveRejected.length > 0 ? effectiveRejected : undefined,
+          senderDisplayName: signerDisplayOverrides[USER_KEY]?.trim() || undefined,
         }),
       });
       if (!res.ok) {
@@ -464,6 +480,52 @@ ${otherDetails.join("\n")}`.replace(/\n{2,}/g, "\n");
       }
       const data = await res.json();
       setMessages(data.messages);
+      setStep("select");
+      logApiCall("generate-card", { model: "gpt-4o", callType: "chat_completion", sessionId: sessionIdRef });
+      setSessionCost((c) => c + 0.025);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Something went wrong");
+    } finally {
+      setIsLoading(false);
+    }
+  }
+
+  async function polishUserMessage() {
+    setIsLoading(true);
+    setLoadingMessage("Polishing your message...");
+    setError(null);
+
+    try {
+      const res = await fetch("/api/generate-card", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          mode: "news",
+          senderContext: buildSenderContext(),
+          newsCategory: categoryLabel,
+          newsDescription: newsDescription.trim() || "General update to share with others",
+          tone,
+          additionalNotes: notes,
+          senderDisplayName: signerDisplayOverrides[USER_KEY]?.trim() || undefined,
+          userDraft: {
+            greeting: byomGreeting,
+            body: byomBody,
+            closing: byomClosing,
+          },
+        }),
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || "Failed to polish message");
+      }
+      const data = await res.json();
+      const userOriginal: CardMessage = {
+        label: "Your original",
+        greeting: byomGreeting,
+        body: byomBody,
+        closing: byomClosing,
+      };
+      setMessages([userOriginal, ...data.messages]);
       setStep("select");
       logApiCall("generate-card", { model: "gpt-4o", callType: "chat_completion", sessionId: sessionIdRef });
       setSessionCost((c) => c + 0.025);
@@ -785,7 +847,8 @@ ${otherDetails.join("\n")}`.replace(/\n{2,}/g, "\n");
 
   function applyShareDraft(d: ShareDraft) {
     let stepToRestore = d.step;
-    if (d.step === "generating" || d.step === "select") stepToRestore = "notes";
+    if (d.step === "message_mode") stepToRestore = "message_mode";
+    if (d.step === "generating" || d.step === "select") stepToRestore = d.messageMode === "byom" ? "byom_write" : "notes";
     if (d.step === "design_style" || d.step === "design_loading") stepToRestore = "design_subject";
     if (d.step === "design_generating" || d.step === "design_confirm_refinement") stepToRestore = "design_confirm_prompt";
     if (d.step === "design_preview") stepToRestore = "design_confirm_prompt";
@@ -799,6 +862,10 @@ ${otherDetails.join("\n")}`.replace(/\n{2,}/g, "\n");
     setNewsDescription(d.newsDescription ?? "");
     setTone(d.tone);
     setNotes(d.notes);
+    setMessageMode(d.messageMode ?? "generate");
+    setByomGreeting(d.byomGreeting ?? "");
+    setByomBody(d.byomBody ?? "");
+    setByomClosing(d.byomClosing ?? "");
     setRejectedMessages(d.rejectedMessages ?? []);
     setRegenerationCount(d.regenerationCount ?? 0);
     setActiveProfileElements(normalizeProfileElements(d.activeProfileElements ?? {}));
@@ -1034,35 +1101,146 @@ ${otherDetails.join("\n")}`.replace(/\n{2,}/g, "\n");
                 <button
                   key={t}
                   onClick={() => setTone(t)}
-                  className="rounded-full px-4 py-2 text-sm font-medium transition-all"
+                  className="rounded-full px-4 py-2 text-sm font-medium transition-all min-w-[120px] text-center"
                   style={tone === t ? { background: "var(--color-brand)", color: "#fff" } : { background: "var(--color-white)", border: "1.5px solid var(--color-sage-light)" }}
                 >
                   {t}
                 </button>
               ))}
             </div>
-            <button onClick={() => setStep("notes")} className="btn-primary">
+            <button onClick={() => setStep("message_mode")} className="btn-primary">
               Next
             </button>
           </div>
         )}
 
+        {/* Step: Message mode choice */}
+        {step === "message_mode" && !showResumePrompt && (
+          <div>
+            <h2 className="text-2xl font-bold text-charcoal mb-2">
+              How do you want to create your message?
+            </h2>
+            <p className="text-sm text-warm-gray mb-6">
+              Choose how you&apos;d like to write this card&apos;s message.
+            </p>
+            <div className="space-y-3">
+              <button
+                onClick={() => { setMessageMode("generate"); setStep("notes"); }}
+                className="w-full card-surface card-surface-clickable p-5 text-left"
+              >
+                <p className="text-base font-semibold text-charcoal mb-1">Let Nuuge create it</p>
+                <p className="text-sm text-warm-gray">
+                  We&apos;ll write 3 options based on your moment and tone.
+                </p>
+              </button>
+              <button
+                onClick={() => { setMessageMode("byom"); setStep("byom_write"); }}
+                className="w-full card-surface card-surface-clickable p-5 text-left"
+              >
+                <p className="text-base font-semibold text-charcoal mb-1">Write it myself</p>
+                <p className="text-sm text-warm-gray">
+                  Type your own message. We&apos;ll suggest a couple of polished alternatives too.
+                </p>
+              </button>
+            </div>
+            <div className="mt-4">
+              <button
+                onClick={() => setStep("tone")}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium transition-colors"
+                style={{ color: "var(--color-brand)", border: "1.5px solid var(--color-sage)" }}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+                Back
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Step: BYOM write */}
+        {step === "byom_write" && !showResumePrompt && (
+          <div>
+            <h2 className="text-2xl font-bold text-charcoal mb-2">
+              Write your message
+            </h2>
+            <p className="text-sm text-warm-gray mb-6">
+              Write your greeting, message, and closing. We&apos;ll offer polished alternatives to choose from.
+            </p>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-charcoal mb-1">Greeting</label>
+                <input
+                  type="text"
+                  value={byomGreeting}
+                  onChange={(e) => setByomGreeting(e.target.value)}
+                  placeholder="Dear friends,"
+                  className="input-field rounded-xl w-full"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-charcoal mb-1">Message</label>
+                <textarea
+                  value={byomBody}
+                  onChange={(e) => setByomBody(e.target.value)}
+                  rows={6}
+                  placeholder="Write your message here..."
+                  className="input-field rounded-xl w-full"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-charcoal mb-1">Closing</label>
+                <input
+                  type="text"
+                  value={byomClosing}
+                  onChange={(e) => setByomClosing(e.target.value)}
+                  placeholder={getDefaultUserDisplayName(profile) ? `With love, ${getDefaultUserDisplayName(profile)}` : "With love,"}
+                  className="input-field rounded-xl w-full"
+                />
+              </div>
+            </div>
+            <div className="flex items-center gap-3 mt-6">
+              <button
+                onClick={() => setStep("message_mode")}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium transition-colors"
+                style={{ color: "var(--color-brand)", border: "1.5px solid var(--color-sage)" }}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+                Back
+              </button>
+              <button
+                onClick={() => setStep("notes")}
+                disabled={!byomBody.trim()}
+                className="btn-primary disabled:opacity-40"
+              >
+                Next
+              </button>
+            </div>
+          </div>
+        )}
+
         {step === "notes" && !showResumePrompt && (
           <div>
-            <h2 className="text-2xl font-bold text-charcoal mb-2">Add a personal touch</h2>
-            <p className="text-sm text-warm-gray mb-4">
-              Optional — give Nuuge something specific to weave into the message, or leave it blank.
-            </p>
-            <textarea
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              placeholder="e.g. mention the date, a special memory..."
-              className="input-field rounded-xl w-full py-3 min-h-[80px] resize-none mb-4"
-            />
+            {messageMode !== "byom" ? (
+              <>
+                <h2 className="text-2xl font-bold text-charcoal mb-2">Personalize your message</h2>
+                <p className="text-sm text-warm-gray mb-4">
+                  Optional — give Nuuge something specific to weave into the message, or leave it blank.
+                </p>
+                <textarea
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  placeholder="e.g. mention the date, a special memory..."
+                  className="input-field rounded-xl w-full py-3 min-h-[80px] resize-none mb-4"
+                />
+              </>
+            ) : (
+              <h2 className="text-2xl font-bold text-charcoal mb-4">
+                Ready to polish
+              </h2>
+            )}
             <div className="flex gap-3">
-              <button onClick={() => setStep("tone")} className="btn-secondary">Back</button>
-              <button onClick={generateMessages} className="btn-primary">
-                Generate card messages
+              <button onClick={() => setStep(messageMode === "byom" ? "byom_write" : "message_mode")} className="btn-secondary">Back</button>
+              <button onClick={messageMode === "byom" ? polishUserMessage : generateMessages} className="btn-primary">
+                {messageMode === "byom" ? "Polish my message" : "Generate card messages"}
               </button>
             </div>
           </div>

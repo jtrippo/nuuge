@@ -66,6 +66,8 @@ type Step =
   | "occasion"
   | "faith"
   | "tone"
+  | "message_mode"
+  | "byom_write"
   | "notes"
   | "generating"
   | "select"
@@ -99,7 +101,7 @@ interface DesignConcept {
 type Stage = "message" | "design" | "details" | "deliver";
 
 const STAGE_STEPS: Record<Stage, Step[]> = {
-  message: ["occasion", "faith", "tone", "notes", "generating", "select", "preview"],  // faith/tone kept for draft compat
+  message: ["occasion", "faith", "tone", "message_mode", "byom_write", "notes", "generating", "select", "preview"],
   design: [
     "design_subject", "design_style", "design_confirm_prompt", "design_loading",
     "design_generating", "design_confirm_refinement", "design_preview",
@@ -137,6 +139,10 @@ interface CardDraft {
   includeFaithBased: boolean;
   tone: string;
   notes: string;
+  messageMode: "generate" | "byom";
+  byomGreeting: string;
+  byomBody: string;
+  byomClosing: string;
   sharedWith: string[];
   coSign: boolean;
   signerRecipientIds: string[];
@@ -258,6 +264,10 @@ function CreateCardPage() {
   const [includeFaithBased, setIncludeFaithBased] = useState(false);
   const [tone, setTone] = useState("");
   const [notes, setNotes] = useState("");
+  const [messageMode, setMessageMode] = useState<"generate" | "byom">("generate");
+  const [byomGreeting, setByomGreeting] = useState("");
+  const [byomBody, setByomBody] = useState("");
+  const [byomClosing, setByomClosing] = useState("");
   const [sharedWith, setSharedWith] = useState<string[]>([]);
   const [coSign, setCoSign] = useState(false);
   const [signerRecipientIds, setSignerRecipientIds] = useState<string[]>([]);
@@ -438,6 +448,10 @@ function CreateCardPage() {
       includeFaithBased,
       tone,
       notes,
+      messageMode,
+      byomGreeting,
+      byomBody,
+      byomClosing,
       sharedWith,
       coSign,
       signerRecipientIds,
@@ -473,7 +487,8 @@ function CreateCardPage() {
     }
   }, [
     mounted, recipientId, editMode, editCardId, showResumePrompt, pendingDraft, step,
-    occasion, occasionCustom, includeFaithBased, tone, notes, sharedWith, coSign, signerRecipientIds, signerDisplayOverrides, signerGroupName, useGroupSignature, recipientDisplayNameOverride, activeProfileElements,
+    occasion, occasionCustom, includeFaithBased, tone, notes, messageMode, byomGreeting, byomBody, byomClosing,
+    sharedWith, coSign, signerRecipientIds, signerDisplayOverrides, signerGroupName, useGroupSignature, recipientDisplayNameOverride, activeProfileElements,
     selected, editedMessage, imageSubject, subjectDetail, artStyle, personalContext,
     currentSceneDescription, selectedDesign, insideImagePosition, accentPositions, imageInterests, frontText, frontTextPosition, frontTextStyle, cardSize,
     generatedImageUrl, insideImageUrl,
@@ -498,7 +513,8 @@ function CreateCardPage() {
   function applyDraft(d: CardDraft) {
     let stepToRestore = d.step;
     if (d.step === "faith" || d.step === "tone") stepToRestore = "occasion";
-    if (d.step === "generating" || d.step === "select") stepToRestore = "notes";
+    if (d.step === "message_mode") stepToRestore = "message_mode";
+    if (d.step === "generating" || d.step === "select") stepToRestore = d.messageMode === "byom" ? "byom_write" : "notes";
     if (d.step === "design_style") stepToRestore = "design_subject";
     if (d.step === "design_loading") stepToRestore = "design_subject";
     if (d.step === "design_generating") stepToRestore = "design_confirm_prompt";
@@ -514,6 +530,10 @@ function CreateCardPage() {
     setIncludeFaithBased(d.includeFaithBased);
     setTone(d.tone);
     setNotes(d.notes);
+    setMessageMode(d.messageMode ?? "generate");
+    setByomGreeting(d.byomGreeting ?? "");
+    setByomBody(d.byomBody ?? "");
+    setByomClosing(d.byomClosing ?? "");
     setSharedWith(d.sharedWith);
     setCoSign(d.coSign);
     setSignerRecipientIds(d.signerRecipientIds ?? []);
@@ -776,6 +796,7 @@ Humor tolerance: ${r.humor_tolerance || "Not specified"}`.replace(/\n{2,}/g, "\n
           relationshipType: recipient!.relationship_type,
           regenerationCount,
           rejectedMessages: rejectedMessages.length > 0 ? rejectedMessages : undefined,
+          senderDisplayName: signerDisplayOverrides[USER_KEY]?.trim() || undefined,
         }),
       });
 
@@ -793,6 +814,77 @@ Humor tolerance: ${r.humor_tolerance || "Not specified"}`.replace(/\n{2,}/g, "\n
     } catch (err: unknown) {
       const message =
         err instanceof Error ? err.message : "Something went wrong";
+      setError(message);
+      setIsLoading(false);
+    }
+  }
+
+  async function polishUserMessage() {
+    setIsLoading(true);
+    setLoadingMessage(`Nuuge is polishing your message for ${recipient!.name}...`);
+    setError(null);
+
+    const ctx = buildContextString(profile, recipient!);
+    const coSignWith = (() => {
+      if (useGroupSignature && signerGroupName.trim()) return signerGroupName.trim();
+      if (signerRecipientIds.length) {
+        const userVal = signerDisplayOverrides[USER_KEY]?.trim() || getDefaultUserDisplayName(profile);
+        const names = [userVal, ...signerRecipientIds
+          .map((id) => {
+            const r = allRecipients.find((rec) => rec.id === id);
+            return signerDisplayOverrides[id]?.trim() || getDefaultDisplayName(r ?? null);
+          })
+          .filter(Boolean)];
+        return names.length ? formatSignerNames(names) : null;
+      }
+      if (coSign) {
+        const userVal = signerDisplayOverrides[USER_KEY]?.trim() || getDefaultUserDisplayName(profile);
+        return formatSignerNames([userVal, profile?.partner_name || ""]);
+      }
+      return null;
+    })();
+
+    try {
+      const res = await fetch("/api/generate-card", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          senderContext: ctx.sender,
+          recipientContext: ctx.recipient,
+          occasion: effectiveOccasion,
+          tone,
+          includeFaithBased,
+          additionalNotes: notes,
+          coSignWith,
+          relationshipType: recipient!.relationship_type,
+          senderDisplayName: signerDisplayOverrides[USER_KEY]?.trim() || undefined,
+          userDraft: {
+            greeting: byomGreeting,
+            body: byomBody,
+            closing: byomClosing,
+          },
+        }),
+      });
+
+      if (!res.ok) {
+        const errData = await res.json();
+        throw new Error(errData.error || "Failed to polish message");
+      }
+
+      const data = await res.json();
+      const userOriginal: CardMessage = {
+        label: "Your original",
+        greeting: byomGreeting,
+        body: byomBody,
+        closing: byomClosing,
+      };
+      setMessages([userOriginal, ...data.messages]);
+      setIsLoading(false);
+      setStep("select");
+      logApiCall("generate-card", { model: "gpt-4o", callType: "chat_completion", recipientId, cardId: editCardId || undefined, sessionId: sessionIdRef.current });
+      setSessionCost((c) => c + 0.025);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Something went wrong";
       setError(message);
       setIsLoading(false);
     }
@@ -1327,7 +1419,7 @@ Humor tolerance: ${r.humor_tolerance || "Not specified"}`.replace(/\n{2,}/g, "\n
                             }
                             setTimeout(() => toneRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 100);
                           }}
-                          className="rounded-full px-4 py-2 text-sm font-medium transition-all"
+                          className="rounded-full px-4 py-2 text-sm font-medium transition-all min-w-[120px] text-center"
                           style={isSelected ? {
                             background: "var(--color-brand)",
                             color: "#fff",
@@ -1403,7 +1495,7 @@ Humor tolerance: ${r.humor_tolerance || "Not specified"}`.replace(/\n{2,}/g, "\n
                       <button
                         key={t}
                         onClick={() => setTone(t)}
-                        className="rounded-full px-4 py-2 text-sm font-medium transition-all"
+                        className="rounded-full px-4 py-2 text-sm font-medium transition-all min-w-[120px] text-center"
                         style={tone === t ? {
                           background: "var(--color-brand)",
                           color: "#fff",
@@ -1421,7 +1513,7 @@ Humor tolerance: ${r.humor_tolerance || "Not specified"}`.replace(/\n{2,}/g, "\n
                 </div>
 
                 <button
-                  onClick={() => setStep("notes")}
+                  onClick={() => setStep("message_mode")}
                   disabled={!tone}
                   className="btn-primary text-base px-6 py-3 disabled:opacity-40"
                 >
@@ -1432,51 +1524,228 @@ Humor tolerance: ${r.humor_tolerance || "Not specified"}`.replace(/\n{2,}/g, "\n
           </div>
         )}
 
-        {/* Step: Additional notes */}
-        {step === "notes" && (
+        {/* Step: Message mode choice */}
+        {step === "message_mode" && (
           <div>
             <h2 className="text-2xl font-bold text-charcoal mb-2">
-              Add a personal touch
+              How do you want to create your message?
             </h2>
-            <p className="text-sm text-warm-gray mb-4">
-              Optional — give Nuuge something specific to weave into the message, or leave it blank.
+            <p className="text-sm text-warm-gray mb-6">
+              Choose how you&apos;d like to write {recipient?.name ? `${recipient.name}'s` : "the"} card message.
             </p>
-            <textarea
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              rows={5}
-              placeholder={"Ideas:\n• A recent trip or shared memory\n• A milestone (promotion, new home)\n• An inside joke\n• Something they said recently"}
-              className="input-field rounded-xl mb-4"
-            />
-            {showShareOption && (
-              <div className="rounded-xl p-4 mb-4" style={{ background: "var(--color-brand-light)", border: "1.5px solid var(--color-sage)" }}>
-                <p className="text-sm font-medium text-charcoal mb-2">
-                  Show this card on linked profiles too?
+            <div className="space-y-3">
+              <button
+                onClick={() => { setMessageMode("generate"); setStep("notes"); }}
+                className="w-full card-surface card-surface-clickable p-5 text-left"
+              >
+                <p className="text-base font-semibold text-charcoal mb-1">Let Nuuge create it</p>
+                <p className="text-sm text-warm-gray">
+                  We&apos;ll write 3 options based on {recipient?.name ? `${recipient.name}'s` : "the recipient's"} profile and your occasion.
                 </p>
-                <p className="text-xs text-warm-gray mb-3">
-                  Since this is a shared occasion, you can save it to both profiles.
+              </button>
+              <button
+                onClick={() => { setMessageMode("byom"); setStep("byom_write"); }}
+                className="w-full card-surface card-surface-clickable p-5 text-left"
+              >
+                <p className="text-base font-semibold text-charcoal mb-1">Write it myself</p>
+                <p className="text-sm text-warm-gray">
+                  Type your own message. We&apos;ll suggest a couple of polished alternatives too.
                 </p>
-                {recipientLinkedPeople.map((lr) => (
-                  <label key={lr.id} className="flex items-center gap-2 text-sm text-charcoal">
-                    <input
-                      type="checkbox"
-                      checked={sharedWith.includes(lr.id)}
-                      onChange={(e) => {
-                        if (e.target.checked) {
-                          setSharedWith([...sharedWith, lr.id]);
-                        } else {
-                          setSharedWith(sharedWith.filter((id) => id !== lr.id));
-                        }
-                      }}
-                      className="rounded"
-                      style={{ accentColor: "var(--color-brand)" }}
-                    />
-                    {lr.name}
-                    <span className="text-xs text-warm-gray capitalize">({lr.linkLabel})</span>
-                  </label>
-                ))}
+              </button>
+            </div>
+            <div className="mt-4">
+              <button
+                onClick={() => setStep("occasion")}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium transition-colors"
+                style={{ color: "var(--color-brand)", border: "1.5px solid var(--color-sage)" }}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+                Back
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Step: BYOM write */}
+        {step === "byom_write" && (
+          <div>
+            <h2 className="text-2xl font-bold text-charcoal mb-2">
+              Write your message
+            </h2>
+            <p className="text-sm text-warm-gray mb-6">
+              Write your greeting, message, and closing. We&apos;ll offer polished alternatives to choose from.
+            </p>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-charcoal mb-1">Greeting</label>
+                <input
+                  type="text"
+                  value={byomGreeting}
+                  onChange={(e) => setByomGreeting(e.target.value)}
+                  placeholder={`Dear ${recipient?.name || "friend"},`}
+                  className="input-field rounded-xl w-full"
+                />
               </div>
+              <div>
+                <label className="block text-sm font-medium text-charcoal mb-1">Message</label>
+                <textarea
+                  value={byomBody}
+                  onChange={(e) => setByomBody(e.target.value)}
+                  rows={6}
+                  placeholder="Write your message here..."
+                  className="input-field rounded-xl w-full"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-charcoal mb-1">Closing</label>
+                <input
+                  type="text"
+                  value={byomClosing}
+                  onChange={(e) => setByomClosing(e.target.value)}
+                  placeholder={getDefaultUserDisplayName(profile) ? `With love, ${getDefaultUserDisplayName(profile)}` : "With love,"}
+                  className="input-field rounded-xl w-full"
+                />
+              </div>
+            </div>
+            <div className="flex items-center gap-3 mt-6">
+              <button
+                onClick={() => setStep("message_mode")}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium transition-colors"
+                style={{ color: "var(--color-brand)", border: "1.5px solid var(--color-sage)" }}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+                Back
+              </button>
+              <button
+                onClick={() => setStep("notes")}
+                disabled={!byomBody.trim()}
+                className="btn-primary disabled:opacity-40"
+              >
+                Next
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Step: Additional notes / envelope */}
+        {step === "notes" && (
+          <div>
+            {messageMode !== "byom" && (
+              <>
+                <h2 className="text-2xl font-bold text-charcoal mb-2">
+                  Personalize your message
+                </h2>
+                <p className="text-sm text-warm-gray mb-4">
+                  Optional — give Nuuge something specific to weave into the message, or leave it blank.
+                </p>
+                <textarea
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  rows={5}
+                  placeholder={"Ideas:\n• A recent trip or shared memory\n• A milestone (promotion, new home)\n• An inside joke\n• Something they said recently"}
+                  className="input-field rounded-xl mb-4"
+                />
+                {showShareOption && (
+                  <div className="rounded-xl p-4 mb-4" style={{ background: "var(--color-brand-light)", border: "1.5px solid var(--color-sage)" }}>
+                    <p className="text-sm font-medium text-charcoal mb-2">
+                      Show this card on linked profiles too?
+                    </p>
+                    <p className="text-xs text-warm-gray mb-3">
+                      Since this is a shared occasion, you can save it to both profiles.
+                    </p>
+                    {recipientLinkedPeople.map((lr) => (
+                      <label key={lr.id} className="flex items-center gap-2 text-sm text-charcoal">
+                        <input
+                          type="checkbox"
+                          checked={sharedWith.includes(lr.id)}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setSharedWith([...sharedWith, lr.id]);
+                            } else {
+                              setSharedWith(sharedWith.filter((id) => id !== lr.id));
+                            }
+                          }}
+                          className="rounded"
+                          style={{ accentColor: "var(--color-brand)" }}
+                        />
+                        {lr.name}
+                        <span className="text-xs text-warm-gray capitalize">({lr.linkLabel})</span>
+                      </label>
+                    ))}
+                  </div>
+                )}
+                {/* Profile topics to include — split into Interests (opt-in) and Personality (opt-out) */}
+                {recipient && (() => {
+                  const raw = Object.keys(activeProfileElements).length > 0
+                    ? normalizeProfileElements(activeProfileElements)
+                    : extractProfileElements(recipient);
+                  if (Object.keys(activeProfileElements).length === 0 && Object.keys(raw).length > 0) {
+                    setTimeout(() => setActiveProfileElements(raw), 0);
+                  }
+                  const elements = raw;
+                  const allEntries = Object.entries(elements);
+                  const interestEntries = allEntries.filter(([k]) => isInterestLikeKey(k));
+                  const toneEntries = allEntries.filter(([k]) => isToneLikeKey(k));
+
+                  const renderPills = (entries: [string, boolean][]) => (
+                    <div className="flex flex-wrap gap-2">
+                      {entries.map(([key, active]) => (
+                        <button
+                          key={key}
+                          onClick={() => setActiveProfileElements((prev) => ({ ...prev, [key]: !prev[key] }))}
+                          className="text-sm px-3 py-1.5 rounded-full font-medium transition-all"
+                          style={active ? {
+                            background: "var(--color-brand-light)",
+                            border: "1.5px solid var(--color-brand)",
+                            color: "var(--color-brand)",
+                          } : {
+                            background: "var(--color-faint-gray)",
+                            border: "1.5px solid var(--color-light-gray)",
+                            color: "var(--color-warm-gray)",
+                          }}
+                        >
+                          {active ? "✓ " : ""}{key.replace(/^[^:]+: /, "")}
+                        </button>
+                      ))}
+                    </div>
+                  );
+
+                  return allEntries.length > 0 ? (
+                    <div className="space-y-4 mb-4">
+                      {interestEntries.length > 0 && (
+                        <div className="rounded-xl p-4" style={{ background: "var(--color-faint-gray)", border: "1px solid var(--color-light-gray)" }}>
+                          <p className="text-base font-medium text-charcoal mb-1">
+                            Interests &amp; details
+                          </p>
+                          <p className="text-sm text-warm-gray mb-3">
+                            Select any of {recipient.name}&apos;s interests you&apos;d like referenced in the message.
+                          </p>
+                          {renderPills(interestEntries)}
+                        </div>
+                      )}
+                      {toneEntries.length > 0 && (
+                        <div className="rounded-xl p-4" style={{ background: "var(--color-faint-gray)", border: "1px solid var(--color-light-gray)" }}>
+                          <p className="text-base font-medium text-charcoal mb-1">
+                            Personality &amp; style
+                          </p>
+                          <p className="text-sm text-warm-gray mb-3">
+                            These shape the tone of the message. Deselect any that don&apos;t fit.
+                          </p>
+                          {renderPills(toneEntries)}
+                        </div>
+                      )}
+                    </div>
+                  ) : null;
+                })()}
+              </>
             )}
+
+            {messageMode === "byom" && (
+              <h2 className="text-2xl font-bold text-charcoal mb-4">
+                Envelope &amp; delivery
+              </h2>
+            )}
+
             {/* Envelope — Going to + Signed from */}
             <div className="rounded-xl p-4 mb-4" style={{ background: "var(--color-faint-gray)", border: "1px solid var(--color-light-gray)" }}>
               <p className="text-base font-medium text-charcoal mb-2">Envelope</p>
@@ -1622,69 +1891,6 @@ Humor tolerance: ${r.humor_tolerance || "Not specified"}`.replace(/\n{2,}/g, "\n
                 </p>
               )}
             </div>
-            {/* Profile topics to include — split into Interests (opt-in) and Personality (opt-out) */}
-            {recipient && (() => {
-              const raw = Object.keys(activeProfileElements).length > 0
-                ? normalizeProfileElements(activeProfileElements)
-                : extractProfileElements(recipient);
-              if (Object.keys(activeProfileElements).length === 0 && Object.keys(raw).length > 0) {
-                setTimeout(() => setActiveProfileElements(raw), 0);
-              }
-              const elements = raw;
-              const allEntries = Object.entries(elements);
-              const interestEntries = allEntries.filter(([k]) => isInterestLikeKey(k));
-              const toneEntries = allEntries.filter(([k]) => isToneLikeKey(k));
-
-              const renderPills = (entries: [string, boolean][]) => (
-                <div className="flex flex-wrap gap-2">
-                  {entries.map(([key, active]) => (
-                    <button
-                      key={key}
-                      onClick={() => setActiveProfileElements((prev) => ({ ...prev, [key]: !prev[key] }))}
-                      className="text-sm px-3 py-1.5 rounded-full font-medium transition-all"
-                      style={active ? {
-                        background: "var(--color-brand-light)",
-                        border: "1.5px solid var(--color-brand)",
-                        color: "var(--color-brand)",
-                      } : {
-                        background: "var(--color-faint-gray)",
-                        border: "1.5px solid var(--color-light-gray)",
-                        color: "var(--color-warm-gray)",
-                      }}
-                    >
-                      {active ? "✓ " : ""}{key.replace(/^[^:]+: /, "")}
-                    </button>
-                  ))}
-                </div>
-              );
-
-              return allEntries.length > 0 ? (
-                <div className="space-y-4 mb-4">
-                  {interestEntries.length > 0 && (
-                    <div className="rounded-xl p-4" style={{ background: "var(--color-faint-gray)", border: "1px solid var(--color-light-gray)" }}>
-                      <p className="text-base font-medium text-charcoal mb-1">
-                        Interests &amp; details
-                      </p>
-                      <p className="text-sm text-warm-gray mb-3">
-                        Select any of {recipient.name}&apos;s interests you&apos;d like referenced in the message.
-                      </p>
-                      {renderPills(interestEntries)}
-                    </div>
-                  )}
-                  {toneEntries.length > 0 && (
-                    <div className="rounded-xl p-4" style={{ background: "var(--color-faint-gray)", border: "1px solid var(--color-light-gray)" }}>
-                      <p className="text-base font-medium text-charcoal mb-1">
-                        Personality &amp; style
-                      </p>
-                      <p className="text-sm text-warm-gray mb-3">
-                        These shape the tone of the message. Deselect any that don&apos;t fit.
-                      </p>
-                      {renderPills(toneEntries)}
-                    </div>
-                  )}
-                </div>
-              ) : null;
-            })()}
 
             {error && (
               <div className="p-3 rounded-lg text-sm mb-4" style={{ background: "var(--color-error-light)", border: "1px solid var(--color-error)", color: "var(--color-error)" }}>
@@ -1693,7 +1899,7 @@ Humor tolerance: ${r.humor_tolerance || "Not specified"}`.replace(/\n{2,}/g, "\n
             )}
             <div className="flex items-center gap-3">
               <button
-                onClick={() => setStep("occasion")}
+                onClick={() => setStep(messageMode === "byom" ? "byom_write" : "message_mode")}
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium transition-colors"
                 style={{ color: "var(--color-brand)", border: "1.5px solid var(--color-sage)" }}
               >
@@ -1701,10 +1907,10 @@ Humor tolerance: ${r.humor_tolerance || "Not specified"}`.replace(/\n{2,}/g, "\n
                 Back
               </button>
               <button
-                onClick={generateMessages}
+                onClick={messageMode === "byom" ? polishUserMessage : generateMessages}
                 className="btn-primary"
               >
-                Generate card messages
+                {messageMode === "byom" ? "Polish my message" : "Generate card messages"}
               </button>
             </div>
           </div>

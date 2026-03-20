@@ -47,6 +47,8 @@ export async function POST(req: NextRequest) {
       mode = "circle",
       newsCategory,
       newsDescription,
+      userDraft,
+      senderDisplayName,
     }: {
       senderContext: string;
       recipientContext?: string;
@@ -62,6 +64,8 @@ export async function POST(req: NextRequest) {
       mode?: "circle" | "news";
       newsCategory?: string;
       newsDescription?: string;
+      userDraft?: { greeting: string; body: string; closing: string };
+      senderDisplayName?: string;
     } = body;
 
     const isNews = mode === "news";
@@ -183,10 +187,94 @@ This is a sympathy, get-well, apology, or difficult-news card. You MUST:
 - Option 2: A version that leans into humor or playfulness (using the recipient's interests or personality)
 - Option 3: A creative or unexpected angle — maybe a reference to a shared interest, an inside-joke-style observation, or a clever twist`;
 
+    const senderNameInstruction = senderDisplayName
+      ? `\nSENDER SIGN-OFF NAME: The sender wants to sign as "${senderDisplayName}". Use this exact name in the closing — do NOT use any other name or nickname from the profile.`
+      : "";
+
     const recipientSection = isNews
       ? `\nNEWS CATEGORY: ${newsCategory || "Life update"}\nSENDER'S STORY / DESCRIPTION: ${newsDescription || "General life update to share with others"}\n\n(No specific recipient — this card will be shared with multiple people.)`
       : `\nABOUT THE RECIPIENT:\n${recipientContext || "No recipient context"}${historySection}`;
 
+    // ── BYOM polish mode ──
+    if (userDraft) {
+      const polishPrompt = `You are Nuuge's card polishing engine. The sender has written their own greeting card message and wants two professionally polished alternatives.
+
+ABOUT THE SENDER:
+${senderContext}
+${recipientSection}
+
+OCCASION: ${effectiveOccasion}
+REQUESTED TONE: ${tone}
+${effectiveNotes ? `ADDITIONAL NOTES FROM SENDER: ${effectiveNotes}` : ""}
+${coSignWith ? `CO-SIGNING: This card is from BOTH the sender and ${coSignWith} together. Use "we", "our", and "us" instead of "I", "my", and "me". Sign off with both names.` : ""}${senderNameInstruction}
+${relationshipGuardrail}
+${faithModifier}
+${gentleModifier}
+
+THE SENDER'S ORIGINAL MESSAGE:
+Greeting: ${userDraft.greeting}
+Body: ${userDraft.body}
+Closing: ${userDraft.closing}
+
+YOUR TASK:
+Generate exactly 2 polished alternatives to the sender's original message.
+
+Option 1 — "Refined":
+- Keep the sender's structure, greeting style, and overall tone
+- Polish the wording — tighten phrasing, improve flow, fix any awkwardness
+- Stay close to the original; the sender should recognize their own message
+
+Option 2 — "Reimagined":
+- Keep the core sentiment, occasion, and relationship context
+- Feel free to restructure, reorder ideas, change the greeting style, or add warmth/humor per the tone setting
+- More creative latitude — a fresh take on what the sender was trying to say
+
+Both options should:
+- Sound like they were written by the sender, not by an AI
+- Match the requested tone
+- Be appropriate for the occasion
+- Have a closing with a newline before the sender name(s): use \\n. Example: "Love,\\nJane"
+
+Keep messages concise. Real card messages are not essays.
+
+Respond with ONLY valid JSON in this exact format:
+{
+  "messages": [
+    {
+      "label": "Refined",
+      "greeting": "the greeting line",
+      "body": "the message body",
+      "closing": "closing phrase,\\nSender Name"
+    },
+    {
+      "label": "Reimagined",
+      "greeting": "...",
+      "body": "...",
+      "closing": "..."
+    }
+  ]
+}`;
+
+      const completion = await openai.chat.completions.create({
+        model: "gpt-4o",
+        messages: [
+          { role: "system", content: polishPrompt },
+          { role: "user", content: "Generate the 2 polished alternatives." },
+        ],
+        temperature: 0.9,
+        max_tokens: 800,
+      });
+
+      const raw = completion.choices[0]?.message?.content || "";
+      const jsonMatch = raw.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) {
+        throw new Error("Failed to parse polished messages from AI response");
+      }
+      const parsed = JSON.parse(jsonMatch[0]);
+      return NextResponse.json(parsed);
+    }
+
+    // ── Standard generation mode ──
     const systemPrompt = `You are Nuuge's card writing engine. Your job is to generate personal, specific greeting card messages based on deep context about the sender${isNews ? " and their news/event" : " and recipient"}.
 
 ABOUT THE SENDER:
@@ -196,7 +284,7 @@ ${rejectedSection}
 OCCASION/NEWS: ${effectiveOccasion}
 REQUESTED TONE: ${tone}
 ${effectiveNotes ? `ADDITIONAL NOTES FROM SENDER: ${effectiveNotes}` : ""}
-${!isNews && coSignWith ? `CO-SIGNING: This card is from BOTH the sender and ${coSignWith} together. Throughout the entire message, use "we", "our", and "us" instead of "I", "my", and "me". The greeting, body, and closing should all reflect that two people are writing — e.g. "We love you", "We're so proud", "Our favorite memory". Sign off with both names.` : ""}
+${!isNews && coSignWith ? `CO-SIGNING: This card is from BOTH the sender and ${coSignWith} together. Throughout the entire message, use "we", "our", and "us" instead of "I", "my", and "me". The greeting, body, and closing should all reflect that two people are writing — e.g. "We love you", "We're so proud", "Our favorite memory". Sign off with both names.` : ""}${senderNameInstruction}
 ${relationshipGuardrail}
 ${faithModifier}
 ${gentleModifier}
