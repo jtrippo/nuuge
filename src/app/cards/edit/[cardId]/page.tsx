@@ -126,7 +126,6 @@ export default function EditCardPage() {
   const [recipient, setRecipient] = useState<Recipient | null>(null);
   const [mounted, setMounted] = useState(false);
   const [saved, setSaved] = useState(false);
-  const [savedAsNew, setSavedAsNew] = useState<string | null>(null);
   const loadedRef = useRef(false);
 
   // Editable fields
@@ -161,6 +160,9 @@ export default function EditCardPage() {
   const [customSignerNames, setCustomSignerNames] = useState<string[]>([]);
   const [regenerating, setRegenerating] = useState(false);
   const [regenError, setRegenError] = useState<string | null>(null);
+
+  // Snapshot for manual-save: captured on load, used for dirty detection & cancel
+  const snapshotRef = useRef<Record<string, unknown> | null>(null);
   const isNewsCard = card?.card_type === "news";
   const isBeyondCard = card?.card_type === "beyond";
   const isNonCircleCard = isNewsCard || isBeyondCard;
@@ -245,15 +247,40 @@ export default function EditCardPage() {
         if (customKeys.length > 0 && overrides) setCustomSignerNames(customKeys.map((k) => overrides[k]));
         if (!signerIds?.length && hydrated.co_signed_with?.trim()) {
           const recipients = getRecipients();
-          const r = recipients.find((rec) => rec.id === c.recipient_id);
+          const userProf = getUserProfile();
           const coName = hydrated.co_signed_with.trim().toLowerCase();
-          const match = r?.links?.find((link) => {
+          const houseMatch = (userProf?.household_links || []).find((link) => {
             const linked = recipients.find((rec) => rec.id === link.recipient_id);
             const fn = (linked?.first_name || linked?.display_name || linked?.name || "").toLowerCase();
             return fn && (fn === coName || fn.startsWith(coName) || coName.startsWith(fn));
           });
-          if (match) setSignerRecipientIds([match.recipient_id]);
+          if (houseMatch) setSignerRecipientIds([houseMatch.recipient_id]);
         }
+        // Capture snapshot from loaded card values for dirty detection & cancel
+        snapshotRef.current = {
+          greeting: parts[0] || "",
+          body: parts.slice(1, -1).join("\n\n") || parts[1] || "",
+          closing: parts[parts.length - 1] || "",
+          frontText: hydrated.front_text ?? "",
+          frontTextPosition: hydrated.front_text_position ?? "bottom-right",
+          frontTextStyle: (hydrated.front_text_style as TextStyleChoice) ?? "plain_black",
+          frontTextFont: hydrated.front_text_font ?? "sans",
+          insideFont: hydrated.font ?? "sans",
+          toneUsed: t, occasion: o, artStyle: s, imageSubject: sub,
+          cardSize: hydrated.card_size ?? "5x7",
+          letterText: hydrated.letter_text ?? "",
+          letterFont: hydrated.letter_font ?? "handwritten",
+          msgSizeScale: hydrated.msg_font_scale ?? 0,
+          ftSizeScale: hydrated.ft_font_scale ?? 1,
+          letterSizeScale: hydrated.letter_font_scale ?? 1,
+          recipientDisplayNameOverride: recDisplay?.trim() || (hydrated.card_type === "beyond" ? ((hydrated as { quick_recipient_name?: string | null }).quick_recipient_name?.trim() || "") : ""),
+          envelopeLabel: envLabel?.trim() || "",
+          signerRecipientIds: signerIds?.length ? [...signerIds] : [],
+          signerDisplayOverrides: overrides && Object.keys(overrides).length ? { ...overrides } : {},
+          signerGroupName: groupName?.trim() || "",
+          useGroupSignature: !!(groupName?.trim()),
+          customSignerNames: Object.keys(overrides || {}).filter((k) => k.startsWith("__custom_")).sort().map((k) => overrides![k]),
+        };
         loadedRef.current = true;
       });
       const recipients = getRecipients();
@@ -263,24 +290,14 @@ export default function EditCardPage() {
     }
   }, [cardId]);
 
-  useEffect(() => {
-    if (!card || !loadedRef.current) return;
-    updateCard(cardId, {
-      message_text: [greeting, body, closing].filter(Boolean).join("\n\n"),
-      front_text: frontText.trim() || null,
-      front_text_position: frontText.trim() ? frontTextPosition : null,
-      front_text_style: frontTextStyle,
-      front_text_font: frontTextFont,
-      font: insideFont,
-      msg_font_scale: msgSizeScale,
-      ft_font_scale: ftSizeScale,
-      card_size: cardSize,
-      letter_text: letterText.trim() || null,
-      letter_font: letterText.trim() ? letterFont : null,
-      letter_font_scale: letterSizeScale,
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [greeting, body, closing, frontText, frontTextPosition, frontTextStyle, frontTextFont, insideFont, msgSizeScale, ftSizeScale, cardSize, letterText, letterFont, letterSizeScale]);
+  // Dirty detection: compare current fields to snapshot
+  const currentFields = loadedRef.current ? JSON.stringify({
+    greeting, body, closing, frontText, frontTextPosition, frontTextStyle, frontTextFont,
+    insideFont, toneUsed, occasion, artStyle, imageSubject, cardSize, letterText, letterFont,
+    msgSizeScale, ftSizeScale, letterSizeScale, recipientDisplayNameOverride, envelopeLabel,
+    signerRecipientIds, signerDisplayOverrides, signerGroupName, useGroupSignature, customSignerNames,
+  }) : "";
+  const isDirty = loadedRef.current && snapshotRef.current != null && currentFields !== JSON.stringify(snapshotRef.current);
 
   const cardLoaded = !!card;
   useEffect(() => {
@@ -331,7 +348,7 @@ export default function EditCardPage() {
     closingSize: remToCqw(baseSizing.closingSize, effectiveMsgScale),
     gap: remToCqw(baseSizing.gap, effectiveMsgScale),
   };
-  const ftSizeCqw = remToCqw("1.5rem", ftSizeScale);
+  const ftSizeCqw = `${(8.5 * ftSizeScale).toFixed(2)}cqw`;
 
   function getUpdates(): Partial<Card> {
     return {
@@ -371,7 +388,7 @@ export default function EditCardPage() {
       signer_group_name: useGroupSignature && signerGroupName.trim() ? signerGroupName.trim() : null,
       recipient_display_name: recipientDisplayNameOverride.trim() || null,
       envelope_label: envelopeLabel.trim() || null,
-      ...(signerRecipientIds.length ? { co_signed_with: null } : {}),
+      ...(signerRecipientIds.length || customSignerNames.some((n) => n.trim()) ? { co_signed_with: null } : {}),
     };
   }
 
@@ -381,22 +398,44 @@ export default function EditCardPage() {
     setOriginalOccasion(occasion);
     setOriginalArtStyle(artStyle);
     setOriginalSubject(imageSubject);
+    // Update snapshot so isDirty resets
+    snapshotRef.current = JSON.parse(currentFields);
     setSaved(true);
-    setSavedAsNew(null);
   }
 
-  function handleSaveAsNew() {
-    const updates = getUpdates();
-    const newCard = saveCard({
-      ...card!,
-      ...updates,
-      id: undefined as unknown as string,
-      created_at: undefined as unknown as string,
-    });
-    if (newCard && typeof newCard === "object" && "id" in newCard) {
-      setSavedAsNew((newCard as { id: string }).id);
-      setSaved(false);
-    }
+  function handleCancel() {
+    if (!snapshotRef.current) return;
+    const s = snapshotRef.current as Record<string, unknown>;
+    setGreeting(s.greeting as string);
+    setBody(s.body as string);
+    setClosing(s.closing as string);
+    setFrontText(s.frontText as string);
+    setFrontTextPosition(s.frontTextPosition as string);
+    setFrontTextStyle(s.frontTextStyle as TextStyleChoice);
+    setFrontTextFont(s.frontTextFont as string);
+    setInsideFont(s.insideFont as string);
+    setToneUsed(s.toneUsed as string);
+    setOccasion(s.occasion as string);
+    setArtStyle(s.artStyle as string);
+    setImageSubject(s.imageSubject as string);
+    setOriginalTone(s.toneUsed as string);
+    setOriginalOccasion(s.occasion as string);
+    setOriginalArtStyle(s.artStyle as string);
+    setOriginalSubject(s.imageSubject as string);
+    setCardSize(s.cardSize as "4x6" | "5x7");
+    setLetterText(s.letterText as string);
+    setLetterFont(s.letterFont as string);
+    setMsgSizeScale(s.msgSizeScale as number);
+    setFtSizeScale(s.ftSizeScale as number);
+    setLetterSizeScale(s.letterSizeScale as number);
+    setRecipientDisplayNameOverride(s.recipientDisplayNameOverride as string);
+    setEnvelopeLabel(s.envelopeLabel as string);
+    setSignerRecipientIds([...(s.signerRecipientIds as string[])]);
+    setSignerDisplayOverrides({ ...(s.signerDisplayOverrides as Record<string, string>) });
+    setSignerGroupName(s.signerGroupName as string);
+    setUseGroupSignature(s.useGroupSignature as boolean);
+    setCustomSignerNames([...(s.customSignerNames as string[])]);
+    setSaved(false);
   }
 
   function navigateToWizard(startStep: string) {
@@ -490,7 +529,10 @@ export default function EditCardPage() {
         title={isNonCircleCard ? `${occasion} — ${isNewsCard ? "Share a moment" : "Quick card"}` : `${occasion} card${recipient ? ` for ${recipient.name}` : ""}`}
       >
         <button
-          onClick={() => { handleSave(); recipient && !isNonCircleCard ? router.push(`/recipients/${recipient.id}`) : router.push("/"); }}
+          onClick={() => {
+            if (isDirty && !window.confirm("You have unsaved changes. Leave without saving?")) return;
+            recipient && !isNonCircleCard ? router.push(`/recipients/${recipient.id}`) : router.push("/");
+          }}
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium"
           style={{ color: "var(--color-brand)", border: "1.5px solid var(--color-sage)" }}
         >
@@ -498,26 +540,39 @@ export default function EditCardPage() {
           {recipient?.name ?? "Home"}
         </button>
         <span className="flex-1" />
-        <button
-          onClick={handleSaveAsNew}
-          className="px-4 py-1.5 rounded-full text-sm text-warm-gray hover:text-charcoal transition-colors"
-          style={{ border: "1.5px solid var(--color-sage)" }}
-        >
-          Save as new
-        </button>
-        <button
-          onClick={() => { handleSave(); window.location.href = `/cards/view/${card.id}`; }}
-          className="px-4 py-1.5 rounded-full text-sm text-warm-gray hover:text-charcoal transition-colors"
-          style={{ border: "1.5px solid var(--color-sage)" }}
-        >
-          View E-card
-        </button>
-        <button
-          onClick={() => { handleSave(); window.location.href = `/cards/print/${card.id}`; }}
-          className="btn-primary px-5 py-2 rounded-full text-sm font-medium"
-        >
-          Print Preview
-        </button>
+        {isDirty ? (
+          <>
+            <button
+              onClick={handleCancel}
+              className="px-4 py-1.5 rounded-full text-sm text-warm-gray hover:text-charcoal transition-colors"
+              style={{ border: "1.5px solid var(--color-sage)" }}
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleSave}
+              className="btn-primary px-5 py-2 rounded-full text-sm font-medium"
+            >
+              Save
+            </button>
+          </>
+        ) : (
+          <>
+            <button
+              onClick={() => { window.location.href = `/cards/view/${card.id}`; }}
+              className="px-4 py-1.5 rounded-full text-sm text-warm-gray hover:text-charcoal transition-colors"
+              style={{ border: "1.5px solid var(--color-sage)" }}
+            >
+              View E-card
+            </button>
+            <button
+              onClick={() => { window.location.href = `/cards/print/${card.id}`; }}
+              className="btn-primary px-5 py-2 rounded-full text-sm font-medium"
+            >
+              Print Preview
+            </button>
+          </>
+        )}
       </AppHeader>
 
       {/* ─── Sticky Card Preview ─── */}
@@ -525,18 +580,14 @@ export default function EditCardPage() {
         className="sticky z-20 border-b"
         style={{ top: stickyTop, background: "var(--color-cream)", borderColor: "var(--color-light-gray)" }}
       >
-        {(saved || savedAsNew) && (
+        {saved && !isDirty && (
           <div className="text-center py-1.5 text-xs font-medium" style={{ background: "var(--color-brand-light)", color: "var(--color-brand)" }}>
-            {savedAsNew ? (
-              <>
-                Saved as new card.{" "}
-                <button onClick={() => router.push(`/cards/edit/${savedAsNew}`)} className="underline" style={{ color: "var(--color-brand)" }}>Edit it</button>
-                {" · "}
-                <button onClick={() => { window.location.href = `/cards/view/${savedAsNew}`; }} className="underline" style={{ color: "var(--color-brand)" }}>View it</button>
-              </>
-            ) : "Changes saved."}
+            Changes saved
           </div>
         )}
+        <p className="text-center text-xs py-1" style={{ color: "var(--color-warm-gray)" }}>
+          {isDirty ? "You have unsaved changes" : "Edit and review your changes — when satisfied, save your results"}
+        </p>
         <div className="flex gap-4 justify-center py-3 px-4">
           <div
             className="relative card-surface rounded-xl shadow-lg overflow-hidden"
@@ -545,16 +596,14 @@ export default function EditCardPage() {
               {card.image_url ? (
                 <>
                   <img src={card.image_url} alt="Card front" className="w-full h-full object-cover" />
-                  {frontText && (
+                  {frontText && card.front_text_mode !== "bake" && (
                     <div
                       style={{
                         position: "absolute",
                         ...ftPos,
                         ...ftFont,
                         ...ftStyle,
-                        maxWidth: "84%",
-                        padding: "0.5rem",
-                        boxSizing: "border-box",
+                        width: "96%",
                         fontSize: ftSizeCqw,
                         lineHeight: 1.25,
                         textAlign: frontTextAlign(frontTextPosition),
@@ -1096,6 +1145,13 @@ export default function EditCardPage() {
         {/* ─── Front Text ─── */}
         <div className="card-surface p-5 mb-4">
           <p className="section-label mb-3">Front text</p>
+          {card.front_text_mode === "bake" ? (
+            <div className="space-y-2">
+              <p className="text-xs text-warm-gray">Text was baked into the artwork during creation. To change it, regenerate the image from the create flow.</p>
+              {card.bake_greeting && <p className="text-sm text-charcoal"><span className="font-medium">Greeting:</span> {card.bake_greeting}</p>}
+              {card.bake_tagline && <p className="text-sm text-charcoal"><span className="font-medium">Tagline:</span> {card.bake_tagline}</p>}
+            </div>
+          ) : (
           <div className="space-y-3">
             <p className="text-xs text-warm-gray">Add line breaks (Enter) to control how longer text wraps.</p>
             <textarea
@@ -1158,6 +1214,7 @@ export default function EditCardPage() {
               </div>
             </div>
           </div>
+          )}
         </div>
 
         {/* ─── Print Settings ─── */}

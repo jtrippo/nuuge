@@ -42,23 +42,32 @@ export function saveUserProfile(profile: Partial<UserProfile>) {
 export function getRecipients(): Recipient[] {
   if (!isBrowser()) return [];
   const raw = localStorage.getItem(KEYS.RECIPIENTS);
-  return raw ? JSON.parse(raw) : [];
+  if (!raw) return [];
+  const list: Recipient[] = JSON.parse(raw);
+  let migrated = false;
+  for (const r of list) {
+    if (r.birthday?.trim()) {
+      const dates = r.important_dates || [];
+      const hasEntry = dates.some((d) => (d.label ?? "").toLowerCase().trim() === "birthday");
+      if (!hasEntry) {
+        dates.push({ label: "Birthday", date: r.birthday.trim(), recurring: true });
+        r.important_dates = dates;
+      }
+      r.birthday = null;
+      migrated = true;
+    }
+  }
+  if (migrated) {
+    localStorage.setItem(KEYS.RECIPIENTS, JSON.stringify(list));
+  }
+  return list;
 }
 
 export function saveRecipient(recipient: Partial<Recipient>) {
   if (!isBrowser()) return;
   const existing = getRecipients();
-  // Sync birthday from Important dates when birthday field is empty (single source of truth)
-  let birthday = (recipient.birthday ?? "").trim() || null;
-  if (!birthday && (recipient.important_dates?.length ?? 0) > 0) {
-    const entry = recipient.important_dates!.find(
-      (d) => (d.label ?? "").toLowerCase().trim() === "birthday"
-    );
-    if (entry?.date?.trim()) birthday = entry.date.trim();
-  }
   const withId = {
     ...recipient,
-    birthday: birthday ?? recipient.birthday,
     id: recipient.id || crypto.randomUUID(),
     created_at: recipient.created_at || new Date().toISOString(),
     updated_at: new Date().toISOString(),

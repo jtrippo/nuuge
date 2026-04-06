@@ -38,16 +38,20 @@ export async function POST(req: NextRequest) {
       occasion: string;
       tone: string;
       position?: string;
-      orientation?: "horizontal" | "vertical" | "square";
+      orientation?: "horizontal" | "vertical" | "square" | "frame";
       artStyle?: string;
       userGuidance?: string;
     } = body;
 
-    const shapeDesc = orientation === "horizontal"
-      ? "a wide horizontal strip (roughly 5:1 ratio — very wide, very short)"
-      : orientation === "vertical"
-        ? "a tall vertical strip (roughly 1:5 ratio — very narrow, very tall)"
-        : "a square area (used as a faded watermark behind text)";
+    const isFrame = orientation === "frame";
+
+    const shapeDesc = isFrame
+      ? "a full-page decorative border frame (portrait orientation, roughly 2:3 ratio). The frame wraps around ALL four edges of the card, leaving the CENTER completely empty/transparent for text. Think ornamental corners connected by delicate border lines"
+      : orientation === "horizontal"
+        ? "a wide horizontal strip (roughly 5:1 ratio — very wide, very short)"
+        : orientation === "vertical"
+          ? "a tall vertical strip (roughly 1:5 ratio — very narrow, very tall)"
+          : "a square area (used as a faded watermark behind text)";
 
     const positionLabel = position ?? "bottom";
 
@@ -72,7 +76,13 @@ RULES:
 3. Keep it simple — one focal element or a repeating pattern from the front, not a whole new scene
 4. For horizontal strips: think borders, edges, scattered elements (petals, leaves, stars), a horizon line, a decorative band
 5. For vertical strips: think a single stem, a tree trunk, a flowing ribbon, a column of small repeating elements
-6. Option 3 should always be "Plain crop" — just crop a section of the front image with no changes
+${isFrame ? `6. For FRAMES: create a decorative border using elements from the front cover. CRITICAL LAYOUT RULES:
+   - The border decoration MUST extend to the VERY EDGES of the image — touching all four sides with NO margin or padding between the decoration and the image boundary.
+   - The CENTER of the image MUST be completely WHITE (pure #FFFFFF) and empty — this is where the message text goes. Leave at least 55% of the area as white space.
+   - The background MUST be pure white (#FFFFFF), NOT cream, off-white, or any tinted color.
+   - Think: ornamental corners connected by delicate border lines that run along the very edge of the image, scattered small elements along the borders only, or a repeating motif border.
+   - The frame must be SYMMETRICAL and balanced.
+7. Option 3 should be a simple, elegant frame using the most prominent motif from the front cover` : `6. Option 3 should always be "Plain crop" — just crop a section of the front image with no changes`}
 
 Suggest exactly 3 options:
 
@@ -82,10 +92,10 @@ Respond with ONLY valid JSON:
     {
       "title": "Short name (2-3 words)",
       "description": "What the user sees — which part of the front cover this uses.",
-      "image_prompt": "Extract/crop [specific element] from the front cover image. Recompose it as a ${shapeDesc.split("(")[0].trim()} decoration. Keep the same colors, style, and artistic feel. [any small addition like 'add a subtle sparkle' or 'fade the edges to white']. No text."
+      "image_prompt": "${isFrame ? `Create a decorative border frame using [specific element] from the front cover. The border elements MUST touch all four edges of the image — no margin or padding. Arrange motifs symmetrically in all four corners connected by delicate lines along every edge. The center must be pure white (#FFFFFF) and completely empty (at least 55% white space). Background: pure white, NOT cream or off-white. Same artistic style as the front. No text.` : `Extract/crop [specific element] from the front cover image. Recompose it as a ${shapeDesc.split("(")[0].trim()} decoration. Keep the same colors, style, and artistic feel. [any small addition like 'add a subtle sparkle' or 'fade the edges to white']. No text.`}"
     },
     { "title": "...", "description": "...", "image_prompt": "..." },
-    { "title": "Plain crop", "description": "A simple cropped section from the front cover — no changes.", "image_prompt": "Crop the most visually interesting ${orientation === "horizontal" ? "horizontal band" : orientation === "vertical" ? "vertical strip" : "central area"} from this image. Keep it exactly as-is, same colors and style, just reframed to fit a ${shapeDesc.split("(")[0].trim()}. No modifications, no text." }
+    { "title": "${isFrame ? "Simple Border" : "Plain crop"}", "description": "${isFrame ? "A clean, elegant border frame using the primary motif from the front cover." : "A simple cropped section from the front cover — no changes."}", "image_prompt": "${isFrame ? `Create a symmetrical decorative border frame using the most prominent visual element from the front cover. Place ornamental motifs in all four corners connected by subtle border lines that run along the VERY EDGES of the image — no margin or padding. The center must be pure white (#FFFFFF) and completely empty — at least 55% blank white space for text. Background: pure white (#FFFFFF), NOT cream or off-white. Same artistic style as the front. No text.` : `Crop the most visually interesting ${orientation === "horizontal" ? "horizontal band" : orientation === "vertical" ? "vertical strip" : "central area"} from this image. Keep it exactly as-is, same colors and style, just reframed to fit a ${shapeDesc.split("(")[0].trim()}. No modifications, no text.`}" }
   ]
 }`;
 

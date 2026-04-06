@@ -12,7 +12,15 @@ import {
 import type { Recipient } from "@/types/database";
 import type { UserProfile } from "@/types/database";
 import { NEWS_RECIPIENT_ID } from "@/types/database";
-import { SUBJECT_RECIPES, STYLE_RECIPES, MOOD_RECIPES, buildUserFacingPrompt, getMoodRecipe, toneToMoodId } from "@/lib/card-recipes";
+import {
+  SUBJECT_RECIPES,
+  STYLE_RECIPES,
+  MOOD_RECIPES,
+  buildUserFacingPrompt,
+  getMoodRecipe,
+  toneToMoodId,
+  getFilteredSketches,
+} from "@/lib/card-recipes";
 import { getDefaultUserDisplayName, getDefaultDisplayName, USER_KEY, MAX_SIGNERS } from "@/lib/signer-helpers";
 import { fontCSS, textStyleCSS, FONT_OPTIONS as CARD_FONT_OPTIONS, isAccentPosition, cornerStyle, cornerImgStyle, edgeStyle, edgeImgStyle, frameImgStyle } from "@/lib/card-ui-helpers";
 import type { FontChoice, TextStyleChoice } from "@/lib/card-ui-helpers";
@@ -22,6 +30,7 @@ import { logApiCall, tagSessionWithCardId } from "@/lib/usage-store";
 import { saveImage, getImage } from "@/lib/image-store";
 import AppHeader from "@/components/AppHeader";
 import { NEWS_CATEGORIES, NEWS_CATEGORY_GROUPS } from "@/lib/news-categories";
+import { OCCASION_TAGLINES } from "@/lib/occasions";
 
 const SHARE_DRAFT_KEY = "nuuge_share_draft";
 
@@ -53,6 +62,8 @@ type Step =
   | "design_subject"
   | "design_style"
   | "design_confirm_prompt"
+  | "front_text_choice"
+  | "front_text_bake"
   | "design_loading"
   | "design_generating"
   | "design_confirm_refinement"
@@ -73,7 +84,7 @@ type Step =
 type Stage = "message" | "design" | "details" | "deliver";
 const STAGE_STEPS: Record<Stage, Step[]> = {
   message: ["category", "tone", "message_mode", "byom_write", "notes", "generating", "select", "preview"],
-  design: ["design_subject", "design_style", "design_confirm_prompt", "design_loading", "design_generating", "design_confirm_refinement", "design_preview"],
+  design: ["design_subject", "design_style", "design_confirm_prompt", "front_text_choice", "front_text_bake", "design_loading", "design_generating", "design_confirm_refinement", "design_preview"],
   details: ["inside_design_ask", "inside_position_pick", "inside_design_loading", "inside_design_pick", "inside_design_generating", "inside_design_preview", "inside_confirm_refinement", "front_text_loading", "front_text", "letter"],
   deliver: ["delivery", "saved"],
 };
@@ -143,6 +154,9 @@ interface ShareDraft {
   accentPositions: number[];
   insideDesignGuidance: string;
   frontText: string;
+  frontTextMode: "bake" | "overlay" | "none";
+  bakeGreeting: string;
+  bakeTagline: string;
   frontTextPosition: string;
   frontTextStyle: TextStyleChoice;
   letterText: string;
@@ -214,6 +228,7 @@ export default function CreateSharePage() {
   const [insideConcepts, setInsideConcepts] = useState<DesignConcept[]>([]);
   const [insideDesignGuidance, setInsideDesignGuidance] = useState("");
   const [frontTextSuggestions, setFrontTextSuggestions] = useState<{ wording: string; position: string }[]>([]);
+  const [frontTextRefreshing, setFrontTextRefreshing] = useState(false);
   const [imageInterests, setImageInterests] = useState<string[]>([]);
   const [previousImageUrl, setPreviousImageUrl] = useState<string | null>(null);
   const [previousSceneDescription, setPreviousSceneDescription] = useState<string | null>(null);
@@ -233,6 +248,11 @@ export default function CreateSharePage() {
   const [accentStyle, setAccentStyle] = useState<"corner_flourish" | "top_edge_accent" | "frame" | null>(null);
   const [accentPositions, setAccentPositions] = useState<number[]>([3]);
   const [frontText, setFrontText] = useState("");
+  const [frontTextMode, setFrontTextMode] = useState<"bake" | "overlay" | "none">("overlay");
+  const [bakeGreeting, setBakeGreeting] = useState("");
+  const [bakeTagline, setBakeTagline] = useState("");
+  const [bakeSuggestions, setBakeSuggestions] = useState<{wording: string; position: string}[]>([]);
+  const [bakeRefreshing, setBakeRefreshing] = useState(false);
   const [frontTextPosition, setFrontTextPosition] = useState("bottom-right");
   const [frontTextStyle, setFrontTextStyle] = useState<TextStyleChoice>("plain_black");
   const [font, setFont] = useState("sans");
@@ -258,6 +278,8 @@ export default function CreateSharePage() {
   const sessionIdRef = useState(`ses_${Date.now()}`)[0];
   const [showResumePrompt, setShowResumePrompt] = useState(false);
   const [pendingDraft, setPendingDraft] = useState<ShareDraft | null>(null);
+  const [dynamicSketches, setDynamicSketches] = useState<Record<string, string[]> | null>(null);
+  const [dynamicSketchStatus, setDynamicSketchStatus] = useState<"idle" | "pending" | "ready" | "failed">("idle");
 
   const categoryLabel = NEWS_CATEGORIES.find((c) => c.id === newsCategory)?.label ?? newsCategory;
   const effectiveOccasion = categoryLabel || "Share a moment";
@@ -309,6 +331,9 @@ export default function CreateSharePage() {
       accentPositions,
       insideDesignGuidance,
       frontText,
+      frontTextMode,
+      bakeGreeting,
+      bakeTagline,
       frontTextPosition,
       frontTextStyle,
       letterText,
@@ -329,14 +354,18 @@ export default function CreateSharePage() {
     rejectedMessages, regenerationCount,
     activeProfileElements, messages, selected, editedMessage, imageSubject, subjectDetail,
     artStyle, personalContext, currentSceneDescription, pendingSceneDescription, userOriginalPrompt,
-    selectedDesign, imageInterests, insideImagePosition, accentPositions, insideDesignGuidance, frontText, frontTextPosition,
+    selectedDesign, imageInterests, insideImagePosition, accentPositions, insideDesignGuidance, frontText, frontTextMode, bakeGreeting, bakeTagline, frontTextPosition,
     frontTextStyle, letterText, letterFont, cardSize,
     generatedImageUrl, insideImageUrl,
   ]);
 
   useEffect(() => {
     if (step !== "front_text_loading") return;
-    loadFrontTextSuggestions();
+    if (frontTextMode === "overlay") {
+      loadFrontTextSuggestions();
+    } else {
+      setStep("letter");
+    }
   }, [step]);
 
   function extractSenderProfileElements(p: Partial<UserProfile> | null): Record<string, boolean> {
@@ -354,8 +383,8 @@ export default function CreateSharePage() {
     if (p.occupation) elements[`occupation: ${p.occupation}`] = false;
     if (p.lifestyle) elements[`lifestyle: ${p.lifestyle}`] = false;
     if (p.pets) elements[`pets: ${p.pets}`] = false;
-    if (p.favorite_foods) elements[`favorite foods: ${p.favorite_foods}`] = false;
-    if (p.favorite_music) elements[`favorite music: ${p.favorite_music}`] = false;
+    if (p.children) elements[`children: ${p.children}`] = false;
+    if (p.notes) elements[`additional context: ${p.notes}`] = false;
     return elements;
   }
 
@@ -378,7 +407,7 @@ export default function CreateSharePage() {
   function isInterestLikeKey(key: string): boolean {
     return key.startsWith("interest: ") || key.startsWith("value: ") ||
       key.startsWith("occupation: ") || key.startsWith("lifestyle: ") || key.startsWith("pets: ") ||
-      key.startsWith("favorite foods: ") || key.startsWith("favorite music: ");
+      key.startsWith("children: ") || key.startsWith("additional context: ");
   }
   function isToneLikeKey(key: string): boolean {
     return key.startsWith("personality: ") || key.startsWith("humor style: ");
@@ -416,9 +445,40 @@ ${interests.length > 0 ? `Interests (use these): ${interests.join(", ")}` : "Int
 ${otherDetails.join("\n")}`.replace(/\n{2,}/g, "\n");
   }
 
+  async function fetchDynamicSketches() {
+    setDynamicSketchStatus("pending");
+    try {
+      const subjects = SUBJECT_RECIPES.map((s) => s.id);
+      const moodId = toneToMoodId(tone);
+      const res = await fetch("/api/suggest-scene-sketches", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          subjects,
+          mood: moodId,
+          occasion: effectiveOccasion,
+          tone,
+        }),
+      });
+      if (!res.ok) throw new Error("Scene sketch API failed");
+      const data = await res.json();
+      if (data.sketches && typeof data.sketches === "object") {
+        setDynamicSketches(data.sketches);
+        setDynamicSketchStatus("ready");
+        logApiCall("suggest-scene-sketches", { model: "gpt-4o-mini", callType: "chat_completion", sessionId: sessionIdRef });
+      } else {
+        throw new Error("Invalid response shape");
+      }
+    } catch (err) {
+      console.error("Scene sketch fetch failed:", err);
+      setDynamicSketchStatus("failed");
+    }
+  }
+
   async function generateMessages() {
     let nextRegenCount = regenerationCount;
     let effectiveRejected = rejectedMessages;
+    let effectiveElements: Record<string, boolean> | undefined;
     if (messages.length > 0) {
       const currentAsText = messages.map((m) => `[${m.label}] ${m.greeting} ${m.body} ${m.closing}`);
       effectiveRejected = [...rejectedMessages, ...currentAsText];
@@ -441,21 +501,23 @@ ${otherDetails.join("\n")}`.replace(/\n{2,}/g, "\n");
           activeToneLike.slice(toneKeepCount).forEach((k) => { updated[k] = false; });
         }
         setActiveProfileElements(updated);
+        effectiveElements = updated;
       }
     }
 
-    if (Object.keys(activeProfileElements).length === 0 && profile) {
+    if (!effectiveElements && Object.keys(activeProfileElements).length === 0 && profile) {
       const elements = extractSenderProfileElements(profile);
       setActiveProfileElements(elements);
+      effectiveElements = elements;
     }
 
     setIsLoading(true);
     setLoadingMessage("Writing your message...");
     setError(null);
 
-    const elementsToUse = Object.keys(activeProfileElements).length > 0
-      ? activeProfileElements
-      : (profile ? extractSenderProfileElements(profile) : undefined);
+    const elementsToUse = effectiveElements
+      ?? (Object.keys(activeProfileElements).length > 0 ? activeProfileElements : undefined)
+      ?? (profile ? extractSenderProfileElements(profile) : undefined);
 
     try {
       const res = await fetch("/api/generate-card", {
@@ -467,7 +529,7 @@ ${otherDetails.join("\n")}`.replace(/\n{2,}/g, "\n");
           newsCategory: categoryLabel,
           newsDescription: newsDescription.trim() || "General update to share with others",
           tone,
-          additionalNotes: notes,
+          additionalNotes: nextRegenCount >= 3 ? undefined : notes,
           cardHistory: [],
           regenerationCount: nextRegenCount,
           rejectedMessages: effectiveRejected.length > 0 ? effectiveRejected : undefined,
@@ -526,6 +588,53 @@ ${otherDetails.join("\n")}`.replace(/\n{2,}/g, "\n");
         closing: byomClosing,
       };
       setMessages([userOriginal, ...data.messages]);
+      setStep("select");
+      logApiCall("generate-card", { model: "gpt-4o", callType: "chat_completion", sessionId: sessionIdRef });
+      setSessionCost((c) => c + 0.025);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Something went wrong");
+    } finally {
+      setIsLoading(false);
+    }
+  }
+
+  async function refineEditedMessage() {
+    if (!editedMessage) return;
+    setIsLoading(true);
+    setLoadingMessage("Nuuge is refining your message...");
+    setError(null);
+
+    try {
+      const res = await fetch("/api/generate-card", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          mode: "news",
+          senderContext: buildSenderContext(),
+          newsCategory: categoryLabel,
+          newsDescription: newsDescription.trim() || "General update to share with others",
+          tone,
+          additionalNotes: notes,
+          senderDisplayName: signerDisplayOverrides[USER_KEY]?.trim() || undefined,
+          userDraft: {
+            greeting: editedMessage.greeting,
+            body: editedMessage.body,
+            closing: editedMessage.closing,
+          },
+        }),
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || "Failed to refine message");
+      }
+      const data = await res.json();
+      const userVersion: CardMessage = {
+        label: "Your version",
+        greeting: editedMessage.greeting,
+        body: editedMessage.body,
+        closing: editedMessage.closing,
+      };
+      setMessages([userVersion, ...data.messages]);
       setStep("select");
       logApiCall("generate-card", { model: "gpt-4o", callType: "chat_completion", sessionId: sessionIdRef });
       setSessionCost((c) => c + 0.025);
@@ -741,10 +850,14 @@ ${otherDetails.join("\n")}`.replace(/\n{2,}/g, "\n");
     }
   }
 
-  async function loadFrontTextSuggestions() {
+  async function loadFrontTextSuggestions(refresh = false) {
     const previousWordings = frontTextSuggestions.map((s) => s.wording);
-    setIsLoading(true);
-    setLoadingMessage("Thinking of front text options...");
+    if (refresh) {
+      setFrontTextRefreshing(true);
+    } else {
+      setIsLoading(true);
+      setLoadingMessage("Thinking of front text options...");
+    }
     const fullMessage = editedMessage ? `${editedMessage.greeting}\n\n${editedMessage.body}\n\n${editedMessage.closing}` : "";
     try {
       const res = await fetch("/api/suggest-front-text", {
@@ -774,12 +887,58 @@ ${otherDetails.join("\n")}`.replace(/\n{2,}/g, "\n");
       logApiCall("suggest-front-text", { model: "gpt-4o", callType: "chat_completion", sessionId: sessionIdRef });
       setSessionCost((c) => c + 0.025);
     } catch {
-      setFrontTextSuggestions([]);
-      setFrontText("");
-      setFrontTextPosition("bottom-right");
+      if (!refresh) {
+        setFrontTextSuggestions([]);
+        setFrontText("");
+        setFrontTextPosition("bottom-right");
+      }
+    } finally {
+      if (refresh) {
+        setFrontTextRefreshing(false);
+      } else {
+        setIsLoading(false);
+        setStep("front_text");
+      }
+    }
+  }
+
+  async function loadBakeSuggestions(refresh = false) {
+    if (refresh) {
+      setBakeRefreshing(true);
+    } else {
+      setIsLoading(true);
+      setLoadingMessage("Suggesting front text ideas...");
+    }
+    try {
+      const previousWordings = bakeSuggestions.map((s) => s.wording);
+      const fullMessage = editedMessage ? `${editedMessage.greeting}\n\n${editedMessage.body}\n\n${editedMessage.closing}` : "";
+      const res = await fetch("/api/suggest-front-text", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          occasion: effectiveOccasion,
+          tone,
+          recipientName: "friends and family",
+          previousWordings: previousWordings.length > 0 ? previousWordings : undefined,
+          messageText: fullMessage || undefined,
+          artStyle: artStyle ? ART_STYLES.find((s) => s.id === artStyle)?.label : undefined,
+          imageSubject: imageSubject ? IMAGE_SUBJECTS.find((s) => s.id === imageSubject)?.label : undefined,
+          sceneDescription: pendingSceneDescription || currentSceneDescription || undefined,
+        }),
+      });
+      const data = await res.json();
+      const suggestions: { wording: string; position: string }[] = Array.isArray(data.suggestions) ? data.suggestions : [];
+      setBakeSuggestions(suggestions);
+      if (!refresh && suggestions.length > 0 && !bakeGreeting) {
+        setBakeGreeting(suggestions[0].wording);
+      }
+      logApiCall("suggest-front-text", { model: "gpt-4o", callType: "chat_completion", sessionId: sessionIdRef });
+      setSessionCost((c) => c + 0.025);
+    } catch {
+      setBakeSuggestions([]);
     } finally {
       setIsLoading(false);
-      setStep("front_text");
+      setBakeRefreshing(false);
     }
   }
 
@@ -809,6 +968,9 @@ ${otherDetails.join("\n")}`.replace(/\n{2,}/g, "\n");
       front_text: frontText.trim() || null,
       front_text_position: frontText.trim() ? frontTextPosition : null,
       front_text_style: frontTextStyle,
+      front_text_mode: frontTextMode,
+      bake_greeting: frontTextMode === "bake" ? (bakeGreeting.trim() || null) : null,
+      bake_tagline: frontTextMode === "bake" ? (bakeTagline.trim() || null) : null,
       front_text_font: font,
       font: insideFont,
       inside_image_position: insideImageUrl ? insideImagePosition : undefined,
@@ -857,6 +1019,8 @@ ${otherDetails.join("\n")}`.replace(/\n{2,}/g, "\n");
     if (d.step === "inside_design_generating" || d.step === "inside_confirm_refinement") stepToRestore = "inside_design_pick";
     if (d.step === "inside_design_preview") stepToRestore = "inside_design_pick";
     if (d.step === "front_text_loading") stepToRestore = "inside_design_ask";
+    if (d.step === "front_text_choice") stepToRestore = "design_confirm_prompt";
+    if (d.step === "front_text_bake") stepToRestore = "front_text_choice";
     setStep(stepToRestore);
     setNewsCategory(d.newsCategory);
     setNewsDescription(d.newsDescription ?? "");
@@ -891,6 +1055,9 @@ ${otherDetails.join("\n")}`.replace(/\n{2,}/g, "\n");
     }
     setInsideDesignGuidance(d.insideDesignGuidance ?? "");
     setFrontText(d.frontText ?? "");
+    setFrontTextMode(d.frontTextMode ?? "overlay");
+    setBakeGreeting(d.bakeGreeting ?? "");
+    setBakeTagline(d.bakeTagline ?? "");
     setFrontTextPosition(d.frontTextPosition ?? "bottom-right");
     setFrontTextStyle((d.frontTextStyle as TextStyleChoice) ?? "plain_black");
     setLetterText(d.letterText ?? "");
@@ -939,6 +1106,10 @@ ${otherDetails.join("\n")}`.replace(/\n{2,}/g, "\n");
     setInsideDesignFeedback("");
     setSelectedInsideConcept(null);
     setFrontText("");
+    setFrontTextMode("overlay");
+    setBakeGreeting("");
+    setBakeTagline("");
+    setBakeSuggestions([]);
     setLetterText("");
   }
 
@@ -1239,7 +1410,7 @@ ${otherDetails.join("\n")}`.replace(/\n{2,}/g, "\n");
             )}
             <div className="flex gap-3">
               <button onClick={() => setStep(messageMode === "byom" ? "byom_write" : "message_mode")} className="btn-secondary">Back</button>
-              <button onClick={messageMode === "byom" ? polishUserMessage : generateMessages} className="btn-primary">
+              <button onClick={() => { (messageMode === "byom" ? polishUserMessage : generateMessages)(); }} className="btn-primary">
                 {messageMode === "byom" ? "Polish my message" : "Generate card messages"}
               </button>
             </div>
@@ -1250,7 +1421,8 @@ ${otherDetails.join("\n")}`.replace(/\n{2,}/g, "\n");
           <div>
             <h2 className="text-xl font-bold text-charcoal mb-2">Pick your favorite</h2>
             <p className="text-sm text-warm-gray mb-6">
-              Here are 3 options for your {effectiveOccasion.toLowerCase()} message. Click one to preview and edit.
+              Here are 3 options for your {effectiveOccasion.toLowerCase()} message.
+              Pick one to get started &mdash; you can add your own words and Nuuge will help you refine it.
             </p>
             <div className="space-y-4">
               {messages.map((msg, i) => (
@@ -1271,6 +1443,30 @@ ${otherDetails.join("\n")}`.replace(/\n{2,}/g, "\n");
                 </button>
               ))}
             </div>
+            {/* Editable personalization notes — visible during regeneration */}
+            {notes.trim() && (
+              <div className="rounded-xl p-4 mt-4" style={{ background: "var(--color-faint-gray)", border: "1px solid var(--color-light-gray)" }}>
+                <p className="text-xs font-medium text-warm-gray uppercase tracking-wide mb-2">
+                  Your personalization
+                </p>
+                <textarea
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  rows={2}
+                  className="input-field rounded-lg w-full text-sm"
+                  placeholder="Optional — tell Nuuge what to weave in"
+                />
+                {notes.trim() && (
+                  <button
+                    onClick={() => setNotes("")}
+                    className="text-xs mt-1 font-medium transition-colors"
+                    style={{ color: "var(--color-warm-gray)" }}
+                  >
+                    Clear
+                  </button>
+                )}
+              </div>
+            )}
             <div className="flex gap-3 mt-4">
               <button onClick={() => setStep("notes")} className="btn-secondary">Back</button>
               <button onClick={generateMessages} className="btn-primary">
@@ -1283,7 +1479,7 @@ ${otherDetails.join("\n")}`.replace(/\n{2,}/g, "\n");
         {step === "preview" && editedMessage && !showResumePrompt && (
           <div>
             <h2 className="text-xl font-bold text-charcoal mb-2">Preview &amp; edit</h2>
-            <p className="text-sm text-warm-gray mb-6">Adjust anything you want, then continue.</p>
+            <p className="text-sm text-warm-gray mb-6">Adjust anything you want, then continue &mdash; or edit and let Nuuge refine your wording.</p>
             <div className="rounded-xl p-6 space-y-4 mb-6" style={{ background: "var(--color-white)", border: "1px solid var(--color-light-gray)" }}>
               <div>
                 <label className="block text-xs font-medium text-warm-gray uppercase tracking-wide mb-1">Greeting</label>
@@ -1324,9 +1520,17 @@ ${otherDetails.join("\n")}`.replace(/\n{2,}/g, "\n");
                 <span className="italic whitespace-pre-line text-warm-gray">{editedMessage.closing}</span>
               </p>
             </div>
-            <div className="flex gap-3">
+            <div className="flex gap-3 flex-wrap">
               <button onClick={() => setStep("select")} className="btn-secondary">Pick a different one</button>
-              <button onClick={() => setStep("design_subject")} className="btn-primary">Next: Design the card</button>
+              <button
+                onClick={refineEditedMessage}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium transition-colors"
+                style={{ color: "var(--color-brand)", border: "1.5px solid var(--color-sage)" }}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+                Refine with Nuuge
+              </button>
+              <button onClick={() => { fetchDynamicSketches(); setStep("design_subject"); }} className="btn-primary">Next: Design the card</button>
             </div>
           </div>
         )}
@@ -1336,7 +1540,11 @@ ${otherDetails.join("\n")}`.replace(/\n{2,}/g, "\n");
           const recommended = moodRec?.recommendedSubjects || [];
           const moodId = toneToMoodId(tone);
           const selectedSubjectRecipe = SUBJECT_RECIPES.find((s) => s.id === imageSubject);
-          const sceneSketches = selectedSubjectRecipe?.sceneSketches?.[moodId] || [];
+          const hasDynamic = dynamicSketchStatus === "ready" && dynamicSketches && imageSubject && dynamicSketches[imageSubject]?.length > 0;
+          const sceneTexts: string[] = hasDynamic
+            ? dynamicSketches[imageSubject]!
+            : getFilteredSketches(selectedSubjectRecipe, moodId, null);
+          const sketchesPending = dynamicSketchStatus === "pending";
           return (
           <div>
             <h2 className="text-xl font-bold text-charcoal mb-1">Design your card</h2>
@@ -1380,24 +1588,35 @@ ${otherDetails.join("\n")}`.replace(/\n{2,}/g, "\n");
 
             {imageSubject && (
               <>
-                {sceneSketches.length > 0 && (
+                {sketchesPending ? (
+                  <div className="mb-4 p-4 rounded-xl" style={{ background: "var(--color-brand-light)", border: "1.5px solid var(--color-sage)" }}>
+                    <p className="text-sm font-medium text-brand uppercase tracking-wide mb-2">
+                      Generating scene ideas&hellip;
+                    </p>
+                    <div className="space-y-2">
+                      {[1, 2, 3].map((i) => (
+                        <div key={i} className="h-10 rounded-lg animate-pulse" style={{ background: "var(--color-sage-light)" }} />
+                      ))}
+                    </div>
+                  </div>
+                ) : sceneTexts.length > 0 && (
                   <div className="mb-4 p-4 rounded-xl" style={{ background: "var(--color-brand-light)", border: "1.5px solid var(--color-sage)" }}>
                     <p className="text-sm font-medium text-brand uppercase tracking-wide mb-2">
                       Scene ideas for {selectedSubjectRecipe?.label} + {tone.toLowerCase()}
                     </p>
                     <div className="space-y-1.5">
-                      {sceneSketches.map((sketch: string, i: number) => (
+                      {sceneTexts.map((text, i) => (
                         <button
                           key={i}
-                          onClick={() => setSubjectDetail(sketch)}
+                          onClick={() => setSubjectDetail(text)}
                           className={`block w-full text-left text-base px-3 py-2.5 rounded-lg transition-colors
-                            ${subjectDetail === sketch
+                            ${subjectDetail === text
                               ? "bg-brand-light text-brand-hover font-medium"
                               : "text-charcoal hover:bg-white/60"
                             }`}
-                          style={subjectDetail === sketch ? { background: "var(--color-brand-light)", color: "var(--color-brand)" } : {}}
+                          style={subjectDetail === text ? { background: "var(--color-brand-light)", color: "var(--color-brand)" } : {}}
                         >
-                          &ldquo;{sketch}&rdquo;
+                          &ldquo;{text}&rdquo;
                         </button>
                       ))}
                     </div>
@@ -1533,12 +1752,170 @@ ${otherDetails.join("\n")}`.replace(/\n{2,}/g, "\n");
                   const matchedConcept = designConcepts.find((c) => c.image_prompt === p);
                   setSelectedDesign(matchedConcept || { title: "Custom", description: "", image_prompt: p });
                   setCurrentSceneDescription(p);
-                  generateDesignImage(p);
+                  setBakeTagline(OCCASION_TAGLINES[effectiveOccasion] || "");
+                  setStep("front_text_choice");
                 }}
                 disabled={!pendingSceneDescription.trim() || conceptsLoading}
                 className="btn-primary disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                {conceptsLoading ? "Waiting for Nuuge ideas…" : "Generate image"}
+                {conceptsLoading ? "Waiting for Nuuge ideas…" : "Next: Front text"}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {step === "front_text_choice" && !showResumePrompt && (
+          <div>
+            <h2 className="text-xl font-bold text-charcoal mb-2">Front text</h2>
+            <p className="text-sm text-warm-gray mb-6">
+              Would you like text on the card front? You can bake it into the artwork for an integrated look, or add it as a text overlay after.
+            </p>
+            <div className="space-y-3">
+              <button
+                onClick={() => {
+                  setFrontTextMode("bake");
+                  loadBakeSuggestions();
+                  setStep("front_text_bake");
+                }}
+                className="w-full rounded-xl border-2 p-5 text-left transition-all hover:shadow-sm"
+                style={{ borderColor: "var(--color-light-gray)", background: "var(--color-white)" }}
+              >
+                <span className="text-sm font-semibold text-charcoal">Bake into the artwork</span>
+                <p className="text-sm text-warm-gray mt-1">
+                  Text becomes part of the illustration &mdash; stylish, integrated lettering rendered by the AI. Works best with short phrases.
+                </p>
+              </button>
+              <button
+                onClick={() => {
+                  setFrontTextMode("overlay");
+                  generateDesignImage(currentSceneDescription);
+                }}
+                className="w-full rounded-xl border-2 p-5 text-left transition-all hover:shadow-sm"
+                style={{ borderColor: "var(--color-light-gray)", background: "var(--color-white)" }}
+              >
+                <span className="text-sm font-semibold text-charcoal">Add text overlay after</span>
+                <p className="text-sm text-warm-gray mt-1">
+                  Generate the image first, then position clean text on top. Reliable and easy to edit.
+                </p>
+              </button>
+              <button
+                onClick={() => {
+                  setFrontTextMode("none");
+                  setFrontText("");
+                  generateDesignImage(currentSceneDescription);
+                }}
+                className="w-full rounded-xl border-2 p-5 text-left transition-all hover:shadow-sm"
+                style={{ borderColor: "var(--color-light-gray)", background: "var(--color-white)" }}
+              >
+                <span className="text-sm font-semibold text-charcoal">No front text</span>
+                <p className="text-sm text-warm-gray mt-1">
+                  Let the artwork speak for itself.
+                </p>
+              </button>
+            </div>
+            <div className="mt-4">
+              <button
+                onClick={() => setStep("design_confirm_prompt")}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium transition-colors"
+                style={{ color: "var(--color-brand)", border: "1.5px solid var(--color-sage)" }}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+                Back
+              </button>
+            </div>
+          </div>
+        )}
+
+        {step === "front_text_bake" && !showResumePrompt && (
+          <div>
+            <h2 className="text-xl font-bold text-charcoal mb-2">Text for the artwork</h2>
+            <p className="text-sm text-warm-gray mb-6">
+              These will be rendered as stylish lettering integrated into the illustration. Shorter phrases (1&ndash;5 words) work best.
+            </p>
+
+            <div className="rounded-xl p-4 mb-4" style={{ background: "var(--color-white)", border: "1px solid var(--color-light-gray)" }}>
+              <label className="block text-sm font-medium text-charcoal mb-2">Creative greeting</label>
+              {bakeSuggestions.length > 0 && (
+                <div className="relative mb-3">
+                  {bakeRefreshing && (
+                    <div className="absolute inset-0 z-10 flex items-center justify-center rounded-lg" style={{ background: "rgba(255,255,255,0.7)", backdropFilter: "blur(2px)" }}>
+                      <div className="w-5 h-5 border-2 rounded-full animate-spin" style={{ borderColor: "var(--color-light-gray)", borderTopColor: "var(--color-brand)" }} />
+                    </div>
+                  )}
+                  <div className="flex flex-wrap gap-2">
+                    {bakeSuggestions.map((s, i) => (
+                      <button
+                        key={i}
+                        onClick={() => setBakeGreeting(s.wording)}
+                        className={`px-3 py-1.5 rounded-full text-sm border transition-all ${
+                          bakeGreeting === s.wording
+                            ? "bg-brand-light border-sage text-brand font-medium"
+                            : "bg-white border-light-gray text-charcoal hover:border-sage"
+                        }`}
+                      >
+                        {s.wording}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+              <input
+                value={bakeGreeting}
+                onChange={(e) => setBakeGreeting(e.target.value)}
+                placeholder="e.g. Big News!"
+                className="input-field w-full"
+              />
+              <button
+                onClick={() => loadBakeSuggestions(true)}
+                disabled={bakeRefreshing}
+                className="mt-2 text-sm text-brand hover:underline disabled:opacity-50"
+              >
+                Suggest new options
+              </button>
+            </div>
+
+            <div className="rounded-xl p-4 mb-4" style={{ background: "var(--color-white)", border: "1px solid var(--color-light-gray)" }}>
+              <label className="block text-sm font-medium text-charcoal mb-2">Occasion tagline</label>
+              <input
+                value={bakeTagline}
+                onChange={(e) => setBakeTagline(e.target.value)}
+                placeholder="e.g. Congratulations!, We Did It!"
+                className="input-field w-full"
+              />
+              <p className="text-xs text-warm-gray mt-1">Edit to personalize or leave empty to skip.</p>
+            </div>
+
+            {error && (
+              <div className="p-3 rounded-lg text-sm mb-4" style={{ background: "var(--color-error-light)", border: "1px solid var(--color-error)", color: "var(--color-error)" }}>
+                {error}
+              </div>
+            )}
+
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() => setStep("front_text_choice")}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium transition-colors"
+                style={{ color: "var(--color-brand)", border: "1.5px solid var(--color-sage)" }}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+                Back
+              </button>
+              <button
+                onClick={() => {
+                  let prompt = currentSceneDescription;
+                  const textLines: string[] = [];
+                  if (bakeGreeting.trim()) textLines.push(bakeGreeting.trim());
+                  if (bakeTagline.trim()) textLines.push(bakeTagline.trim());
+                  if (textLines.length > 0) {
+                    prompt += `\n\nINCORPORATE TEXT INTO THE ARTWORK — render as stylish lettering that is part of the illustration, matching the art style and integrated into the composition:\n${textLines.map((t, i) => `Line ${i + 1}: "${t}"`).join("\n")}\nDo NOT add any other text or words beyond what is specified above.`;
+                  }
+                  setFrontText(textLines.join(" \u2014 "));
+                  generateDesignImage(prompt);
+                }}
+                disabled={!bakeGreeting.trim() && !bakeTagline.trim()}
+                className="btn-primary disabled:opacity-50"
+              >
+                Generate image with text
               </button>
             </div>
           </div>
@@ -1568,7 +1945,16 @@ ${otherDetails.join("\n")}`.replace(/\n{2,}/g, "\n");
                   setPreviousImageUrl(generatedImageUrl);
                   setPreviousSceneDescription(currentSceneDescription);
                   setCurrentSceneDescription(pendingSceneDescription);
-                  generateDesignImage(pendingSceneDescription, { editExisting: false });
+                  let prompt = pendingSceneDescription;
+                  if (frontTextMode === "bake") {
+                    const textLines: string[] = [];
+                    if (bakeGreeting.trim()) textLines.push(bakeGreeting.trim());
+                    if (bakeTagline.trim()) textLines.push(bakeTagline.trim());
+                    if (textLines.length > 0) {
+                      prompt += `\n\nINCORPORATE TEXT INTO THE ARTWORK — render as stylish lettering that is part of the illustration, matching the art style and integrated into the composition:\n${textLines.map((t, i) => `Line ${i + 1}: "${t}"`).join("\n")}\nDo NOT add any other text or words beyond what is specified above.`;
+                    }
+                  }
+                  generateDesignImage(prompt, { editExisting: false });
                 }}
                 disabled={!pendingSceneDescription.trim()}
                 className="flex-1 btn-primary"
@@ -1634,7 +2020,7 @@ ${otherDetails.join("\n")}`.replace(/\n{2,}/g, "\n");
                 {designConcepts.length > 0 ? "Pick different design" : "Back to design builder"}
               </button>
               <button onClick={() => setStep("inside_design_ask")} className="btn-primary">
-                Next: Inside &amp; front text
+                {frontTextMode === "bake" || frontTextMode === "none" ? "Next: Inside" : "Next: Inside & front text"}
               </button>
             </div>
           </div>
@@ -1722,7 +2108,11 @@ ${otherDetails.join("\n")}`.replace(/\n{2,}/g, "\n");
                       setSessionCost((c) => c + 0.025);
                     } catch {
                       setIsLoading(false);
-                      loadFrontTextSuggestions();
+                      if (frontTextMode === "overlay") {
+                        loadFrontTextSuggestions();
+                      } else {
+                        setStep("letter");
+                      }
                     }
                   }}
                   disabled={!insideImagePosition}
@@ -1794,7 +2184,7 @@ ${otherDetails.join("\n")}`.replace(/\n{2,}/g, "\n");
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="15 18 9 12 15 6"/></svg>
                 Back
               </button>
-              <button onClick={() => loadFrontTextSuggestions()} className="btn-secondary ml-auto">Skip — no decoration</button>
+              <button onClick={() => { if (frontTextMode === "overlay") { loadFrontTextSuggestions(); } else { setStep("letter"); } }} className="btn-secondary ml-auto">Skip — no decoration</button>
             </div>
           </div>
         )}
@@ -1838,7 +2228,7 @@ ${otherDetails.join("\n")}`.replace(/\n{2,}/g, "\n");
             </div>
             <div className="flex gap-3 mt-4">
               <button onClick={() => setStep("inside_design_ask")} className="text-sm px-4 py-2 rounded-full text-warm-gray hover:text-charcoal" style={{ border: "1.5px solid var(--color-sage)" }}>&larr; Change position</button>
-              <button onClick={() => loadFrontTextSuggestions()} className="text-sm px-4 py-2 rounded-full text-warm-gray hover:text-charcoal ml-auto" style={{ border: "1.5px solid var(--color-sage)" }}>Skip inside illustration</button>
+              <button onClick={() => { if (frontTextMode === "overlay") { loadFrontTextSuggestions(); } else { setStep("letter"); } }} className="text-sm px-4 py-2 rounded-full text-warm-gray hover:text-charcoal ml-auto" style={{ border: "1.5px solid var(--color-sage)" }}>Skip inside illustration</button>
             </div>
           </div>
         )}
@@ -1904,7 +2294,7 @@ ${otherDetails.join("\n")}`.replace(/\n{2,}/g, "\n");
             {error && <div className="p-3 rounded-lg text-sm mb-4" style={{ background: "var(--color-error-light)", border: "1px solid var(--color-error)", color: "var(--color-error)" }}>{error}</div>}
             <div className="flex gap-3">
               <button onClick={() => { if (decorationType === "accent") { setStep("inside_design_ask"); } else { setStep("inside_design_pick"); } }} className="text-sm text-warm-gray hover:text-charcoal px-4 py-2 rounded-full" style={{ border: "1.5px solid var(--color-sage)" }}>&larr; {decorationType === "accent" ? "Change style" : "Pick different"}</button>
-              <button onClick={() => loadFrontTextSuggestions()} className="btn-primary">Next: Front text</button>
+              <button onClick={() => { if (frontTextMode === "overlay") { loadFrontTextSuggestions(); } else { setStep("letter"); } }} className="btn-primary">{frontTextMode === "overlay" ? "Next: Front text" : "Next: Letter"}</button>
             </div>
           </div>
         )}
@@ -1914,19 +2304,27 @@ ${otherDetails.join("\n")}`.replace(/\n{2,}/g, "\n");
             <h2 className="text-xl font-bold text-charcoal mb-2">Front text &amp; font style</h2>
             <p className="text-sm text-warm-gray mb-6">Pick a suggestion, edit your own, or skip. Choose a font for the card.</p>
             {frontTextSuggestions.length > 0 && (
-              <div className="mb-4">
+              <div className="mb-4 relative">
                 <label className="block text-xs font-medium text-warm-gray uppercase tracking-wide mb-2">Suggestions</label>
-                <div className="grid gap-2">
-                  {frontTextSuggestions.map((s, idx) => (
-                    <button key={idx} onClick={() => { setFrontText(s.wording); setFrontTextPosition(s.position); }}
-                      className={`text-left rounded-lg border p-3 transition-colors ${frontText === s.wording ? "border-brand bg-brand-light" : "border-light-gray hover:border-warm-gray"}`}
-                    >
-                      <span className="text-base font-medium text-charcoal">&ldquo;{s.wording}&rdquo;</span>
-                      <span className="block text-xs text-warm-gray mt-0.5">{s.position.replace(/-/g, " ")}</span>
-                    </button>
-                  ))}
+                <div className="relative">
+                  <div className="grid gap-2" style={frontTextRefreshing ? { filter: "blur(3px)", opacity: 0.5, pointerEvents: "none", transition: "filter 0.2s, opacity 0.2s" } : { transition: "filter 0.2s, opacity 0.2s" }}>
+                    {frontTextSuggestions.map((s, idx) => (
+                      <button key={idx} onClick={() => { setFrontText(s.wording); setFrontTextPosition(s.position); }}
+                        className={`text-left rounded-lg border p-3 transition-colors ${frontText === s.wording ? "border-brand bg-brand-light" : "border-light-gray hover:border-warm-gray"}`}
+                      >
+                        <span className="text-base font-medium text-charcoal">&ldquo;{s.wording}&rdquo;</span>
+                        <span className="block text-xs text-warm-gray mt-0.5">{s.position.replace(/-/g, " ")}</span>
+                      </button>
+                    ))}
+                  </div>
+                  {frontTextRefreshing && (
+                    <div className="absolute inset-0 flex flex-col items-center justify-center">
+                      <div className="animate-spin h-7 w-7 border-3 rounded-full" style={{ borderColor: "var(--color-sage-light)", borderTopColor: "var(--color-brand)" }} />
+                      <p className="text-sm font-medium text-charcoal mt-2">Thinking&hellip;</p>
+                    </div>
+                  )}
                 </div>
-                <button onClick={() => loadFrontTextSuggestions()} className="mt-2 text-sm text-brand hover:underline">Suggest new options</button>
+                <button onClick={() => loadFrontTextSuggestions(true)} disabled={frontTextRefreshing} className="mt-2 text-sm text-brand hover:underline disabled:opacity-50">Suggest new options</button>
               </div>
             )}
             <div className="rounded-xl p-4 mb-4" style={{ background: "var(--color-white)", border: "1px solid var(--color-light-gray)" }}>
@@ -2036,12 +2434,12 @@ ${otherDetails.join("\n")}`.replace(/\n{2,}/g, "\n");
             )}
             <div className="flex items-center gap-3">
               <button
-                onClick={() => setStep("front_text")}
+                onClick={() => setStep(frontTextMode === "overlay" ? "front_text" : "inside_design_ask")}
                 className="flex items-center gap-1.5 px-4 py-2 rounded-full text-sm text-warm-gray hover:text-charcoal transition-colors"
                 style={{ border: "1.5px solid var(--color-sage)" }}
               >
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
-                Back to front text
+                {frontTextMode === "overlay" ? "Back to front text" : "Back"}
               </button>
               <button
                 onClick={() => { setLetterText(""); setStep("delivery"); }}

@@ -71,8 +71,12 @@ STRICT RULES — follow the scene description LITERALLY:
 
     if (isEditing && sourceImageBase64) {
       let editPrompt: string;
+      const isFramePrompt = imagePrompt.toLowerCase().includes("border frame") || imagePrompt.toLowerCase().includes("decorative frame");
       if (isInsideIllustration && !existingImageBase64 && frontImageBase64) {
-        editPrompt = `Using this greeting card front cover as the source, create a decorative inside-card element by extracting or re-composing elements from it.\n\n${imagePrompt}\n\nKeep the exact same art style, colors, and feel as the source image. The result should look like a detail or crop from the same artwork. No text.`;
+        const frameRules = isFramePrompt
+          ? `\n\nCRITICAL FRAME LAYOUT: The decorative border elements MUST extend to the VERY EDGES of the generated image — touching all four sides with ZERO margin or padding. The center area must be pure white (#FFFFFF), NOT cream or off-white. At least 55% of the image should be empty white space for text.`
+          : "";
+        editPrompt = `Using this greeting card front cover as the source, create a decorative inside-card element by extracting or re-composing elements from it.\n\n${imagePrompt}\n\nKeep the exact same art style, colors, and feel as the source image. The result should look like a detail or crop from the same artwork. No text.${frameRules}`;
       } else if (isInsideIllustration && editInstruction) {
         editPrompt = `IMPORTANT — MAKE THIS CHANGE TO THE IMAGE:\n${editInstruction}\n\nKeep everything else exactly the same. Do not change elements that weren't mentioned.\n\nFull scene for reference: ${imagePrompt}`;
       } else if (isInsideIllustration) {

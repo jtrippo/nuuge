@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { getBeyondCircleCards, getUserProfile, hydrateCardImages, saveRecipient } from "@/lib/store";
+import { getBeyondCircleCards, getRecipients, getUserProfile, hydrateCardImages, saveRecipient, updateCard } from "@/lib/store";
 import { shareCard } from "@/lib/share-card";
 import { copyToClipboard } from "@/lib/clipboard";
 import { getDisplayOccasion } from "@/lib/occasions";
@@ -25,6 +25,8 @@ export default function BeyondPage() {
   const [shareUrls, setShareUrls] = useState<Record<string, string>>({});
   const [shareError, setShareError] = useState<string | null>(null);
   const [promotedIds, setPromotedIds] = useState<Set<string>>(new Set());
+  const [moveCardId, setMoveCardId] = useState<string | null>(null);
+  const [moveTargetId, setMoveTargetId] = useState("");
 
   useEffect(() => {
     setMounted(true);
@@ -61,13 +63,31 @@ export default function BeyondPage() {
 
   function handleAddToCircle(card: BeyondCard) {
     if (!card.quick_recipient_name) return;
-    saveRecipient({
+    const newRecipient = saveRecipient({
       name: card.quick_recipient_name,
       personality: card.quick_recipient_traits?.join(", ") || "",
       relationship_type: card.quick_recipient_relationship || "other",
       setup_complete: false,
     });
-    setPromotedIds((prev) => new Set(prev).add(card.id));
+    if (newRecipient?.id) {
+      updateCard(card.id, {
+        recipient_id: newRecipient.id,
+        recipient_ids: [newRecipient.id],
+        card_type: "circle",
+      });
+      setCards((prev) => prev.filter((c) => c.id !== card.id));
+    }
+  }
+
+  function handleMoveToProfile(cardId: string, recipientId: string) {
+    updateCard(cardId, {
+      recipient_id: recipientId,
+      recipient_ids: [recipientId],
+      card_type: "circle",
+    });
+    setCards((prev) => prev.filter((c) => c.id !== cardId));
+    setMoveCardId(null);
+    setMoveTargetId("");
   }
 
   function formatDate(dateStr: string): string {
@@ -184,14 +204,14 @@ export default function BeyondPage() {
                           className="px-3 py-1 rounded-full text-xs font-medium transition-colors"
                           style={{ color: "var(--color-brand)", border: "1.5px solid var(--color-sage)" }}
                         >
-                          View
+                          E-card
                         </button>
                         <button
                           onClick={() => router.push(`/cards/print/${card.id}`)}
                           className="px-3 py-1 rounded-full text-xs font-medium transition-colors"
                           style={{ color: "var(--color-warm-gray)", border: "1.5px solid var(--color-light-gray)" }}
                         >
-                          Print
+                          Preview
                         </button>
                         <button
                           onClick={() => router.push(`/cards/edit/${card.id}`)}
@@ -218,25 +238,62 @@ export default function BeyondPage() {
                             {sharingId === card.id ? "Sharing..." : "Share"}
                           </button>
                         )}
-                        {!promoted ? (
-                          <button
-                            onClick={() => handleAddToCircle(card)}
-                            className="px-3 py-1 rounded-full text-xs font-medium transition-colors"
-                            style={{ color: "var(--color-warm-gray)", border: "1.5px solid var(--color-light-gray)" }}
-                          >
-                            Add to circle
-                          </button>
-                        ) : (
-                          <span className="px-3 py-1 text-xs font-medium" style={{ color: "var(--color-brand)" }}>
-                            Added to circle
-                          </span>
-                        )}
+                        <button
+                          onClick={() => handleAddToCircle(card)}
+                          className="px-3 py-1 rounded-full text-xs font-medium transition-colors"
+                          style={{ color: "var(--color-warm-gray)", border: "1.5px solid var(--color-light-gray)" }}
+                        >
+                          Add to circle
+                        </button>
+                        <button
+                          onClick={() => { setMoveCardId(card.id); setMoveTargetId(""); }}
+                          className="px-3 py-1 rounded-full text-xs font-medium transition-colors"
+                          style={{ color: "var(--color-warm-gray)", border: "1.5px solid var(--color-light-gray)" }}
+                        >
+                          Move to profile
+                        </button>
                       </div>
                     </div>
                   </div>
                 </div>
               );
             })}
+          </div>
+        )}
+        {/* Move to profile modal */}
+        {moveCardId && (
+          <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+            <div className="card-surface rounded-xl shadow-xl max-w-md w-full p-6">
+              <h3 className="text-lg font-semibold text-charcoal mb-2">Move to profile</h3>
+              <p className="text-sm text-warm-gray mb-4">
+                Move this card to an existing profile in your circle.
+              </p>
+              <select
+                value={moveTargetId}
+                onChange={(e) => setMoveTargetId(e.target.value)}
+                className="w-full input-field rounded-lg px-3 py-2 text-sm mb-4"
+              >
+                <option value="">Choose recipient…</option>
+                {getRecipients().map((r) => (
+                  <option key={r.id} value={r.id}>{r.name} ({r.relationship_type})</option>
+                ))}
+              </select>
+              <div className="flex gap-2 justify-end">
+                <button
+                  onClick={() => { setMoveCardId(null); setMoveTargetId(""); }}
+                  className="px-4 py-2 text-sm text-warm-gray hover:text-charcoal"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => handleMoveToProfile(moveCardId, moveTargetId)}
+                  disabled={!moveTargetId}
+                  className="btn-primary px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-50"
+                >
+                  Move
+                </button>
+              </div>
+            </div>
           </div>
         )}
       </main>

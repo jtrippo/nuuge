@@ -78,7 +78,6 @@ export function getSenderNames(
   const overrides = (card as { signer_display_overrides?: Record<string, string> }).signer_display_overrides;
   const groupName = (card as { signer_group_name?: string | null }).signer_group_name?.trim();
 
-  // Group signature replaces all
   if (groupName) return groupName;
 
   const defaultUser = getDefaultUserDisplayName(userProfile);
@@ -95,15 +94,38 @@ export function getSenderNames(
       const name = overrides?.[id]?.trim() || defaultName;
       if (name && !names.includes(name)) names.push(name);
     }
-    return formatSignerNamesForEnvelope(names);
   }
 
-  const coSigned = card.co_signed_with?.trim();
-  if (coSigned && !names.includes(coSigned)) {
-    names.push(coSigned);
-    return formatSignerNamesForEnvelope(names);
+  if (names.length === 1) {
+    const coSigned = card.co_signed_with?.trim();
+    if (coSigned) {
+      let resolvedCoName = coSigned;
+      if (overrides && userProfile) {
+        const houseLinks = (userProfile as { household_links?: { recipient_id: string }[] }).household_links || [];
+        for (const link of houseLinks) {
+          const r = allRecipients.find((rec) => rec.id === link.recipient_id);
+          const fn = (r?.first_name || r?.display_name || r?.name || "").toLowerCase();
+          if (fn && (fn === coSigned.toLowerCase() || fn.startsWith(coSigned.toLowerCase()) || coSigned.toLowerCase().startsWith(fn))) {
+            if (overrides[link.recipient_id]?.trim()) {
+              resolvedCoName = overrides[link.recipient_id].trim();
+            }
+            break;
+          }
+        }
+      }
+      if (!names.includes(resolvedCoName)) names.push(resolvedCoName);
+    }
   }
 
+  if (overrides) {
+    const customKeys = Object.keys(overrides).filter((k) => k.startsWith("__custom_")).sort();
+    for (const key of customKeys) {
+      const name = overrides[key]?.trim();
+      if (name && !names.includes(name)) names.push(name);
+    }
+  }
+
+  if (names.length > 1) return formatSignerNamesForEnvelope(names);
   return userName;
 }
 
@@ -136,11 +158,20 @@ export function getSignerNameList(
       const name = overrides?.[id]?.trim() || defaultName;
       if (name && !names.includes(name)) names.push(name);
     }
-    return names;
   }
 
-  const coSigned = card.co_signed_with?.trim();
-  if (coSigned && !names.includes(coSigned)) names.push(coSigned);
+  if (names.length === 1) {
+    const coSigned = card.co_signed_with?.trim();
+    if (coSigned && !names.includes(coSigned)) names.push(coSigned);
+  }
+
+  if (overrides) {
+    const customKeys = Object.keys(overrides).filter((k) => k.startsWith("__custom_")).sort();
+    for (const key of customKeys) {
+      const name = overrides[key]?.trim();
+      if (name && !names.includes(name)) names.push(name);
+    }
+  }
 
   return names;
 }

@@ -1,7 +1,10 @@
 /backup
 Card output
+PDF card storage
 *.pdf
 usage-log.json
 Project plan
+Patents
+Cursor transcripts
 .DS_Store
 home page pix.pdf

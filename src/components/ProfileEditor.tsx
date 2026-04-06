@@ -29,7 +29,13 @@ export default function ProfileEditor({
       const buf: Record<string, string> = {};
       for (const f of fields) {
         const val = profile[f.key];
-        buf[f.key] = Array.isArray(val) ? val.join(", ") : (val as string) || "";
+        if (Array.isArray(val)) {
+          buf[f.key] = val.join(", ");
+        } else if (f.key === "mailing_address" && typeof val === "string" && val.includes("|")) {
+          buf[f.key] = val.split("|").map((s) => s.trim()).filter(Boolean).join(", ");
+        } else {
+          buf[f.key] = (val as string) || "";
+        }
       }
       setEditBuf(buf);
     }
@@ -76,6 +82,7 @@ export default function ProfileEditor({
               <textarea
                 value={editBuf[field.key] ?? getDisplayValue(field.key)}
                 onChange={(e) => handleChange(field.key, e.target.value)}
+                placeholder={field.placeholder}
                 rows={field.key === "mailing_address" ? 3 : 2}
                 className="w-full input-field rounded-lg"
               />
@@ -83,6 +90,7 @@ export default function ProfileEditor({
               <input
                 value={editBuf[field.key] ?? getDisplayValue(field.key)}
                 onChange={(e) => handleChange(field.key, e.target.value)}
+                placeholder={field.placeholder}
                 className="w-full input-field rounded-lg"
               />
             )}

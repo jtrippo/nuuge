@@ -20,16 +20,41 @@ export interface GlobalGuardrails {
   avoid: string[];
 }
 
+export interface SceneSketch {
+  text: string;
+  /** "all" = any age, "young" = child/teen only (too childish for adults), "mature" = adult/senior only. */
+  for: "all" | "young" | "mature";
+}
+
 export interface SubjectRecipe {
   id: string;
   label: string;
   emoji: string;
   examples: string;
   /** Motif pools keyed by mood id — prompt builder picks 1-2 at random */
-  sceneSketches: Record<string, string[]>;
+  sceneSketches: Record<string, SceneSketch[]>;
   compositionHints: string[];
   /** Interest keywords from a person's profile that map to this subject */
   profileKeywords: string[];
+}
+
+const AGE_LEVEL: Record<string, number> = { child: 0, teen: 1, young_adult: 2, adult: 3, senior: 4 };
+
+const sk = (text: string, audience: SceneSketch["for"] = "all"): SceneSketch => ({ text, for: audience });
+
+/** Filter static scene sketches to those appropriate for the given age band. Falls back to full list if nothing matches. */
+export function getFilteredSketches(recipe: SubjectRecipe | undefined, moodId: string, ageBand: string | null): string[] {
+  if (!recipe) return [];
+  const all = recipe.sceneSketches[moodId] ?? [];
+  if (!ageBand || all.length === 0) return all.map((s) => s.text);
+  const level = AGE_LEVEL[ageBand] ?? 3;
+  const filtered = all.filter((s) => {
+    if (s.for === "all") return true;
+    if (s.for === "young") return level <= 1; // child or teen only
+    if (s.for === "mature") return level >= 3; // adult or senior only
+    return true;
+  });
+  return filtered.length > 0 ? filtered.map((s) => s.text) : all.map((s) => s.text);
 }
 
 export interface MoodRecipe {
@@ -110,49 +135,49 @@ export const SUBJECT_RECIPES: SubjectRecipe[] = [
     profileKeywords: ["garden", "flowers", "roses", "plants", "gardening", "botany", "floral", "sunflowers", "orchids", "lavender"],
     sceneSketches: {
       heartfelt_and_sincere: [
-        "A loose bouquet of wildflowers tied with twine, catching soft morning light",
-        "Sunflowers turning toward gentle light in a simple glass jar",
-        "A gentle arrangement of daisies and lavender with dewdrops on petals",
+        sk("A loose bouquet of wildflowers tied with twine, catching soft morning light"),
+        sk("Sunflowers turning toward gentle light in a simple glass jar"),
+        sk("A gentle arrangement of daisies and lavender with dewdrops on petals"),
       ],
       supportive_and_comforting: [
-        "A single resilient flower pushing through soft earth at dawn",
-        "Quiet lavender stems in soft mist, gentle and calming",
-        "A small potted succulent on a windowsill with soft diffused light",
+        sk("A single resilient flower pushing through soft earth at dawn"),
+        sk("Quiet lavender stems in soft mist, gentle and calming"),
+        sk("A small potted succulent on a windowsill with soft diffused light"),
       ],
       romantic_and_affectionate: [
-        "Lush peonies and garden roses in full bloom, soft ambient light",
-        "A cascading arrangement of soft pink roses with delicate ribbon",
-        "An intimate close-up of intertwined rose stems with velvet petals",
+        sk("Lush peonies and garden roses in full bloom, soft ambient light"),
+        sk("A cascading arrangement of soft pink roses with delicate ribbon"),
+        sk("An intimate close-up of intertwined rose stems with velvet petals"),
       ],
       joyful_and_celebratory: [
-        "A vibrant explosion of mixed wildflowers in bold cheerful colors",
-        "Bright sunflowers and zinnias bursting upward with festive energy",
-        "A colorful flower crown arrangement with poppies and cornflowers",
+        sk("A vibrant explosion of mixed wildflowers in bold cheerful colors"),
+        sk("Bright sunflowers and zinnias bursting upward with festive energy"),
+        sk("A colorful flower crown arrangement with poppies and cornflowers"),
       ],
       warm_with_a_touch_of_humor: [
-        "A cheerful daisy growing stubbornly through a crack in a path",
-        "A slightly lopsided bouquet in a quirky watering can, charmingly imperfect",
-        "Sunflowers with one bloom facing the wrong way, endearingly goofy",
+        sk("A cheerful daisy growing stubbornly through a crack in a path"),
+        sk("A slightly lopsided bouquet in a quirky watering can, charmingly imperfect"),
+        sk("Sunflowers with one bloom facing the wrong way, endearingly goofy"),
       ],
       funny_and_playful: [
-        "A flower with an exaggerated cartoon grin among normal flowers",
-        "A tiny cactus in a party hat among a group of elegant roses",
-        "Flowers arranged to look like they're dancing in the breeze",
+        sk("A flower with an exaggerated cartoon grin among normal flowers", "young"),
+        sk("A tiny cactus in a party hat among a group of elegant roses", "young"),
+        sk("Flowers arranged to look like they're dancing in the breeze"),
       ],
       sarcastic_and_edgy: [
-        "A single bold red rose in a concrete setting, stark and graphic",
-        "A cactus surrounded by delicate flowers, standing its ground",
-        "A dramatic dark dahlia against a minimal neutral background",
+        sk("A single bold red rose in a concrete setting, stark and graphic"),
+        sk("A cactus surrounded by delicate flowers, standing its ground"),
+        sk("A dramatic dark dahlia against a minimal neutral background"),
       ],
       simple_and_understated: [
-        "A single elegant stem — one flower, lots of white space",
-        "Three simple line-drawn botanical stems, minimal and refined",
-        "A quiet sprig of eucalyptus, understated and modern",
+        sk("A single elegant stem — one flower, lots of white space"),
+        sk("Three simple line-drawn botanical stems, minimal and refined"),
+        sk("A quiet sprig of eucalyptus, understated and modern"),
       ],
       nostalgic_and_reflective: [
-        "Dried pressed flowers in a vintage botanical arrangement, faded and delicate",
-        "A well-worn garden gate overgrown with climbing roses, soft afternoon light",
-        "Wildflowers in a weathered mason jar on an old wooden table",
+        sk("Dried pressed flowers in a vintage botanical arrangement, faded and delicate"),
+        sk("A well-worn garden gate overgrown with climbing roses, soft afternoon light"),
+        sk("Wildflowers in a weathered mason jar on an old wooden table"),
       ],
     },
   },
@@ -169,50 +194,50 @@ export const SUBJECT_RECIPES: SubjectRecipe[] = [
     profileKeywords: ["dog", "cat", "bird", "pet", "horse", "fish", "wildlife", "zoo", "puppy", "kitten", "rabbit", "fox", "deer", "butterfly"],
     sceneSketches: {
       heartfelt_and_sincere: [
-        "A gentle fox curled up beside wildflowers in soft diffused light",
-        "Two small birds sitting together on a branch in quiet evening light",
-        "A loyal dog resting its head on a cozy blanket, peaceful and content",
+        sk("A gentle fox curled up beside wildflowers in soft diffused light"),
+        sk("Two small birds sitting together on a branch in quiet evening light"),
+        sk("A loyal dog resting its head on a cozy blanket, peaceful and content"),
       ],
       supportive_and_comforting: [
-        "A calm deer standing at the edge of a misty forest at dawn",
-        "A mother bird sheltering chicks under her wing in soft rain",
-        "A rabbit resting under a quiet willow tree in gentle morning light",
+        sk("A calm deer standing at the edge of a misty forest at dawn"),
+        sk("A mother bird sheltering chicks under her wing in soft rain"),
+        sk("A rabbit resting under a quiet willow tree in gentle morning light"),
       ],
       romantic_and_affectionate: [
-        "Two swans forming a heart shape on still water at dusk",
-        "A pair of lovebirds on a flowering branch, heads touching",
-        "Two foxes nuzzling in a meadow of soft wildflowers",
+        sk("Two swans forming a heart shape on still water at dusk"),
+        sk("A pair of lovebirds on a flowering branch, heads touching"),
+        sk("Two foxes nuzzling in a meadow of soft wildflowers"),
       ],
       joyful_and_celebratory: [
-        "A jubilant dog mid-leap catching a frisbee in bright sunshine",
-        "Colorful tropical birds in flight against a blue sky",
-        "A playful otter splashing joyfully in sparkling water",
+        sk("A jubilant dog mid-leap catching a frisbee in bright sunshine"),
+        sk("Colorful tropical birds in flight against a blue sky"),
+        sk("A playful otter splashing joyfully in sparkling water"),
       ],
       warm_with_a_touch_of_humor: [
-        "A cat napping in a sunbeam, one paw dangling off the edge of a shelf",
-        "A dog tilting its head quizzically, one ear up and one down",
-        "An owl perched on a stack of books looking wisely at the viewer",
+        sk("A cat napping in a sunbeam, one paw dangling off the edge of a shelf"),
+        sk("A dog tilting its head quizzically, one ear up and one down"),
+        sk("An owl perched on a stack of books looking wisely at the viewer"),
       ],
       funny_and_playful: [
-        "A goofy dog wearing an oversized party hat, tongue out",
-        "A cat tangled in a ball of yarn looking bewildered",
-        "A penguin sliding belly-first into a pile of wrapped presents",
-        "A bear balancing a birthday cake on one paw, looking proud",
+        sk("A goofy dog wearing an oversized party hat, tongue out", "young"),
+        sk("A cat tangled in a ball of yarn looking bewildered"),
+        sk("A penguin sliding belly-first into a pile of wrapped presents", "young"),
+        sk("A bear balancing a birthday cake on one paw, looking proud", "young"),
       ],
       sarcastic_and_edgy: [
-        "A cat sitting in a box, judging the viewer with deadpan indifference",
-        "A grumpy hedgehog next to a cupcake it clearly doesn't want",
-        "A raccoon in sunglasses leaning against a wall, too cool",
+        sk("A cat sitting in a box, judging the viewer with deadpan indifference"),
+        sk("A grumpy hedgehog next to a cupcake it clearly doesn't want"),
+        sk("A raccoon in sunglasses leaning against a wall, too cool"),
       ],
       simple_and_understated: [
-        "A single hummingbird in flight, minimal background",
-        "A quiet silhouette of a cat on a windowsill",
-        "One small bird perched on a bare branch, elegant and simple",
+        sk("A single hummingbird in flight, minimal background"),
+        sk("A quiet silhouette of a cat on a windowsill"),
+        sk("One small bird perched on a bare branch, elegant and simple"),
       ],
       nostalgic_and_reflective: [
-        "An old dog resting on a porch, quiet afternoon light filtering through trees",
-        "A pair of songbirds on a fence post, soft overcast sky",
-        "A cat curled on a stack of vintage books beside a window",
+        sk("An old dog resting on a porch, quiet afternoon light filtering through trees"),
+        sk("A pair of songbirds on a fence post, soft overcast sky"),
+        sk("A cat curled on a stack of vintage books beside a window"),
       ],
     },
   },
@@ -230,58 +255,58 @@ export const SUBJECT_RECIPES: SubjectRecipe[] = [
     profileKeywords: ["hiking", "camping", "mountains", "beach", "ocean", "outdoors", "fishing", "skiing", "surfing", "kayaking", "travel", "nature", "forest", "lake", "city", "architecture", "paris", "europe", "urban", "home", "cottage"],
     sceneSketches: {
       heartfelt_and_sincere: [
-        "A sun-dappled path through a gentle woodland, inviting and serene",
-        "A quiet garden bench under a canopy of soft spring blossoms",
-        "Rolling hills dotted with wildflowers under a soft open sky",
-        "A cozy cottage with a welcoming front door and climbing roses",
+        sk("A sun-dappled path through a gentle woodland, inviting and serene"),
+        sk("A quiet garden bench under a canopy of soft spring blossoms"),
+        sk("Rolling hills dotted with wildflowers under a soft open sky"),
+        sk("A cozy cottage with a welcoming front door and climbing roses"),
       ],
       supportive_and_comforting: [
-        "A peaceful sunrise over a calm lake, soft mist rising",
-        "A single tree standing strong on a gentle hill, dawn sky behind",
-        "A quiet forest path with dappled light filtering through leaves",
-        "A sheltered stone doorway with warm light glowing from within",
+        sk("A peaceful sunrise over a calm lake, soft mist rising"),
+        sk("A single tree standing strong on a gentle hill, dawn sky behind"),
+        sk("A quiet forest path with dappled light filtering through leaves"),
+        sk("A sheltered stone doorway with warm light glowing from within"),
       ],
       romantic_and_affectionate: [
-        "A moonlit beach with gentle waves and a soft sky at dusk",
-        "A winding garden path through rose arches in late afternoon light",
-        "A secluded woodland clearing with fireflies at twilight",
-        "A quaint Parisian cafe at dusk, warm light spilling onto cobblestones",
+        sk("A moonlit beach with gentle waves and a soft sky at dusk"),
+        sk("A winding garden path through rose arches in late afternoon light"),
+        sk("A secluded woodland clearing with fireflies at twilight"),
+        sk("A quaint Parisian cafe at dusk, warm light spilling onto cobblestones"),
       ],
       joyful_and_celebratory: [
-        "A brilliant rainbow arching over a sunlit mountain valley",
-        "A meadow of bright wildflowers under a vivid blue sky",
-        "A sparkling ocean scene with bright sun and vibrant sky colors",
-        "A festive town square with colorful bunting and bright market stalls",
+        sk("A brilliant rainbow arching over a sunlit mountain valley"),
+        sk("A meadow of bright wildflowers under a vivid blue sky"),
+        sk("A sparkling ocean scene with bright sun and vibrant sky colors"),
+        sk("A festive town square with colorful bunting and bright market stalls"),
       ],
       warm_with_a_touch_of_humor: [
-        "A cozy cabin porch with a welcoming rocking chair and soft light",
-        "A puddle reflecting a surprisingly beautiful sky, humble and charming",
-        "A garden gate slightly ajar, as if inviting the viewer in",
-        "A crooked little bookshop on a cobblestone lane, endearingly quirky",
+        sk("A cozy cabin porch with a welcoming rocking chair and soft light"),
+        sk("A puddle reflecting a surprisingly beautiful sky, humble and charming"),
+        sk("A garden gate slightly ajar, as if inviting the viewer in"),
+        sk("A crooked little bookshop on a cobblestone lane, endearingly quirky"),
       ],
       funny_and_playful: [
-        "A mountain peak with a cartoonish flag planted at the top",
-        "A tropical island so small it has just one palm tree and a beach chair",
-        "A garden where the flowers are growing in unexpectedly wild directions",
-        "A tiny house with an absurdly oversized chimney puffing cheerful smoke",
+        sk("A mountain peak with a cartoonish flag planted at the top", "young"),
+        sk("A tropical island so small it has just one palm tree and a beach chair"),
+        sk("A garden where the flowers are growing in unexpectedly wild directions"),
+        sk("A tiny house with an absurdly oversized chimney puffing cheerful smoke", "young"),
       ],
       sarcastic_and_edgy: [
-        "A lone cactus in a vast desert, bold and graphic",
-        "A stark mountain silhouette against a dramatic moody sky",
-        "A single dead tree in an otherwise empty landscape, powerful and minimal",
-        "A brutalist concrete building, stark and unapologetic against a flat sky",
+        sk("A lone cactus in a vast desert, bold and graphic"),
+        sk("A stark mountain silhouette against a dramatic moody sky"),
+        sk("A single dead tree in an otherwise empty landscape, powerful and minimal"),
+        sk("A brutalist concrete building, stark and unapologetic against a flat sky", "mature"),
       ],
       simple_and_understated: [
-        "A minimal mountain range silhouette against a soft gradient sky",
-        "A single leaf floating on still water, concentric ripples",
-        "A quiet horizon line where sea meets sky, almost abstract",
-        "A simple arched doorway framing a distant view, elegant and spare",
+        sk("A minimal mountain range silhouette against a soft gradient sky"),
+        sk("A single leaf floating on still water, concentric ripples"),
+        sk("A quiet horizon line where sea meets sky, almost abstract"),
+        sk("A simple arched doorway framing a distant view, elegant and spare"),
       ],
       nostalgic_and_reflective: [
-        "A winding country road disappearing into misty rolling hills",
-        "An old wooden dock on a still lake at dusk, soft reflections",
-        "A weathered bench under an ancient oak tree, dappled shade",
-        "An old stone bridge over a quiet river, soft afternoon light",
+        sk("A winding country road disappearing into misty rolling hills"),
+        sk("An old wooden dock on a still lake at dusk, soft reflections"),
+        sk("A weathered bench under an ancient oak tree, dappled shade"),
+        sk("An old stone bridge over a quiet river, soft afternoon light"),
       ],
     },
   },
@@ -299,49 +324,49 @@ export const SUBJECT_RECIPES: SubjectRecipe[] = [
     profileKeywords: ["family", "friends", "dancing", "sports", "couple", "wedding", "together", "kids", "grandchildren", "partner"],
     sceneSketches: {
       heartfelt_and_sincere: [
-        "Two silhouetted figures walking side by side down a tree-lined path in soft autumn light, seen from behind",
-        "A small silhouette hand reaching up to hold a larger one, gentle sky glow behind them",
-        "Two abstract figures on a park bench viewed from a distance, soft bokeh light around them",
+        sk("Two silhouetted figures walking side by side down a tree-lined path in soft autumn light, seen from behind"),
+        sk("A small silhouette hand reaching up to hold a larger one, gentle sky glow behind them"),
+        sk("Two abstract figures on a park bench viewed from a distance, soft bokeh light around them"),
       ],
       supportive_and_comforting: [
-        "Two dark silhouettes standing shoulder to shoulder facing a peaceful sunrise over water",
-        "An impressionistic embrace — two abstract forms blending together in soft muted tones",
-        "A single outstretched hand offering another hand, rendered as a minimal ink sketch",
+        sk("Two dark silhouettes standing shoulder to shoulder facing a peaceful sunrise over water"),
+        sk("An impressionistic embrace — two abstract forms blending together in soft muted tones"),
+        sk("A single outstretched hand offering another hand, rendered as a minimal ink sketch"),
       ],
       romantic_and_affectionate: [
-        "Two silhouettes dancing under string lights in a garden at dusk, faces not visible",
-        "Abstract figures sharing an umbrella in soft rain, rendered as fluid watercolor shapes",
-        "Two silhouettes on a balcony watching a sunset, seen from behind as dark outlines",
+        sk("Two silhouettes dancing under string lights in a garden at dusk, faces not visible"),
+        sk("Abstract figures sharing an umbrella in soft rain, rendered as fluid watercolor shapes"),
+        sk("Two silhouettes on a balcony watching a sunset, seen from behind as dark outlines"),
       ],
       joyful_and_celebratory: [
-        "Raised glasses clinking in a toast, hands only, bright festive light and confetti",
-        "A row of silhouetted figures jumping joyfully on a hilltop against a bright sky",
-        "An impressionistic table scene — lively light, indistinct figures, celebration implied through color and energy",
+        sk("Raised glasses clinking in a toast, hands only, bright festive light and confetti"),
+        sk("A row of silhouetted figures jumping joyfully on a hilltop against a bright sky"),
+        sk("An impressionistic table scene — lively light, indistinct figures, celebration implied through color and energy"),
       ],
       warm_with_a_touch_of_humor: [
-        "Two oversized coffee mugs on a porch railing, two pairs of feet propped up beside them",
-        "A kitchen scene with flour everywhere — only hands and mixing bowls visible, warmth and chaos",
-        "Two shadows cast long across a sunlit yard, one clearly chasing the other",
+        sk("Two oversized coffee mugs on a porch railing, two pairs of feet propped up beside them"),
+        sk("A kitchen scene with flour everywhere — only hands and mixing bowls visible, warmth and chaos"),
+        sk("Two shadows cast long across a sunlit yard, one clearly chasing the other"),
       ],
       funny_and_playful: [
-        "Two pairs of hands in a playful tug-of-war over the last slice of cake on a plate",
-        "A row of silly shadows on a wall — exaggerated poses cast by unseen figures",
-        "Two pairs of sneakers side by side, one pair standing on tiptoe, playful energy",
+        sk("Two pairs of hands in a playful tug-of-war over the last slice of cake on a plate"),
+        sk("A row of silly shadows on a wall — exaggerated poses cast by unseen figures"),
+        sk("Two pairs of sneakers side by side, one pair standing on tiptoe, playful energy"),
       ],
       sarcastic_and_edgy: [
-        "Two silhouettes clinking coffee mugs with deadpan posture, minimal background",
-        "An empty party chair with a single balloon and a half-eaten cake slice — wryly funny",
-        "Two pairs of sunglasses resting side by side on a table, cool and understated",
+        sk("Two silhouettes clinking coffee mugs with deadpan posture, minimal background"),
+        sk("An empty party chair with a single balloon and a half-eaten cake slice — wryly funny"),
+        sk("Two pairs of sunglasses resting side by side on a table, cool and understated"),
       ],
       simple_and_understated: [
-        "A single elegant silhouette looking out over a quiet landscape at dusk",
-        "Two minimal continuous-line figures holding hands, white space all around",
-        "A quiet shadow profile against a soft gradient background, elegant and spare",
+        sk("A single elegant silhouette looking out over a quiet landscape at dusk"),
+        sk("Two minimal continuous-line figures holding hands, white space all around"),
+        sk("A quiet shadow profile against a soft gradient background, elegant and spare"),
       ],
       nostalgic_and_reflective: [
-        "Two silhouettes walking together down a tree-lined path, soft filtered light",
-        "A figure sitting on a porch swing looking at a distant sunset",
-        "Gentle shadows of two people sharing an umbrella in light rain",
+        sk("Two silhouettes walking together down a tree-lined path, soft filtered light"),
+        sk("A figure sitting on a porch swing looking at a distant sunset"),
+        sk("Gentle shadows of two people sharing an umbrella in light rain"),
       ],
     },
   },
@@ -358,50 +383,50 @@ export const SUBJECT_RECIPES: SubjectRecipe[] = [
     profileKeywords: ["cute", "kawaii", "cartoon", "animation", "stuffed animals", "plush", "teddy", "whimsical"],
     sceneSketches: {
       heartfelt_and_sincere: [
-        "A small hedgehog offering a tiny flower with earnest expression",
-        "A fox cub sitting under a string of soft fairy lights, content",
-        "A teddy bear holding a hand-written card, looking up sweetly",
+        sk("A small hedgehog offering a tiny flower with earnest expression", "young"),
+        sk("A fox cub sitting under a string of soft fairy lights, content", "young"),
+        sk("A teddy bear holding a hand-written card, looking up sweetly", "young"),
       ],
       supportive_and_comforting: [
-        "A small bear wrapping a blanket around a smaller friend",
-        "A gentle elephant holding a tiny umbrella over a mouse in the rain",
-        "A sleepy owl on a branch, keeping watch through the night",
+        sk("A small bear wrapping a blanket around a smaller friend", "young"),
+        sk("A gentle elephant holding a tiny umbrella over a mouse in the rain", "young"),
+        sk("A sleepy owl on a branch, keeping watch through the night", "young"),
       ],
       romantic_and_affectionate: [
-        "Two otters holding hands while floating on calm water",
-        "A fox and rabbit sharing a scarf, sitting close together",
-        "A pair of lovebird characters on a branch with tiny hearts",
+        sk("Two otters holding hands while floating on calm water", "young"),
+        sk("A fox and rabbit sharing a scarf, sitting close together", "young"),
+        sk("A pair of lovebird characters on a branch with tiny hearts", "young"),
       ],
       joyful_and_celebratory: [
-        "A little bear wearing a party hat, arms up in celebration",
-        "A parade of tiny woodland creatures carrying a banner",
-        "A penguin popping confetti from a little cannon, delighted",
+        sk("A little bear wearing a party hat, arms up in celebration", "young"),
+        sk("A parade of tiny woodland creatures carrying a banner", "young"),
+        sk("A penguin popping confetti from a little cannon, delighted", "young"),
       ],
       warm_with_a_touch_of_humor: [
-        "A hedgehog trying to hug a cactus, both looking surprised",
-        "A cat character sitting in a box too small for it, perfectly content",
-        "A tiny gnome carrying an enormous mushroom, determined",
+        sk("A hedgehog trying to hug a cactus, both looking surprised", "young"),
+        sk("A cat character sitting in a box too small for it, perfectly content", "young"),
+        sk("A tiny gnome carrying an enormous mushroom, determined", "young"),
       ],
       funny_and_playful: [
-        "A raccoon character caught mid-heist with a cupcake, no regrets",
-        "A penguin doing a dramatic belly slide through confetti",
-        "An owl wearing comically large glasses, looking scholarly",
-        "A corgi character doing a backflip off a stack of pancakes",
+        sk("A raccoon character caught mid-heist with a cupcake, no regrets", "young"),
+        sk("A penguin doing a dramatic belly slide through confetti", "young"),
+        sk("An owl wearing comically large glasses, looking scholarly", "young"),
+        sk("A corgi character doing a backflip off a stack of pancakes", "young"),
       ],
       sarcastic_and_edgy: [
-        "A cat character sipping tea and side-eyeing the viewer",
-        "A sloth character hanging from a branch, unbothered by everything",
-        "A tiny grumpy frog sitting on a lily pad with a deadpan stare",
+        sk("A cat character sipping tea and side-eyeing the viewer", "young"),
+        sk("A sloth character hanging from a branch, unbothered by everything", "young"),
+        sk("A tiny grumpy frog sitting on a lily pad with a deadpan stare", "young"),
       ],
       simple_and_understated: [
-        "A single small bird character perched quietly, minimal line art",
-        "A tiny fox silhouette, clean and elegant against white space",
-        "A simple bunny character in repose, gentle and refined",
+        sk("A single small bird character perched quietly, minimal line art", "young"),
+        sk("A tiny fox silhouette, clean and elegant against white space", "young"),
+        sk("A simple bunny character in repose, gentle and refined", "young"),
       ],
       nostalgic_and_reflective: [
-        "A small owl character sitting on a stack of old letters",
-        "A gentle bear character holding a faded photograph",
-        "A rabbit character tending a timeworn garden, quiet contentment",
+        sk("A small owl character sitting on a stack of old letters", "young"),
+        sk("A gentle bear character holding a faded photograph", "young"),
+        sk("A rabbit character tending a timeworn garden, quiet contentment", "young"),
       ],
     },
   },
@@ -418,49 +443,49 @@ export const SUBJECT_RECIPES: SubjectRecipe[] = [
     profileKeywords: ["christmas", "halloween", "easter", "thanksgiving", "hanukkah", "diwali", "new year", "valentines", "fourth of july", "holiday"],
     sceneSketches: {
       heartfelt_and_sincere: [
-        "A cozy fireplace scene with stockings, soft candlelight",
-        "A gentle snow-covered cottage with soft light in the windows",
-        "A spring garden in soft bloom, easter-morning feeling",
+        sk("A cozy fireplace scene with stockings, soft candlelight"),
+        sk("A gentle snow-covered cottage with soft light in the windows"),
+        sk("A spring garden in soft bloom, easter-morning feeling"),
       ],
       supportive_and_comforting: [
-        "A single candle flame glowing steadily against a quiet winter night",
-        "First snowdrops emerging in early spring, promise of renewal",
-        "A quiet winter scene with soft falling snow and gentle light",
+        sk("A single candle flame glowing steadily against a quiet winter night"),
+        sk("First snowdrops emerging in early spring, promise of renewal"),
+        sk("A quiet winter scene with soft falling snow and gentle light"),
       ],
       romantic_and_affectionate: [
-        "Mistletoe and soft string lights in a cozy winter setting",
-        "A Valentine's garden with heart-shaped topiaries and roses",
-        "Two stockings hanging side by side by a quiet fire",
+        sk("Mistletoe and soft string lights in a cozy winter setting"),
+        sk("A Valentine's garden with heart-shaped topiaries and roses"),
+        sk("Two stockings hanging side by side by a quiet fire"),
       ],
       joyful_and_celebratory: [
-        "Brilliant fireworks bursting over a cityscape in celebration",
-        "A brightly decorated Christmas tree with glowing ornaments",
-        "Festive autumn harvest table with pumpkins and rich seasonal colors",
+        sk("Brilliant fireworks bursting over a cityscape in celebration"),
+        sk("A brightly decorated Christmas tree with glowing ornaments"),
+        sk("Festive autumn harvest table with pumpkins and rich seasonal colors"),
       ],
       warm_with_a_touch_of_humor: [
-        "A snowman with a slightly crooked carrot nose, charming and imperfect",
-        "A Christmas tree ornament that's a tiny disco ball among traditional ones",
-        "A jack-o-lantern with a goofy surprised expression",
+        sk("A snowman with a slightly crooked carrot nose, charming and imperfect"),
+        sk("A Christmas tree ornament that's a tiny disco ball among traditional ones"),
+        sk("A jack-o-lantern with a goofy surprised expression", "young"),
       ],
       funny_and_playful: [
-        "A turkey wearing a pilgrim hat looking relieved it's not Thanksgiving",
-        "A snowman that has clearly been in a snowball fight and lost",
-        "A Christmas tree that's been enthusiastically over-decorated by a cat",
+        sk("A turkey wearing a pilgrim hat looking relieved it's not Thanksgiving", "young"),
+        sk("A snowman that has clearly been in a snowball fight and lost"),
+        sk("A Christmas tree that's been enthusiastically over-decorated by a cat"),
       ],
       sarcastic_and_edgy: [
-        "A single wilting Valentine's rose in a stark modern vase",
-        "A Christmas cactus decorated with one tiny ornament, minimal effort",
-        "A jack-o-lantern with a deeply unimpressed carved expression",
+        sk("A single wilting Valentine's rose in a stark modern vase", "mature"),
+        sk("A Christmas cactus decorated with one tiny ornament, minimal effort"),
+        sk("A jack-o-lantern with a deeply unimpressed carved expression"),
       ],
       simple_and_understated: [
-        "A single snowflake crystal against a soft blue gradient",
-        "A minimal holly branch with red berries, elegant and clean",
-        "One simple autumn leaf, perfectly formed, against white space",
+        sk("A single snowflake crystal against a soft blue gradient"),
+        sk("A minimal holly branch with red berries, elegant and clean"),
+        sk("One simple autumn leaf, perfectly formed, against white space"),
       ],
       nostalgic_and_reflective: [
-        "Vintage Christmas ornaments in a worn wooden box, soft light",
-        "An old-fashioned valentine with lace edges and faded ink",
-        "A weathered birthday candle holder with a single lit flame, quiet celebration",
+        sk("Vintage Christmas ornaments in a worn wooden box, soft light"),
+        sk("An old-fashioned valentine with lace edges and faded ink"),
+        sk("A weathered birthday candle holder with a single lit flame, quiet celebration"),
       ],
     },
   },
@@ -478,58 +503,58 @@ export const SUBJECT_RECIPES: SubjectRecipe[] = [
     profileKeywords: ["coffee", "tea", "books", "reading", "music", "guitar", "piano", "cooking", "baking", "art", "photography", "cycling", "running", "wine", "craft", "knitting", "chess", "gaming", "writing", "vintage", "food", "cake", "cocktails", "brunch"],
     sceneSketches: {
       heartfelt_and_sincere: [
-        "A steaming cup of tea with steam curling upward in soft light",
-        "An open book with pressed flowers between the pages",
-        "A hand-written letter in an envelope with a wax seal",
-        "A lovingly arranged tea set for two on a linen cloth, soft light",
+        sk("A steaming cup of tea with steam curling upward in soft light"),
+        sk("An open book with pressed flowers between the pages"),
+        sk("A hand-written letter in an envelope with a wax seal"),
+        sk("A lovingly arranged tea set for two on a linen cloth, soft light"),
       ],
       supportive_and_comforting: [
-        "A soft blanket draped over a reading chair, gentle lamp light",
-        "A steaming mug of cocoa with a cozy knit sleeve",
-        "A small candle glowing steadily beside a stack of books",
-        "A warm bowl of soup and fresh bread on a quiet table, comforting light",
+        sk("A soft blanket draped over a reading chair, gentle lamp light"),
+        sk("A steaming mug of cocoa with a cozy knit sleeve"),
+        sk("A small candle glowing steadily beside a stack of books"),
+        sk("A warm bowl of soup and fresh bread on a quiet table, comforting light"),
       ],
       romantic_and_affectionate: [
-        "Two wine glasses touching in a toast, soft candlelight",
-        "A vintage key on a velvet ribbon, symbolizing the heart",
-        "A pair of intertwined coffee cups viewed from above",
-        "A box of artisan chocolates with a satin ribbon, intimate setting",
+        sk("Two wine glasses touching in a toast, soft candlelight", "mature"),
+        sk("A vintage key on a velvet ribbon, symbolizing the heart"),
+        sk("A pair of intertwined coffee cups viewed from above"),
+        sk("A box of artisan chocolates with a satin ribbon, intimate setting"),
       ],
       joyful_and_celebratory: [
-        "A champagne bottle with cork popping and sparkles",
-        "A colorful birthday cake with lit candles, festive and bright",
-        "A gift box with a spectacular bow, anticipation and joy",
-        "A festive table spread with cupcakes, confetti, and party favors",
+        sk("A champagne bottle with cork popping and sparkles", "mature"),
+        sk("A colorful birthday cake with lit candles, festive and bright"),
+        sk("A gift box with a spectacular bow, anticipation and joy"),
+        sk("A festive table spread with cupcakes, confetti, and party favors"),
       ],
       warm_with_a_touch_of_humor: [
-        "A coffee mug that says something you can't quite read, next to a donut",
-        "A guitar leaning against a porch railing on a lazy afternoon",
-        "A stack of books piled improbably high, endearingly precarious",
-        "A slightly lopsided homemade birthday cake, charming and heartfelt",
+        sk("A coffee mug that says something you can't quite read, next to a donut"),
+        sk("A guitar leaning against a porch railing on a lazy afternoon"),
+        sk("A stack of books piled improbably high, endearingly precarious"),
+        sk("A slightly lopsided homemade birthday cake, charming and heartfelt"),
       ],
       funny_and_playful: [
-        "A donut wearing sunglasses next to a very serious cup of coffee",
-        "A pizza slice on a throne with a tiny crown",
-        "A sock missing its match, looking forlorn on a clothesline",
-        "A cake with way too many candles, cheerful and absurd",
+        sk("A donut wearing sunglasses next to a very serious cup of coffee", "young"),
+        sk("A pizza slice on a throne with a tiny crown", "young"),
+        sk("A sock missing its match, looking forlorn on a clothesline"),
+        sk("A cake with way too many candles, cheerful and absurd"),
       ],
       sarcastic_and_edgy: [
-        "A single black coffee in a stark white mug, no nonsense",
-        "A vintage typewriter with a crumpled paper ball beside it",
-        "A cactus in a tiny pot on an otherwise empty desk",
-        "A single candle on a cupcake, deadpan minimal birthday",
+        sk("A single black coffee in a stark white mug, no nonsense", "mature"),
+        sk("A vintage typewriter with a crumpled paper ball beside it"),
+        sk("A cactus in a tiny pot on an otherwise empty desk"),
+        sk("A single candle on a cupcake, deadpan minimal birthday"),
       ],
       simple_and_understated: [
-        "A single vintage bicycle leaning against a wall",
-        "A compass rose, clean and elegant against a soft background",
-        "A simple line drawing of a coffee cup, refined and minimal",
-        "A single macaron on a white plate, elegant and spare",
+        sk("A single vintage bicycle leaning against a wall"),
+        sk("A compass rose, clean and elegant against a soft background"),
+        sk("A simple line drawing of a coffee cup, refined and minimal"),
+        sk("A single macaron on a white plate, elegant and spare"),
       ],
       nostalgic_and_reflective: [
-        "A well-loved book open on a worn leather armchair, reading glasses nearby",
-        "An antique pocket watch resting on a handwritten letter",
-        "A vintage camera on a wooden shelf beside faded photographs",
-        "A grandmother's tea cup and saucer on a lace doily, gentle light",
+        sk("A well-loved book open on a worn leather armchair, reading glasses nearby"),
+        sk("An antique pocket watch resting on a handwritten letter"),
+        sk("A vintage camera on a wooden shelf beside faded photographs"),
+        sk("A grandmother's tea cup and saucer on a lace doily, gentle light"),
       ],
     },
   },
@@ -546,49 +571,49 @@ export const SUBJECT_RECIPES: SubjectRecipe[] = [
     profileKeywords: ["art", "design", "patterns", "geometry", "colors", "abstract", "modern", "contemporary", "minimal"],
     sceneSketches: {
       heartfelt_and_sincere: [
-        "Soft watercolor washes blending gentle blues, sage, and muted rose",
-        "Flowing organic shapes in soft pastel tones, like a gentle embrace",
-        "A soft gradient from dusty blue to blush pink, simple and emotional",
+        sk("Soft watercolor washes blending gentle blues, sage, and muted rose"),
+        sk("Flowing organic shapes in soft pastel tones, like a gentle embrace"),
+        sk("A soft gradient from dusty blue to blush pink, simple and emotional"),
       ],
       supportive_and_comforting: [
-        "Gentle concentric circles in calming blues and soft lavender",
-        "A smooth gradient from dawn blue to warm cream, peaceful and steady",
-        "Soft overlapping shapes in muted tones, like a gentle exhale",
+        sk("Gentle concentric circles in calming blues and soft lavender"),
+        sk("A smooth gradient from dawn blue to warm cream, peaceful and steady"),
+        sk("Soft overlapping shapes in muted tones, like a gentle exhale"),
       ],
       romantic_and_affectionate: [
-        "Flowing curves in deep rose and slate, intimate and refined",
-        "Intertwining abstract forms in blush and burgundy",
-        "Soft bokeh-like circles in romantic pink and muted plum tones",
+        sk("Flowing curves in deep rose and slate, intimate and refined"),
+        sk("Intertwining abstract forms in blush and burgundy"),
+        sk("Soft bokeh-like circles in romantic pink and muted plum tones"),
       ],
       joyful_and_celebratory: [
-        "Bold splashes of confetti-like color bursting across the canvas",
-        "Energetic geometric patterns in bright, festive primary colors",
-        "Radiating sunburst pattern in vibrant yellows and oranges",
+        sk("Bold splashes of confetti-like color bursting across the canvas"),
+        sk("Energetic geometric patterns in bright, festive primary colors"),
+        sk("Radiating sunburst pattern in vibrant yellows and oranges"),
       ],
       warm_with_a_touch_of_humor: [
-        "Playful polka dots in mismatched soft colors, charming and casual",
-        "Squiggly hand-drawn shapes in friendly muted tones",
-        "A pattern where one element is deliberately out of place, winking",
+        sk("Playful polka dots in mismatched soft colors, charming and casual"),
+        sk("Squiggly hand-drawn shapes in friendly muted tones"),
+        sk("A pattern where one element is deliberately out of place, winking"),
       ],
       funny_and_playful: [
-        "Wild zigzag patterns in clashing bright colors, joyfully chaotic",
-        "Cartoon-style explosion shapes in cheerful neon pastels",
-        "Confetti-like scattered shapes in every direction, pure fun",
+        sk("Wild zigzag patterns in clashing bright colors, joyfully chaotic"),
+        sk("Cartoon-style explosion shapes in cheerful neon pastels", "young"),
+        sk("Confetti-like scattered shapes in every direction, pure fun"),
       ],
       sarcastic_and_edgy: [
-        "A stark geometric grid with one element breaking the pattern",
-        "Bold black and white contrast with a single pop of color",
-        "Minimal graphic shapes — strong, clean, unapologetic",
+        sk("A stark geometric grid with one element breaking the pattern"),
+        sk("Bold black and white contrast with a single pop of color"),
+        sk("Minimal graphic shapes — strong, clean, unapologetic"),
       ],
       simple_and_understated: [
-        "A single thin line forming a gentle curve against white space",
-        "Two overlapping circles in muted neutral tones",
-        "A quiet gradient from soft gray to cool white, barely there",
+        sk("A single thin line forming a gentle curve against white space"),
+        sk("Two overlapping circles in muted neutral tones"),
+        sk("A quiet gradient from soft gray to cool white, barely there"),
       ],
       nostalgic_and_reflective: [
-        "Layered translucent shapes suggesting faded memories, soft edges",
-        "A gentle wash of sepia and dusty blue, abstract and evocative",
-        "Overlapping circles in muted tones, like ripples in still water",
+        sk("Layered translucent shapes suggesting faded memories, soft edges"),
+        sk("A gentle wash of sepia and dusty blue, abstract and evocative"),
+        sk("Overlapping circles in muted tones, like ripples in still water"),
       ],
     },
   },
@@ -605,49 +630,49 @@ export const SUBJECT_RECIPES: SubjectRecipe[] = [
     profileKeywords: ["astronomy", "stars", "space", "science", "nature", "night", "sky", "travel", "wonder", "meditation", "philosophy"],
     sceneSketches: {
       heartfelt_and_sincere: [
-        "A gentle crescent moon above a quiet landscape, soft starlight",
-        "A sky full of softly glowing stars reflected in still water below",
-        "A warm sunrise breaking over a distant horizon, hopeful and tender",
+        sk("A gentle crescent moon above a quiet landscape, soft starlight"),
+        sk("A sky full of softly glowing stars reflected in still water below"),
+        sk("A warm sunrise breaking over a distant horizon, hopeful and tender"),
       ],
       supportive_and_comforting: [
-        "A steady guiding star in a soft night sky, calm and reassuring",
-        "The first light of dawn appearing on a dark horizon, quiet promise",
-        "A gentle aurora in soft blues and greens over a peaceful scene",
+        sk("A steady guiding star in a soft night sky, calm and reassuring"),
+        sk("The first light of dawn appearing on a dark horizon, quiet promise"),
+        sk("A gentle aurora in soft blues and greens over a peaceful scene"),
       ],
       romantic_and_affectionate: [
-        "A full moon casting silver light over a calm sea at night",
-        "Two shooting stars crossing paths in a deep twilight sky",
-        "A starlit sky above a silhouetted tree line, intimate and magical",
+        sk("A full moon casting silver light over a calm sea at night"),
+        sk("Two shooting stars crossing paths in a deep twilight sky"),
+        sk("A starlit sky above a silhouetted tree line, intimate and magical"),
       ],
       joyful_and_celebratory: [
-        "A brilliant burst of shooting stars streaking across a vivid sky",
-        "A vibrant aurora borealis in greens, pinks, and purples, dazzling",
-        "A radiant sunrise with bold color bands of coral, gold, and blue",
+        sk("A brilliant burst of shooting stars streaking across a vivid sky"),
+        sk("A vibrant aurora borealis in greens, pinks, and purples, dazzling"),
+        sk("A radiant sunrise with bold color bands of coral, gold, and blue"),
       ],
       nostalgic_and_reflective: [
-        "A familiar constellation in a faded indigo sky, quiet wonder",
-        "An old telescope pointed at a soft moon, sense of shared memories",
-        "The last light of a sunset fading into deep blue dusk",
+        sk("A familiar constellation in a faded indigo sky, quiet wonder"),
+        sk("An old telescope pointed at a soft moon, sense of shared memories"),
+        sk("The last light of a sunset fading into deep blue dusk"),
       ],
       warm_with_a_touch_of_humor: [
-        "A smiling crescent moon peeking through friendly clouds",
-        "A single star that shines just a bit brighter than the rest, winking",
-        "A cozy rooftop scene with a blanket laid out for stargazing",
+        sk("A smiling crescent moon peeking through friendly clouds", "young"),
+        sk("A single star that shines just a bit brighter than the rest, winking"),
+        sk("A cozy rooftop scene with a blanket laid out for stargazing"),
       ],
       funny_and_playful: [
-        "A moon with a cheerful face winking at the viewer, bright and playful",
-        "Stars arranged in a cartoonishly perfect constellation shape",
-        "A rocket ship trailing a rainbow through a starry cartoon sky",
+        sk("A moon with a cheerful face winking at the viewer, bright and playful", "young"),
+        sk("Stars arranged in a cartoonishly perfect constellation shape", "young"),
+        sk("A rocket ship trailing a rainbow through a starry cartoon sky", "young"),
       ],
       sarcastic_and_edgy: [
-        "A stark black sky with a single unimpressed-looking star",
-        "A dramatic eclipse in high contrast, bold and graphic",
-        "A minimalist crescent moon against absolute darkness, striking",
+        sk("A stark black sky with a single unimpressed-looking star"),
+        sk("A dramatic eclipse in high contrast, bold and graphic"),
+        sk("A minimalist crescent moon against absolute darkness, striking", "mature"),
       ],
       simple_and_understated: [
-        "A thin crescent moon against a soft gradient sky, minimal and elegant",
-        "Three small stars in a quiet expanse of night, understated and calm",
-        "A single horizon line with the faintest glow of predawn light",
+        sk("A thin crescent moon against a soft gradient sky, minimal and elegant"),
+        sk("Three small stars in a quiet expanse of night, understated and calm"),
+        sk("A single horizon line with the faintest glow of predawn light"),
       ],
     },
   },
@@ -887,6 +912,15 @@ export const STYLE_RECIPES: StyleRecipe[] = [
     renderingNotes: ["bold flat areas of color with confident placement", "contemporary and fresh — like a modern book or magazine illustration"],
   },
   {
+    id: "impressionist",
+    label: "Impressionist",
+    desc: "Luminous, light-filled scenes with visible dabs of color — like Monet or Renoir",
+    technique: ["broken brushwork with short dabs of pure color", "optical color mixing — juxtaposed strokes blend in the viewer's eye", "en plein air atmosphere", "emphasis on natural light and its shifting effects on color"],
+    texture: ["visible individual brushstrokes throughout", "paint surface with varied mark-making", "luminous quality from layered dabs of color"],
+    lineQuality: ["no outlines — form dissolves into light and color", "soft diffused edges", "shapes emerge from accumulated brushstrokes rather than drawn contours"],
+    renderingNotes: ["prioritize capturing light and atmosphere over precise detail", "use warm/cool color contrasts to suggest shadow and sunlight", "slightly dreamy, sun-dappled quality — the scene should feel alive with light"],
+  },
+  {
     id: "cut_paper",
     label: "Cut Paper Folk",
     desc: "Layered paper collage with geometric shapes and Scandinavian folk charm",
@@ -1006,10 +1040,10 @@ export function buildRecipePrompt(opts: {
 
   // Pick a random scene sketch for this subject×mood combination
   const moodId = toneToMoodId(opts.tone);
-  const sketches = subject.sceneSketches[moodId] || [];
+  const sketchObjs = subject.sceneSketches[moodId] || [];
   const chosenSketch = opts.subjectDetail?.trim()
     ? opts.subjectDetail.trim()
-    : (pickRandom(sketches, 1)[0] || `${subject.label} illustration`);
+    : (pickRandom(sketchObjs, 1)[0]?.text ?? `${subject.label} illustration`);
 
   // Filter and inject profile interests as motif hints
   let profileHint = "";
@@ -1106,6 +1140,9 @@ export function buildUserFacingPrompt(opts: {
   personalContext?: string;
   profileInterests?: string[];
   occasion: string;
+  recipientAge?: number | null;
+  recipientAgeBand?: string | null;
+  recipientRelationship?: string;
 }): string {
   const subject = getSubjectRecipe(opts.subjectId);
   const mood = getMoodRecipe(opts.tone);
@@ -1116,39 +1153,68 @@ export function buildUserFacingPrompt(opts: {
   }
 
   const moodId = toneToMoodId(opts.tone);
-  const sketches = subject.sceneSketches[moodId] || [];
-  const chosenSketch = opts.subjectDetail?.trim()
-    ? opts.subjectDetail.trim()
-    : (pickRandom(sketches, 1)[0] || `${subject.label} illustration`);
+  const sketchObjs = subject.sceneSketches[moodId] || [];
+  const rawSketch = pickRandom(sketchObjs, 1)[0]?.text ?? `${subject.label} illustration`;
 
-  let profileHint = "";
-  if (opts.profileInterests && opts.profileInterests.length > 0) {
-    const filtered = filterProfileInterests(opts.profileInterests, mood);
-    const relevant = filtered.filter((interest) =>
-      subject.profileKeywords.some((kw) =>
-        interest.toLowerCase().includes(kw) || kw.includes(interest.toLowerCase())
-      )
-    );
-    if (relevant.length > 0) {
-      const picked = pickRandom(relevant, 2);
-      profileHint = `\nPersonal touch: incorporate ${picked.join(" and ")} naturally into the scene.`;
-    }
+  const hasCustomScene = Boolean(opts.subjectDetail?.trim());
+  const hasInterests = opts.profileInterests && opts.profileInterests.length > 0;
+
+  let sceneLine: string;
+
+  if (hasCustomScene) {
+    sceneLine = `Scene: ${opts.subjectDetail!.trim()}`;
+  } else if (hasInterests) {
+    const interestTheme = opts.profileInterests!.join(" and ");
+    sceneLine = `Scene: A ${interestTheme}-inspired ${subject.label.toLowerCase()} scene — ${rawSketch}`;
+  } else {
+    sceneLine = `Scene: ${rawSketch}`;
   }
 
   const personalCtx = opts.personalContext?.trim()
     ? `\nAdditional context: ${opts.personalContext.trim()}`
     : "";
 
+  let recipientLine = "";
+  const ageBand = opts.recipientAgeBand || (opts.recipientAge != null ? ageBandFromExactAge(opts.recipientAge) : null);
+  if (opts.recipientAge != null || ageBand || opts.recipientRelationship) {
+    const parts: string[] = [];
+    if (opts.recipientRelationship) parts.push(opts.recipientRelationship);
+    if (opts.recipientAge != null) parts.push(`age ${opts.recipientAge}`);
+    else if (ageBand) parts.push(`approximate age: ${ageBand}`);
+    recipientLine = `\nRecipient: ${parts.join(", ")}.`;
+  }
+
+  let ageGuidance = "";
+  if (ageBand) {
+    const level = AGE_LEVEL[ageBand] ?? 3;
+    if (level <= 0) {
+      ageGuidance = "\nAge guidance: Bright, playful, whimsical imagery. Cartoon-style characters and bold colors are welcome.";
+    } else if (level === 1) {
+      ageGuidance = "\nAge guidance: Contemporary, stylish imagery. Vibrant but not childish.";
+    } else if (level >= 3) {
+      ageGuidance = "\nAge guidance: Sophisticated, refined imagery. Animals depicted naturally or artistically, NOT as cartoons. If people are shown, depict them at the correct age — NOT as children.";
+    }
+  }
+
   const lines = [
-    `Scene: ${chosenSketch}`,
+    sceneLine,
     `\nArt style: ${style.label} — ${pickRandom(style.technique, 2).join(", ")}.`,
     `Lighting: ${pickRandom(mood.lighting, 2).join(", ")}.`,
     `Palette: ${pickRandom(mood.palette, 3).join(", ")}.`,
     `Atmosphere: ${pickRandom(mood.promptSnippets, 2).join(". ")}.`,
-    profileHint,
     personalCtx,
+    recipientLine,
+    ageGuidance,
     `\nOccasion: ${opts.occasion}.`,
   ];
 
   return lines.filter(Boolean).join("\n");
+}
+
+function ageBandFromExactAge(age: number): string | null {
+  if (age < 13) return "child";
+  if (age < 19) return "teen";
+  if (age < 31) return "young_adult";
+  if (age < 56) return "adult";
+  return "senior";
 }

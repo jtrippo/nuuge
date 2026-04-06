@@ -207,7 +207,7 @@ export function cornerStyle(slot: number): CSSProperties {
 }
 
 export const DEFAULT_ACCENT_OPACITY = 0.55;
-export const DEFAULT_FRAME_OPACITY = 0.25;
+export const DEFAULT_FRAME_OPACITY = 0.45;
 
 export function cornerImgStyle(opacity?: number): CSSProperties {
   return {

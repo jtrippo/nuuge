@@ -25,13 +25,31 @@ export async function POST(req: NextRequest) {
       currentScene,
       change,
       currentInterests = [],
-    }: { currentScene: string; change: string; currentInterests?: string[] } =
-      await req.json();
+      recipientAge,
+      recipientAgeBand,
+      recipientRelationship,
+    }: {
+      currentScene: string;
+      change: string;
+      currentInterests?: string[];
+      recipientAge?: number | null;
+      recipientAgeBand?: string | null;
+      recipientRelationship?: string;
+    } = await req.json();
 
     const interestsNote =
       currentInterests.length > 0
         ? `\n\nCurrent interests to use (only these): ${currentInterests.join(", ")}. In the output, any "Personal touch" or interests line must reference only these, or omit if none fit the scene.`
         : "\n\nNo interests list provided — omit or minimalize any Personal touch line in the output.";
+
+    let recipientNote = "";
+    if (recipientAge != null || recipientAgeBand || recipientRelationship) {
+      const parts: string[] = [];
+      if (recipientRelationship) parts.push(`Relationship: ${recipientRelationship}`);
+      if (recipientAge != null) parts.push(`Age: ${recipientAge}`);
+      else if (recipientAgeBand) parts.push(`Approximate age: ${recipientAgeBand}`);
+      recipientNote = `\n\nRECIPIENT CONTEXT: ${parts.join(". ")}. If the user's change involves depicting people (e.g. "father and son"), render them at the CORRECT ages based on this context — do NOT default to showing a child unless the recipient IS a child.`;
+    }
 
     const { choices } = await openai.chat.completions.create({
       model: "gpt-4o-mini",
@@ -63,7 +81,7 @@ Output ONLY valid JSON, no markdown fences, no explanation. Escape any quotes in
         },
         {
           role: "user",
-          content: `Current full prompt:\n${currentScene}\n\nUser's change: ${change}${interestsNote}`,
+          content: `Current full prompt:\n${currentScene}\n\nUser's change: ${change}${interestsNote}${recipientNote}`,
         },
       ],
       max_tokens: 1200,

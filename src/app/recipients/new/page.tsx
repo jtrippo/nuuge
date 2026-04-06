@@ -47,6 +47,9 @@ function getInterestCategory(interest: string): string | null {
   for (const [category, items] of Object.entries(INTEREST_CATEGORIES)) {
     if (items.includes(interest)) return category;
   }
+  for (const [category, items] of Object.entries(PROFESSIONAL_INTERESTS)) {
+    if (items.includes(interest)) return category;
+  }
   return null;
 }
 
@@ -68,9 +71,46 @@ function defaultRecurringForType(type: string): boolean {
   return ["Birthday", "Anniversary", "Wedding"].includes(type);
 }
 
+const VALUES_LIST = [
+  "Family", "Integrity", "Adventure", "Creativity", "Faith",
+  "Independence", "Loyalty", "Education", "Community", "Health",
+  "Humor", "Tradition", "Compassion", "Ambition", "Patience",
+  "Honesty", "Generosity", "Freedom", "Sustainability", "Service",
+];
+
 const LIFESTYLE_OPTIONS = [
   "Single", "In a relationship", "Married", "Divorced", "Widowed",
 ];
+
+const CLOSENESS_OPTIONS = [
+  { id: "very_close", label: "Very close", desc: "We talk often and share everything" },
+  { id: "close", label: "Close", desc: "We're comfortable and connected" },
+  { id: "friendly", label: "Friendly", desc: "We get along well" },
+  { id: "acquaintance", label: "Acquaintance", desc: "We know each other but aren't close" },
+  { id: "distant", label: "Distant", desc: "We rarely connect but stay in touch" },
+  { id: "complicated", label: "It's complicated", desc: "The relationship is complex" },
+];
+
+function isProRelationship(rel: string): boolean {
+  return /colleague|coworker|co-worker|boss|mentor|manager|supervisor|client|business|professional/i.test(rel);
+}
+
+const PROFESSIONAL_TRAITS = [
+  "Collaborative", "Detail-oriented", "Strategic", "Supportive", "Direct",
+  "Innovative", "Reliable", "Inspiring", "Approachable", "Mentoring",
+  "Results-driven", "Thoughtful", "Methodical", "Visionary", "Inclusive",
+  "Decisive", "Calm under pressure", "Good communicator",
+];
+
+const PROFESSIONAL_INTERESTS: Record<string, string[]> = {
+  "Work & Leadership": ["Leadership", "Team building", "Public speaking", "Networking", "Mentoring", "Professional development"],
+  "Sports & Outdoors": ["Hiking", "Running", "Cycling", "Yoga", "Golf", "Tennis", "Fishing"],
+  "Food & Drink": ["Cooking", "Wine", "Coffee", "Dining out"],
+  "Entertainment": ["Reading", "Movies", "Travel", "Podcasts"],
+  "Tech & Learning": ["Technology", "Science", "History"],
+};
+
+const ALL_PROFESSIONAL_INTERESTS = Object.values(PROFESSIONAL_INTERESTS).flat();
 
 // ─── Component ──────────────────────────────────────────────────────
 
@@ -111,18 +151,20 @@ function NewRecipientPageInner() {
   const [addressState, setAddressState] = useState("");
   const [addressPostal, setAddressPostal] = useState("");
   const [lifestyle, setLifestyle] = useState("");
+  const [closeness, setCloseness] = useState("");
   const [relationship, setRelationship] = useState("");
   const [customRelationship, setCustomRelationship] = useState("");
   const [selectedTraits, setSelectedTraits] = useState<string[]>([]);
   const [customTrait, setCustomTrait] = useState("");
   const [selectedInterests, setSelectedInterests] = useState<string[]>([]);
   const [customInterest, setCustomInterest] = useState("");
+  const [selectedValues, setSelectedValues] = useState<string[]>([]);
+  const [customValue, setCustomValue] = useState("");
   const [humorTolerance, setHumorTolerance] = useState("");
   const [personalDates, setPersonalDates] = useState<PersonalDate[]>([]);
   const [newDateType, setNewDateType] = useState("Birthday");
   const [newDateValue, setNewDateValue] = useState("");
   const [newDateRecurring, setNewDateRecurring] = useState(true);
-  const [milestones, setMilestones] = useState("");
   const [humorCenterLabel, setHumorCenterLabel] = useState<string | null>(null);
 
   useEffect(() => {
@@ -145,6 +187,7 @@ function NewRecipientPageInner() {
           setAddressPostal(parts[3] || "");
         }
         setLifestyle(existing.lifestyle || "");
+        if ((existing as any).relationship_closeness) setCloseness((existing as any).relationship_closeness);
         const rel = existing.relationship_type || "";
         if (rel && !RELATIONSHIP_TYPES.includes(rel)) {
           setRelationship("__custom");
@@ -156,12 +199,12 @@ function NewRecipientPageInner() {
           setSelectedTraits(existing.personality_notes.split(", ").filter(Boolean));
         }
         setSelectedInterests(existing.interests || []);
+        setSelectedValues(existing.values || []);
         if (existing.humor_tolerance) {
           const match = HUMOR_LEVELS.find((h) => h.label === existing.humor_tolerance);
           setHumorTolerance(match?.id || "");
         }
         setPersonalDates(existing.important_dates || []);
-        setMilestones((existing.milestones || []).join("\n"));
 
         const resumeStep = existing.setup_step as RecipientStep | undefined;
         if (resumeStep && ["who", "personality", "preferences", "review"].includes(resumeStep)) {
@@ -236,6 +279,24 @@ function NewRecipientPageInner() {
       setSelectedInterests((prev) => [...prev, i]);
     }
     setCustomInterest("");
+  }
+
+  function toggleValue(value: string) {
+    setSelectedValues((prev) =>
+      prev.includes(value) ? prev.filter((v) => v !== value) : [...prev, value]
+    );
+  }
+
+  function addCustomValue() {
+    const v = customValue.trim();
+    if (!v) return;
+    const match = VALUES_LIST.find((x) => x.toLowerCase() === v.toLowerCase());
+    if (match) {
+      if (!selectedValues.includes(match)) toggleValue(match);
+    } else if (!selectedValues.includes(v)) {
+      setSelectedValues((prev) => [...prev, v]);
+    }
+    setCustomValue("");
   }
 
   function addDate() {
@@ -324,7 +385,6 @@ function NewRecipientPageInner() {
   }
 
   function buildRecipientData() {
-    const milestonesArray = milestones.split("\n").map((m) => m.trim()).filter(Boolean);
     const nameForSave = displayName || "Unnamed";
     const mailingAddr = [addressStreet, addressCity, addressState, addressPostal].some((s) => s.trim())
       ? [addressStreet.trim(), addressCity.trim(), addressState.trim(), addressPostal.trim()].join("|")
@@ -341,12 +401,14 @@ function NewRecipientPageInner() {
       mailing_address: mailingAddr,
       lifestyle: lifestyle.trim() || null,
       relationship_type: resolvedRelationship || "",
+      relationship_closeness: closeness || null,
       personality_notes: selectedTraits.join(", ") || null,
       interests: selectedInterests,
+      values: selectedValues,
       humor_tolerance: humorTolerance ? (HUMOR_LEVELS.find((h) => h.id === humorTolerance)?.label ?? humorTolerance) : null,
       tone_preference: "Not specified",
       important_dates: personalDates,
-      milestones: milestonesArray,
+      milestones: [],
     };
   }
 
@@ -398,13 +460,14 @@ function NewRecipientPageInner() {
               setAddressState("");
               setAddressPostal("");
               setLifestyle("");
+              setCloseness("");
               setRelationship("");
               setCustomRelationship("");
               setSelectedTraits([]);
               setSelectedInterests([]);
+              setSelectedValues([]);
               setHumorTolerance("");
               setPersonalDates([]);
-              setMilestones("");
             }}
             className="btn-primary mr-3"
           >
@@ -591,6 +654,32 @@ function NewRecipientPageInner() {
                   </button>
                 </div>
               </div>
+
+              <div>
+                <label className="block text-xl font-semibold text-charcoal mb-3">
+                  How close are you?
+                </label>
+                <p className="text-base text-warm-gray mb-3">
+                  Helps Nuuge match the emotional tone of your messages.
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {CLOSENESS_OPTIONS.map((opt) => (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      onClick={() => setCloseness(closeness === opt.id ? "" : opt.id)}
+                      className={`px-3 py-2 rounded-full text-base transition-colors
+                        ${closeness === opt.id
+                          ? "bg-brand text-white"
+                          : "bg-faint-gray text-charcoal hover:bg-light-gray"
+                        }`}
+                      title={opt.desc}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
             </div>
 
             <div className="flex gap-3 mt-8">
@@ -617,16 +706,16 @@ function NewRecipientPageInner() {
             <div className="flex-1 max-w-xl flex flex-col">
               <div className="flex-1 overflow-y-auto">
                 <h2 className="text-2xl font-bold text-charcoal mb-2">
-                  What is {displayName} like?
+                  {isProRelationship(resolvedRelationship) ? `How would you describe ${displayName}?` : `What is ${displayName} like?`}
                 </h2>
                 <p className="text-xl text-warm-gray mb-6 leading-relaxed">
-                  This helps Nuuge write messages that feel right for them.
+                  {isProRelationship(resolvedRelationship) ? "Think about how you know them professionally — even a few traits help." : "This helps Nuuge write messages that feel right for them."}
                 </p>
 
                 <div className="mb-8">
-                  <p className="text-xl font-semibold text-charcoal mb-6">Personality — tap the ones that fit {displayName}</p>
+                  <p className="text-xl font-semibold text-charcoal mb-6">{isProRelationship(resolvedRelationship) ? `Professional traits — tap the ones that fit ${displayName}` : `Personality — tap the ones that fit ${displayName}`}</p>
                   <TraitPickerWheel
-                    items={PERSONALITY_TRAITS}
+                    items={isProRelationship(resolvedRelationship) ? PROFESSIONAL_TRAITS : PERSONALITY_TRAITS}
                     selected={selectedTraits}
                     onToggle={toggleTrait}
                   />
@@ -650,9 +739,9 @@ function NewRecipientPageInner() {
                 </div>
 
                 <div className="mb-8">
-                  <p className="text-xl font-semibold text-charcoal mb-6">{displayName}&apos;s interests — tap the ones that fit</p>
+                  <p className="text-xl font-semibold text-charcoal mb-6">{isProRelationship(resolvedRelationship) ? `${displayName}\u2019s interests & context` : `${displayName}\u2019s interests \u2014 tap the ones that fit`}</p>
                   <TraitPickerWheel
-                    items={ALL_INTERESTS}
+                    items={isProRelationship(resolvedRelationship) ? ALL_PROFESSIONAL_INTERESTS : ALL_INTERESTS}
                     selected={selectedInterests}
                     onToggle={toggleInterest}
                   />
@@ -667,6 +756,32 @@ function NewRecipientPageInner() {
                     <button
                       onClick={addCustomInterest}
                       disabled={!customInterest.trim()}
+                      className="text-sm font-medium px-3 disabled:text-warm-gray"
+                      style={{ color: "var(--color-brand)" }}
+                    >
+                      Add
+                    </button>
+                  </div>
+                </div>
+
+                <div className="mb-8">
+                  <p className="text-xl font-semibold text-charcoal mb-6">What does {displayName} value most?</p>
+                  <TraitPickerWheel
+                    items={VALUES_LIST}
+                    selected={selectedValues}
+                    onToggle={toggleValue}
+                  />
+                  <div className="flex gap-2 mt-4">
+                    <input
+                      value={customValue}
+                      onChange={(e) => setCustomValue(e.target.value)}
+                      onKeyDown={(e) => e.key === "Enter" && addCustomValue()}
+                      placeholder="Add your own value..."
+                      className="input-field flex-1"
+                    />
+                    <button
+                      onClick={addCustomValue}
+                      disabled={!customValue.trim()}
                       className="text-sm font-medium px-3 disabled:text-warm-gray"
                       style={{ color: "var(--color-brand)" }}
                     >
@@ -714,8 +829,8 @@ function NewRecipientPageInner() {
               </div>
               <div className="flex-1 p-4 flex flex-col min-h-0 overflow-y-auto">
                 <p className="text-lg font-semibold text-charcoal mb-3">Your picks</p>
-                {selectedTraits.length === 0 && selectedInterests.length === 0 ? (
-                  <p className="text-lg text-warm-gray italic pl-3">Tap traits and interests in the wheels to add them</p>
+                {selectedTraits.length === 0 && selectedInterests.length === 0 && selectedValues.length === 0 ? (
+                  <p className="text-lg text-warm-gray italic pl-3">Tap traits, interests, and values in the wheels to add them</p>
                 ) : (
                   <div className="space-y-4 pl-3">
                     {selectedTraits.length > 0 && (
@@ -791,6 +906,23 @@ function NewRecipientPageInner() {
                         })()}
                       </div>
                     )}
+                    {selectedValues.length > 0 && (
+                      <div>
+                        <p className="section-label mb-1.5">Values</p>
+                        <ul className="space-y-1.5 pl-5">
+                          {selectedValues.map((v) => (
+                            <li key={`value-${v}`}>
+                              <button
+                                onClick={() => toggleValue(v)}
+                                className="text-lg font-medium text-brand hover:opacity-70 text-left w-full"
+                              >
+                                {v} ×
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -832,7 +964,7 @@ function NewRecipientPageInner() {
               </div>
 
               <div className="mb-8">
-                <label className="block text-xl font-semibold text-charcoal mb-3">Personal dates</label>
+                <label className="block text-xl font-semibold text-charcoal mb-3">Important dates</label>
                 {personalDates.length > 0 && (
                   <div className="space-y-2 mb-3">
                     {personalDates.map((d, i) => (
@@ -911,23 +1043,12 @@ function NewRecipientPageInner() {
                   <button
                     onClick={addDate}
                     disabled={!newDateValue || isDateTypeDisabled(newDateType)}
-                    className="btn-primary text-sm px-4 py-1.5 disabled:opacity-40 disabled:cursor-not-allowed"
+                    className="px-5 py-2 rounded-full text-sm font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                    style={{ background: "var(--color-brand)", color: "#fff" }}
                   >
-                    Add date
+                    + Add date
                   </button>
                 </div>
-              </div>
-
-              <div className="mb-6">
-                <label className="block text-xl font-semibold text-charcoal mb-2">Milestones &amp; important dates</label>
-                <textarea
-                  value={milestones}
-                  onChange={(e) => setMilestones(e.target.value)}
-                  rows={3}
-                  placeholder={"e.g. Graduated college 2024\nFirst marathon 2023\nGot promoted last year"}
-                  className="w-full input-field rounded-xl resize-none text-base"
-                />
-                <p className="text-base text-warm-gray mt-2">Optional — one per line. These help Nuuge remind you when a meaningful moment is coming up.</p>
               </div>
 
               </div>
@@ -982,7 +1103,7 @@ function NewRecipientPageInner() {
                   </div>
                   {personalDates.length > 0 && (
                     <div>
-                      <p className="section-label mb-1.5">Personal dates</p>
+                      <p className="section-label mb-1.5">Important dates</p>
                       <ul className="space-y-1.5 pl-5">
                         {personalDates.map((d, i) => (
                           <li key={i} className="text-lg text-charcoal">
@@ -992,14 +1113,8 @@ function NewRecipientPageInner() {
                       </ul>
                     </div>
                   )}
-                  {milestones.trim() && (
-                    <div>
-                      <p className="section-label mb-1.5">Milestones</p>
-                      <p className="text-lg text-charcoal pl-5 whitespace-pre-wrap">{milestones.trim()}</p>
-                    </div>
-                  )}
-                  {!humorTolerance && personalDates.length === 0 && !milestones.trim() && (
-                    <p className="text-lg text-warm-gray italic pl-3">Select humor, add dates, or add milestones in the left column</p>
+                  {!humorTolerance && personalDates.length === 0 && (
+                    <p className="text-lg text-warm-gray italic pl-3">Select humor or add dates in the left column</p>
                   )}
                 </div>
               </div>
@@ -1059,6 +1174,10 @@ function NewRecipientPageInner() {
                 <p className="text-lg text-charcoal">
                   {selectedInterests.length > 0 ? selectedInterests.join(", ") : <span className="text-warm-gray">None selected</span>}
                 </p>
+                <p className="section-label mt-3 mb-1">Values</p>
+                <p className="text-lg text-charcoal">
+                  {selectedValues.length > 0 ? selectedValues.join(", ") : <span className="text-warm-gray">None selected</span>}
+                </p>
               </button>
 
               {/* Preferences */}
@@ -1075,16 +1194,10 @@ function NewRecipientPageInner() {
                 </p>
                 {personalDates.length > 0 && (
                   <>
-                    <p className="section-label mt-3 mb-1">Personal dates</p>
+                    <p className="section-label mt-3 mb-1">Important dates</p>
                     <p className="text-lg text-charcoal">
                       {personalDates.map((d) => `${d.label}: ${d.date}`).join(", ")}
                     </p>
-                  </>
-                )}
-                {milestones.trim() && (
-                  <>
-                    <p className="section-label mt-3 mb-1">Milestones &amp; important dates</p>
-                    <p className="text-lg text-charcoal whitespace-pre-wrap">{milestones.trim()}</p>
                   </>
                 )}
               </button>

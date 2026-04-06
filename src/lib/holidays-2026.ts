@@ -16,6 +16,7 @@ export const HOLIDAYS_2026: HolidayEntry[] = [
   { id: "ash-wednesday-2026", label: "Ash Wednesday / Lent begins (Christian)", date: "2026-02-18" },
   { id: "ramadan-start-2026", label: "Ramadan begins (Islamic)", date: "2026-02-18" },
   { id: "eid-al-fitr-2026", label: "Eid al-Fitr (Islamic)", date: "2026-03-20" },
+  { id: "passover-2026", label: "Passover begins (Jewish)", date: "2026-04-01" },
   { id: "easter-2026", label: "Easter (Christian)", date: "2026-04-05" },
   { id: "mothers-day-2026", label: "Mother's Day (US)", date: "2026-05-10" },
   { id: "fathers-day-2026", label: "Father's Day (US)", date: "2026-06-21" },

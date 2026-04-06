@@ -42,6 +42,7 @@ export async function POST(req: NextRequest) {
       cardHistory,
       coSignWith,
       relationshipType,
+      relationshipCloseness,
       regenerationCount,
       rejectedMessages,
       mode = "circle",
@@ -50,6 +51,8 @@ export async function POST(req: NextRequest) {
       userDraft,
       senderDisplayName,
       recipientAddressedTo,
+      directionCorrection,
+      previousApproachSummary,
     }: {
       senderContext: string;
       recipientContext?: string;
@@ -60,6 +63,7 @@ export async function POST(req: NextRequest) {
       cardHistory?: string[];
       coSignWith?: string | null;
       relationshipType?: string;
+      relationshipCloseness?: string | null;
       regenerationCount?: number;
       rejectedMessages?: string[];
       mode?: "circle" | "news";
@@ -68,6 +72,8 @@ export async function POST(req: NextRequest) {
       userDraft?: { greeting: string; body: string; closing: string };
       senderDisplayName?: string;
       recipientAddressedTo?: string;
+      directionCorrection?: string | null;
+      previousApproachSummary?: string | null;
     } = body;
 
     const isNews = mode === "news";
@@ -125,6 +131,33 @@ The recipient is the sender's ${relationshipType}. This is a family relationship
       relationshipGuardrail = `
 RELATIONSHIP NOTE:
 The recipient is the sender's ${relationshipType}. Keep the tone appropriate for this relationship — warm and personal, but not romantic or intimate unless the relationship type suggests otherwise.`;
+    }
+
+    const isProfessional = /colleague|coworker|co-worker|boss|mentor|manager|supervisor|client|business|professional/i.test(rel);
+    const closeness = (relationshipCloseness || "").toLowerCase();
+
+    let closenessGuardrail = "";
+    if (closeness === "distant" || closeness === "complicated") {
+      closenessGuardrail = `
+RELATIONSHIP CLOSENESS — CRITICAL:
+The sender describes this relationship as ${closeness === "complicated" ? "COMPLICATED" : "DISTANT"}. This means:
+- Do NOT assume a close, warm bond. Avoid phrases like "you've always been there", "you mean so much", "our special bond", "watching you grow", or "grounding force in the family"
+- Keep the message pleasant but measured — like a respectful, genuine acknowledgment, not an outpouring of affection
+- Match the emotional distance: brief, genuine, not overly sentimental
+- It's OK to reference shared interests or the occasion, but do NOT fabricate closeness that doesn't exist`;
+    } else if (closeness === "acquaintance") {
+      closenessGuardrail = `
+RELATIONSHIP CLOSENESS:
+The sender describes this as an acquaintance-level relationship.
+- Keep the message warm but brief — friendly without assuming deep personal knowledge
+- Focus on the occasion rather than personal details`;
+    }
+    if (isProfessional && !isRomantic) {
+      closenessGuardrail += `
+PROFESSIONAL RELATIONSHIP:
+- Maintain professional warmth — not personal intimacy
+- Reference shared work context or professional respect rather than personal life details
+- Keep it concise and appropriate for a workplace relationship`;
     }
 
     const regenCount = regenerationCount ?? 0;
@@ -197,9 +230,41 @@ This is a sympathy, get-well, apology, or difficult-news card. You MUST:
       ? `\nCARD ADDRESSED TO (RECIPIENTS): This card is addressed to "${recipientAddressedTo}". Use this name in the greeting (e.g., "Dear ${recipientAddressedTo},") and reference both people in the body where appropriate. IMPORTANT: These are the RECIPIENTS — the people RECEIVING the card. They are NOT signers. Do NOT put recipient names in the closing/sign-off.`
       : "";
 
+    const contextSafetyInstruction = `
+DO NOT GUESS OR INVENT:
+- If the recipient's age is not provided, write age-neutral content. Do NOT assume, guess, or reference a specific age, life stage, grade level, or school year.
+- Do NOT invent details that are not present in the profile. Only reference information explicitly provided above.
+- When the profile is sparse, lean into the occasion and tone rather than making up personal details.
+
+AGE-APPROPRIATE TONE (apply when an approximate age range is given above):
+- Child (under 13): Simple, playful language. Reference age-appropriate activities. Keep it fun and warm.
+- Teen (13-18): Casual, relatable tone. Avoid condescension. Acknowledge their growing independence.
+- Young adult (19-30): Energetic, forward-looking. Milestone-aware (college, career, new chapters). Treat them as an equal.
+- Adult (31-55): Peer-to-peer tone. Do NOT use language that implies "watching them grow up" or references their "journey" as if they are young. Focus on current life, shared experiences, and the relationship as it is now.
+- Senior (55+): Warm and respectful. Celebrate experience and wisdom. Do NOT patronize or use language that implies frailty or decline.
+If only an approximate age range is provided, write for the middle of that range. Never reference the age range label itself in the message.`;
+
     const recipientSection = isNews
       ? `\nNEWS CATEGORY: ${newsCategory || "Life update"}\nSENDER'S STORY / DESCRIPTION: ${newsDescription || "General life update to share with others"}\n\n(No specific recipient — this card will be shared with multiple people.)`
       : `\nABOUT THE RECIPIENT:\n${recipientContext || "No recipient context"}${historySection}`;
+
+    const elevatedNotes = effectiveNotes
+      ? directionCorrection
+        ? `\nSENDER'S ORIGINAL NOTES (provided earlier, now superseded by their correction below):
+${effectiveNotes}
+The sender has since corrected their direction — defer to the DIRECTION CORRECTION below. If the correction contradicts these notes, IGNORE the contradicted parts of these notes entirely.`
+        : `\nSENDER'S NOTES (PRIORITIZE THIS):
+${effectiveNotes}
+These notes from the sender reflect their intent and should take PRIORITY over inferred relationship warmth from the profile. If the sender describes the relationship as distant, sets a specific emotional boundary, or requests a particular vibe, RESPECT that even if profile traits suggest otherwise.`
+      : "";
+
+    const directionBlock = directionCorrection
+      ? `\nDIRECTION CORRECTION FROM SENDER (HIGHEST PRIORITY — OVERRIDES ALL OTHER CONTEXT):
+The sender reviewed your previous messages and said they were NOT in the right direction.
+Their correction: "${directionCorrection}"
+${previousApproachSummary ? `Previous approach that was rejected: "${previousApproachSummary}"` : ""}
+This correction takes ABSOLUTE priority over everything else — including the sender's original notes, profile details, and inferred tone. If the correction says to remove a topic, do NOT reference that topic at all, even if it appears in the sender's notes or profile.`
+      : "";
 
     // ── BYOM polish mode ──
     if (userDraft) {
@@ -208,14 +273,16 @@ This is a sympathy, get-well, apology, or difficult-news card. You MUST:
 ABOUT THE SENDER:
 ${senderContext}
 ${recipientSection}
+${elevatedNotes}${directionBlock}
 
 OCCASION: ${effectiveOccasion}
 REQUESTED TONE: ${tone}
-${effectiveNotes ? `ADDITIONAL NOTES FROM SENDER: ${effectiveNotes}` : ""}
 ${coSignWith ? `SIGNED BY: This card is signed by ${coSignWith}. Use "we", "our", and "us" instead of "I", "my", and "me". The closing MUST end with exactly: ${coSignWith}. Do NOT substitute any other names in the sign-off.` : `SOLO SIGNER: This card is from ONLY the sender. The closing must include ONLY the sender's name — do NOT add any other person's name to the sign-off, even if the card is addressed to multiple people.`}${senderNameInstruction}${addressingInstruction}
 ${relationshipGuardrail}
+${closenessGuardrail}
 ${faithModifier}
 ${gentleModifier}
+${contextSafetyInstruction}
 
 THE SENDER'S ORIGINAL MESSAGE:
 Greeting: ${userDraft.greeting}
@@ -243,8 +310,11 @@ Both options should:
 
 Keep messages concise. Real card messages are not essays.
 
+Also, write a brief "approachSummary" (1-2 sentences) describing your interpretation and the angle you chose.
+
 Respond with ONLY valid JSON in this exact format:
 {
+  "approachSummary": "Brief description of how you interpreted the relationship and the angle you chose",
   "messages": [
     {
       "label": "Refined",
@@ -286,14 +356,16 @@ Respond with ONLY valid JSON in this exact format:
 ABOUT THE SENDER:
 ${senderContext}
 ${recipientSection}
+${elevatedNotes}${directionBlock}
 ${rejectedSection}
 OCCASION/NEWS: ${effectiveOccasion}
 REQUESTED TONE: ${tone}
-${effectiveNotes ? `ADDITIONAL NOTES FROM SENDER: ${effectiveNotes}` : ""}
 ${!isNews && coSignWith ? `SIGNED BY: This card is signed by ${coSignWith}. Throughout the entire message, use "we", "our", and "us" instead of "I", "my", and "me". The greeting, body, and closing should all reflect that two people are writing — e.g. "We love you", "We're so proud", "Our favorite memory". The closing MUST end with exactly: ${coSignWith}. Do NOT substitute any other names in the sign-off.` : !isNews ? `SOLO SIGNER: This card is from ONLY the sender. The closing must include ONLY the sender's name — do NOT add any other person's name to the sign-off, even if the card is addressed to multiple people.` : ""}${senderNameInstruction}${addressingInstruction}
 ${relationshipGuardrail}
+${closenessGuardrail}
 ${faithModifier}
 ${gentleModifier}
+${contextSafetyInstruction}
 
 CONTEXT EMPHASIS: ${contextEmphasis}
 
@@ -316,8 +388,11 @@ ${isNews ? "Each option should take a DIFFERENT angle on the sender's news. Vary
 
 Keep messages concise. Real card messages are not essays.
 
+Also, write a brief "approachSummary" (1-2 sentences) describing your overall interpretation of the relationship and the angle you chose. This helps the sender understand your reasoning.
+
 Respond with ONLY valid JSON in this exact format:
 {
+  "approachSummary": "Brief description of how you interpreted the relationship and the tone/angle you chose",
   "messages": [
     {
       "label": "${isGentleOccasion ? "Direct" : "Heartfelt"}",

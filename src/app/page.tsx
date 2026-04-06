@@ -751,16 +751,17 @@ export default function Dashboard() {
         </div>
       </section>
 
-      {/* Two-card navigation — Circle of People + Moments Shared */}
+      {/* Three-card navigation — Cards that sound like you + Share a Moment + Quick Card */}
       <section className="w-full px-6 py-10" style={{ background: "var(--color-cream)", borderBottom: "1px solid var(--color-sage-light)" }}>
-        <div className="max-w-4xl mx-auto grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div className="max-w-5xl mx-auto grid grid-cols-1 sm:grid-cols-3 gap-4">
           <div
             className="rounded-xl p-6 transition-shadow hover:shadow-md"
             style={{ background: "var(--color-white)", border: "1px solid var(--color-sage-light)" }}
           >
             <h3 className="text-lg font-semibold text-charcoal mb-1" style={{ fontFamily: "var(--font-heading)" }}>
-              Circle of People
+              Cards that sound like you
             </h3>
+            <p className="text-xs text-warm-gray mb-1">One card, one person &mdash; deeply personal</p>
             <p className="text-sm text-warm-gray mb-4">
               {recipients.length === 0 ? "No one in your circle yet." : `${recipients.length} ${recipients.length === 1 ? "person" : "people"} in your circle`}
             </p>
@@ -798,8 +799,9 @@ export default function Dashboard() {
             style={{ background: "var(--color-white)", border: "1px solid var(--color-sage-light)" }}
           >
             <h3 className="text-lg font-semibold text-charcoal mb-1" style={{ fontFamily: "var(--font-heading)" }}>
-              Moments Shared
+              Share a Moment
             </h3>
+            <p className="text-xs text-warm-gray mb-1">One message, many people &mdash; share your news</p>
             <p className="text-sm text-warm-gray mb-4">
               {(() => {
                 const count = getSharedMomentCards().length;
@@ -810,7 +812,7 @@ export default function Dashboard() {
               onClick={() => router.push("/cards/create/share")}
               className="btn-primary text-sm px-4 py-2"
             >
-              Create shared card
+              Share a moment
             </button>
             {getSharedMomentCards().length > 0 && (
               <button
@@ -819,6 +821,36 @@ export default function Dashboard() {
                 style={{ color: "var(--color-brand)" }}
               >
                 View moments &rarr;
+              </button>
+            )}
+          </div>
+          <div
+            className="rounded-xl p-6 transition-shadow hover:shadow-md"
+            style={{ background: "var(--color-white)", border: "1px solid var(--color-sage-light)" }}
+          >
+            <h3 className="text-lg font-semibold text-charcoal mb-1" style={{ fontFamily: "var(--font-heading)" }}>
+              Quick Card
+            </h3>
+            <p className="text-xs text-warm-gray mb-1">Someone beyond your circle</p>
+            <p className="text-sm text-warm-gray mb-4">
+              {(() => {
+                const count = getBeyondCircleCards().length;
+                return count === 0 ? "No quick cards yet." : `${count} quick card${count === 1 ? "" : "s"} created`;
+              })()}
+            </p>
+            <button
+              onClick={() => router.push("/cards/create/quick")}
+              className="btn-primary text-sm px-4 py-2"
+            >
+              Send a quick card
+            </button>
+            {getBeyondCircleCards().length > 0 && (
+              <button
+                onClick={() => router.push("/beyond")}
+                className="mt-3 block text-sm font-medium"
+                style={{ color: "var(--color-brand)" }}
+              >
+                View all &rarr;
               </button>
             )}
           </div>

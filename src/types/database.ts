@@ -55,31 +55,26 @@ export const PERSON_PROFILE_FIELDS: {
   key: keyof PersonProfile;
   label: string;
   type: "text" | "textarea" | "tags";
+  placeholder?: string;
 }[] = [
-  { key: "display_name", label: "Display name (for salutations)", type: "text" },
+  { key: "display_name", label: "Display name (for salutations)", type: "text", placeholder: "How they're addressed in cards (e.g., Mom, Dave, Auntie Pat)" },
   { key: "first_name", label: "First name", type: "text" },
   { key: "last_name", label: "Last name", type: "text" },
-  { key: "nickname", label: "Nickname", type: "text" },
-  { key: "birthday", label: "Birthday", type: "text" },
-  { key: "personality", label: "Personality", type: "textarea" },
-  { key: "humor_style", label: "Humor style", type: "text" },
-  { key: "interests", label: "Interests", type: "tags" },
-  { key: "values", label: "Values", type: "tags" },
-  { key: "occupation", label: "Occupation", type: "text" },
-  { key: "location", label: "Location", type: "text" },
-  { key: "lifestyle", label: "Lifestyle / stage of life", type: "textarea" },
-  { key: "pets", label: "Pets", type: "text" },
-  { key: "children", label: "Children", type: "text" },
-  { key: "favorite_foods", label: "Favorite foods", type: "text" },
-  { key: "favorite_music", label: "Favorite music", type: "text" },
-  { key: "favorite_movies_tv", label: "Favorite movies / TV", type: "text" },
-  { key: "favorite_books", label: "Favorite books", type: "text" },
-  { key: "dislikes", label: "Dislikes / things to avoid", type: "text" },
-  { key: "communication_style", label: "Communication style", type: "text" },
-  { key: "emotional_energy", label: "Emotional energy", type: "text" },
-  { key: "mailing_address", label: "Mailing address", type: "textarea" },
-  { key: "email", label: "Email", type: "text" },
-  { key: "notes", label: "Additional notes", type: "textarea" },
+  { key: "nickname", label: "Nickname", type: "text", placeholder: "e.g., Bear, Scooter, D" },
+  { key: "personality", label: "Personality", type: "textarea", placeholder: "e.g., Warm and thoughtful, adventurous, quiet but caring" },
+  { key: "humor_style", label: "Humor style", type: "text", placeholder: "e.g., Dry wit, Dad jokes, Sarcastic, Playful" },
+  { key: "interests", label: "Interests", type: "tags", placeholder: "e.g., Cooking, Hiking, Photography, Cars" },
+  { key: "values", label: "Values", type: "tags", placeholder: "e.g., Family, Integrity, Adventure, Creativity, Faith" },
+  { key: "occupation", label: "Occupation", type: "text", placeholder: "e.g., Teacher, Retired engineer, College student" },
+  { key: "lifestyle", label: "Lifestyle / stage of life", type: "textarea", placeholder: "e.g., Married with kids, Recently retired, Newlywed" },
+  { key: "pets", label: "Pets", type: "text", placeholder: "e.g., Dog named Max, Two cats" },
+  { key: "children", label: "Children", type: "text", placeholder: "e.g., Emma (12), Liam (8)" },
+  { key: "dislikes", label: "Things to avoid in cards", type: "text", placeholder: "e.g., Don't mention ex-spouse, no age jokes, avoid health topics" },
+  { key: "communication_style", label: "Communication style", type: "text", placeholder: "e.g., Direct, Warm and chatty, Reserved, Storyteller" },
+  { key: "emotional_energy", label: "Emotional energy", type: "text", placeholder: "e.g., Upbeat, Reflective, Calm, Expressive" },
+  { key: "mailing_address", label: "Mailing address", type: "textarea", placeholder: "Street, City, State, ZIP" },
+  { key: "email", label: "Email", type: "text", placeholder: "name@example.com" },
+  { key: "notes", label: "Additional notes", type: "textarea", placeholder: "Anything else that helps Nuuge know this person better" },
 ];
 
 export interface UserProfile extends PersonProfile {
@@ -117,6 +112,10 @@ export interface Recipient extends PersonProfile {
   links: RecipientLink[];
   setup_complete?: boolean;
   setup_step?: string;
+  /** Estimated age range when exact birthday is unknown (e.g. "adult", "teen"). NOT a substitute for birthday. */
+  age_band?: string | null;
+  /** How close the sender feels to this person (e.g. "very_close", "distant", "complicated"). */
+  relationship_closeness?: string | null;
 }
 
 export interface ImportantDate {
@@ -149,6 +148,12 @@ export interface Card {
   /** Optional small inside illustration that carries the front theme (e.g. shooting star if front has stars) */
   inside_image_url?: string | null;
   inside_image_prompt?: string | null;
+  /** How front text was applied: "bake" = rendered by DALL-E in the artwork; "overlay" = positioned as HTML text; "none" = no front text */
+  front_text_mode?: "bake" | "overlay" | "none";
+  /** Creative greeting baked into the artwork by DALL-E (e.g. "Naps are cosmic—") */
+  bake_greeting?: string | null;
+  /** Occasion tagline baked into the artwork by DALL-E (e.g. "Happy Birthday!") */
+  bake_tagline?: string | null;
   /** Optional text on the card front (e.g. "Happy Birthday!") — overlay, not in image */
   front_text?: string | null;
   /** e.g. "bottom-right", "center", "top-left" */

@@ -11,9 +11,9 @@ import type { Recipient, ImportantDate, Card, PersonProfile } from "@/types/data
 
 interface RecipientFields {
   relationship_type: string;
+  relationship_closeness: string;
   humor_tolerance: string;
   important_dates: ImportantDate[];
-  milestones: string;
 }
 
 export default function RecipientDetailPage() {
@@ -132,9 +132,9 @@ export default function RecipientDetailPage() {
   function initRecipientFields(r: Recipient): RecipientFields {
     return {
       relationship_type: r.relationship_type,
+      relationship_closeness: r.relationship_closeness || "",
       humor_tolerance: r.humor_tolerance || "",
       important_dates: r.important_dates || [],
-      milestones: (r.milestones || []).join(", "),
     };
   }
 
@@ -164,26 +164,18 @@ export default function RecipientDetailPage() {
       mailing_address: (profileData.mailing_address as string)?.trim() || null,
       email: (profileData.email as string)?.trim() || null,
       relationship_type: recipientFields.relationship_type,
+      relationship_closeness: recipientFields.relationship_closeness || null,
       personality_notes: (profileData.personality as string) || null,
       interests: toTags(profileData.interests),
       values: toTags(profileData.values),
       humor_style: profileData.humor_style || null,
       humor_tolerance: recipientFields.humor_tolerance,
-      tone_preference: "",
       important_dates: recipientFields.important_dates,
-      milestones: recipientFields.milestones.split(",").map((s) => s.trim()).filter(Boolean),
-      birthday: profileData.birthday || null,
       occupation: profileData.occupation || null,
-      location: profileData.location || null,
       lifestyle: profileData.lifestyle || null,
       pets: profileData.pets || null,
       children: profileData.children || null,
-      favorite_foods: profileData.favorite_foods || null,
-      favorite_music: profileData.favorite_music || null,
-      favorite_movies_tv: profileData.favorite_movies_tv || null,
-      favorite_books: profileData.favorite_books || null,
       dislikes: profileData.dislikes || null,
-      communication_style: profileData.communication_style || null,
       notes: profileData.notes || null,
     };
     saveRecipient(updated);
@@ -287,7 +279,14 @@ export default function RecipientDetailPage() {
             <div className="flex items-center justify-between mb-4">
               <div>
                 <h1 className="text-2xl font-bold text-charcoal">{recipient.name}</h1>
-                <p className="text-warm-gray capitalize">{recipient.relationship_type}</p>
+                <p className="text-warm-gray capitalize">
+                  {recipient.relationship_type}
+                  {recipient.relationship_closeness && (
+                    <span className="text-xs ml-2 px-2 py-0.5 rounded-full bg-faint-gray text-warm-gray">
+                      {recipient.relationship_closeness.replace(/_/g, " ")}
+                    </span>
+                  )}
+                </p>
               </div>
               <div className="flex items-center gap-2">
                 <button
@@ -325,10 +324,36 @@ export default function RecipientDetailPage() {
                   className="w-full input-field rounded-lg px-3 py-2 text-sm"
                 />
               </Field>
+              <Field label="Closeness">
+                <div className="flex flex-wrap gap-2">
+                  {[
+                    { id: "very_close", label: "Very close" },
+                    { id: "close", label: "Close" },
+                    { id: "friendly", label: "Friendly" },
+                    { id: "acquaintance", label: "Acquaintance" },
+                    { id: "distant", label: "Distant" },
+                    { id: "complicated", label: "It's complicated" },
+                  ].map((opt) => (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      onClick={() => setRecipientFields({ ...recipientFields!, relationship_closeness: recipientFields!.relationship_closeness === opt.id ? "" : opt.id })}
+                      className={`px-3 py-1.5 rounded-full text-sm transition-colors ${
+                        recipientFields!.relationship_closeness === opt.id
+                          ? "bg-brand text-white"
+                          : "bg-faint-gray text-charcoal hover:bg-light-gray"
+                      }`}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              </Field>
               <Field label="Humor tolerance">
                 <input
                   value={recipientFields.humor_tolerance}
                   onChange={(e) => setRecipientFields({ ...recipientFields, humor_tolerance: e.target.value })}
+                  placeholder="e.g., Loves puns, Prefers heartfelt, Enjoys sarcasm"
                   className="w-full input-field rounded-lg px-3 py-2 text-sm"
                 />
               </Field>
@@ -382,23 +407,17 @@ export default function RecipientDetailPage() {
                   ))}
                   <button
                     onClick={addDate}
-                    className="text-sm font-medium"
-                    style={{ color: "var(--color-brand)" }}
+                    className="text-sm font-medium px-4 py-1.5 rounded-full transition-colors hover:opacity-80"
+                    style={{ color: "var(--color-brand)", border: "1.5px solid var(--color-sage)" }}
                   >
                     + Add date
                   </button>
                 </div>
               </Field>
-              <Field label="Milestones" hint="Comma-separated">
-                <input
-                  value={recipientFields.milestones}
-                  onChange={(e) => setRecipientFields({ ...recipientFields, milestones: e.target.value })}
-                  className="w-full input-field rounded-lg px-3 py-2 text-sm"
-                />
-              </Field>
             </div>
           ) : profileExpanded ? (
             <div className="space-y-4 mb-6 pb-6 border-b" style={{ borderColor: "var(--color-light-gray)" }}>
+              <DetailRow label="Closeness" value={recipient.relationship_closeness ? recipient.relationship_closeness.replace(/_/g, " ") : null} />
               <DetailRow label="Humor tolerance" value={recipient.humor_tolerance} />
               <DetailRow
                 label="Important dates"
@@ -426,14 +445,6 @@ export default function RecipientDetailPage() {
                   ) : null
                 }
               />
-              <DetailRow
-                label="Milestones"
-                value={
-                  recipient.milestones && recipient.milestones.length > 0
-                    ? recipient.milestones.join(", ")
-                    : null
-                }
-              />
             </div>
           ) : null}
 
@@ -443,7 +454,7 @@ export default function RecipientDetailPage() {
               profile={profileData}
               editing={editing}
               onChange={setProfileData}
-              excludeFields={["display_name"]}
+              excludeFields={["display_name", "humor_style", "communication_style", "emotional_energy"]}
             />
           )}
         </div>
@@ -680,14 +691,14 @@ export default function RecipientDetailPage() {
                                 className="text-xs font-medium px-3 py-1 rounded-full transition-colors hover:opacity-80"
                                 style={{ color: "var(--color-brand)", border: "1.5px solid var(--color-sage)" }}
                               >
-                                View
+                                E-card
                               </button>
                               <button
                                 onClick={(e) => { e.stopPropagation(); router.push(`/cards/print/${card.id}`); }}
                                 className="text-xs font-medium px-3 py-1 rounded-full transition-colors hover:opacity-80"
                                 style={{ color: "var(--color-brand)", border: "1.5px solid var(--color-sage)" }}
                               >
-                                Reprint
+                                Preview
                               </button>
                               <button
                                 onClick={(e) => { e.stopPropagation(); router.push(`/cards/edit/${card.id}`); }}
@@ -701,7 +712,7 @@ export default function RecipientDetailPage() {
                                 className="text-xs font-medium px-3 py-1 rounded-full transition-colors hover:opacity-80"
                                 style={{ color: "var(--color-brand)", border: "1.5px solid var(--color-sage)" }}
                               >
-                                Reuse for someone else
+                                Use Again
                               </button>
                               <button
                                 onClick={(e) => {
@@ -727,13 +738,13 @@ export default function RecipientDetailPage() {
           )}
         </div>
 
-        {/* Reuse card modal */}
+        {/* Use Again modal */}
         {reuseCardId && (
           <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
             <div className="card-surface rounded-xl shadow-xl max-w-md w-full p-6">
-              <h3 className="text-lg font-semibold text-charcoal mb-2">Reuse this card</h3>
+              <h3 className="text-lg font-semibold text-charcoal mb-2">Use this image again</h3>
               <p className="text-sm text-warm-gray mb-4">
-                Save a copy for another recipient. Same design and message.
+                Same artwork, fresh message for a new recipient.
               </p>
               <select
                 value={reuseTargetRecipientId}
@@ -746,6 +757,7 @@ export default function RecipientDetailPage() {
                   .map((r) => (
                     <option key={r.id} value={r.id}>{r.name} ({r.relationship_type})</option>
                   ))}
+                <option value="__quick__">Someone not in my circle</option>
               </select>
               <div className="flex gap-2 justify-end">
                 <button
@@ -756,36 +768,16 @@ export default function RecipientDetailPage() {
                 </button>
                 <button
                   onClick={() => {
-                    const card = getCards().find((c) => c.id === reuseCardId);
-                    if (card && reuseTargetRecipientId) {
-                      saveCard({
-                        user_id: card.user_id,
-                        recipient_id: reuseTargetRecipientId,
-                        recipient_ids: [reuseTargetRecipientId],
-                        occasion: card.occasion,
-                        occasion_custom: card.occasion_custom ?? null,
-                        message_text: card.message_text,
-                        image_url: card.image_url,
-                        image_prompt: card.image_prompt,
-                        inside_image_url: card.inside_image_url,
-                        inside_image_prompt: card.inside_image_prompt,
-                        front_text: card.front_text,
-                        front_text_position: card.front_text_position,
-                        tone_used: card.tone_used,
-                        style: card.style,
-                        delivery_method: card.delivery_method,
-                        sent: false,
-                        co_signed_with: card.co_signed_with,
-                      });
-                      setReuseCardId(null);
-                      setReuseTargetRecipientId("");
-                      refreshCards();
+                    if (reuseTargetRecipientId === "__quick__") {
+                      router.push(`/cards/create/quick?reuseCardId=${reuseCardId}`);
+                    } else {
+                      router.push(`/cards/create/${reuseTargetRecipientId}?reuseCardId=${reuseCardId}`);
                     }
                   }}
                   disabled={!reuseTargetRecipientId}
                   className="btn-primary px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-50"
                 >
-                  Save copy
+                  Continue
                 </button>
               </div>
             </div>

@@ -33,6 +33,7 @@ export async function shareCard(
     sender_name: senderNames,
     message_text: card.message_text,
     front_text: card.front_text ?? null,
+    front_text_mode: card.front_text_mode ?? "overlay",
     front_text_position: card.front_text_position ?? "bottom-right",
     front_text_font: card.front_text_font ?? undefined,
     front_text_style: card.front_text_style ?? "dark_box",

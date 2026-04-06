@@ -3,6 +3,7 @@
 import { useState, useCallback, useEffect } from "react";
 import { fontCSS, positionCSS, textStyleCSS, frontTextAlign, messageSizing, msgSizeOptions, isAccentPosition, defaultAccentSlots, cornerStyle, cornerImgStyle, edgeStyle, edgeImgStyle, frameImgStyle } from "@/lib/card-ui-helpers";
 import type { TextStyleChoice, AccentPosition } from "@/lib/card-ui-helpers";
+import NuugeWaxSeal from "@/components/NuugeWaxSeal";
 
 type ViewStage = "envelope_front" | "envelope_back" | "front" | "inside" | "letter";
 
@@ -90,20 +91,6 @@ export default function SharedCardViewer({ cardJson, frontImageUrl, insideImageU
     return () => clearTimeout(timer);
   }, [stage]);
 
-  const waxSeal = (
-    <svg viewBox="0 0 56 56" width="56" height="56">
-      <circle cx="28" cy="28" r="26" fill="#f87171" stroke="#dc2626" strokeWidth="2" />
-      <defs>
-        <path id="nuuge-arc-share" d="M 10,28 A 18,18 0 0,1 46,28" fill="none" />
-      </defs>
-      <text fill="#fff" fontSize="7.5" fontWeight="700" letterSpacing="1.5" textAnchor="middle">
-        <textPath href="#nuuge-arc-share" startOffset="50%">NUUGE</textPath>
-      </text>
-      <text x="28" y="36" fill="#fff" fontSize="16" fontWeight="800" textAnchor="middle" dominantBaseline="central">
-        N
-      </text>
-    </svg>
-  );
 
   return (
     <div className="flex flex-col items-center justify-center min-h-screen px-4 py-8" style={{ background: "var(--color-cream)" }}>
@@ -154,7 +141,7 @@ export default function SharedCardViewer({ cardJson, frontImageUrl, insideImageU
               </div>
               <div className="envelope-face envelope-back-face shadow-lg" style={{ background: "#f0e8db", border: "1px solid #e8e0d4" }}>
                 <div className="absolute top-0 left-0 right-0" style={{ height: "45%", background: "#e8dfd0", clipPath: "polygon(0 0, 50% 100%, 100% 0)", borderBottom: "1px solid #d4c9b8" }} />
-                <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-16 h-16">{waxSeal}</div>
+                <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2"><NuugeWaxSeal size={56} /></div>
               </div>
             </div>
           </div>
@@ -174,7 +161,7 @@ export default function SharedCardViewer({ cardJson, frontImageUrl, insideImageU
             {frontImageUrl ? (
               <>
                 <img src={frontImageUrl} alt="Card front" className="w-full h-full object-cover" />
-                {frontText && (
+                {frontText && card.front_text_mode !== "bake" && (
                   <div style={{ position: "absolute", ...ftPos, ...ftFontStyle, ...ftStyle, width: "84%", padding: "0.5rem", boxSizing: "border-box", fontSize: `calc(clamp(1.4rem, 4vw, 2.5rem) * ${ftScale})`, lineHeight: 1.25, textAlign: frontTextAlign(frontTextPosition), whiteSpace: "pre-line" }}>
                     {frontText}
                   </div>
@@ -270,14 +257,20 @@ export default function SharedCardViewer({ cardJson, frontImageUrl, insideImageU
           </div>
 
           <div className="mt-6 space-y-3">
-            {hasLetter && (
+            {hasLetter ? (
               <p className="text-sm animate-pulse text-center" style={{ color: "var(--color-brand)" }}>A letter fell out — tap anywhere to read it</p>
+            ) : (
+              <>
+                <div className="flex flex-col items-center">
+                  <NuugeWaxSeal size={36} />
+                  <p className="text-xs text-warm-gray text-center mt-1">Created with Nuuge</p>
+                </div>
+                <div className="flex flex-wrap items-center gap-3 justify-center">
+                  <button onClick={() => setStage("front")} className="px-4 py-1.5 rounded-full text-sm text-warm-gray hover:text-charcoal transition-colors" style={{ border: "1.5px solid var(--color-sage)" }}>View front</button>
+                  <button onClick={() => { setStage("envelope_front"); setFlipVisible(false); }} className="px-4 py-1.5 rounded-full text-sm text-warm-gray hover:text-charcoal transition-colors" style={{ border: "1.5px solid var(--color-sage)" }}>View again</button>
+                </div>
+              </>
             )}
-            <p className="text-xs text-warm-gray text-center">Created with Nuuge</p>
-            <div className="flex flex-wrap items-center gap-3 justify-center">
-              <button onClick={() => setStage("front")} className="px-4 py-1.5 rounded-full text-sm text-warm-gray hover:text-charcoal transition-colors" style={{ border: "1.5px solid var(--color-sage)" }}>View front</button>
-              <button onClick={() => { setStage("envelope_front"); setFlipVisible(false); }} className="px-4 py-1.5 rounded-full text-sm text-warm-gray hover:text-charcoal transition-colors" style={{ border: "1.5px solid var(--color-sage)" }}>View again</button>
-            </div>
           </div>
         </div>
       )}
@@ -300,10 +293,14 @@ export default function SharedCardViewer({ cardJson, frontImageUrl, insideImageU
             </div>
           </div>
           <div className="flex-shrink-0 mt-6 pb-8 space-y-3">
-            <p className="text-xs text-warm-gray text-center">Created with Nuuge</p>
+            <div className="flex flex-col items-center">
+              <NuugeWaxSeal size={36} />
+              <p className="text-xs text-warm-gray text-center mt-1">Created with Nuuge</p>
+            </div>
             <div className="flex flex-wrap items-center gap-3 justify-center">
               <button onClick={() => setStage("front")} className="px-4 py-1.5 rounded-full text-sm text-warm-gray hover:text-charcoal transition-colors" style={{ border: "1.5px solid var(--color-sage)" }}>View front</button>
               <button onClick={() => setStage("inside")} className="px-4 py-1.5 rounded-full text-sm text-warm-gray hover:text-charcoal transition-colors" style={{ border: "1.5px solid var(--color-sage)" }}>View inside</button>
+              <button onClick={() => { setStage("envelope_front"); setFlipVisible(false); }} className="px-4 py-1.5 rounded-full text-sm text-warm-gray hover:text-charcoal transition-colors" style={{ border: "1.5px solid var(--color-sage)" }}>View again</button>
             </div>
           </div>
         </div>

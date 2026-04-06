@@ -1,9 +1,10 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import AppHeader from "@/components/AppHeader";
 import TraitPickerWheel from "@/components/TraitPickerWheel";
+import { AGE_BAND_LABELS, type AgeBand } from "@/lib/occasions";
 
 const QUICK_SESSION_KEY = "nuuge_quick_recipient";
 
@@ -19,6 +20,7 @@ export interface QuickRecipientData {
   name: string;
   relationship: string;
   traits: string[];
+  ageBand?: AgeBand | null;
 }
 
 export function saveQuickRecipient(data: QuickRecipientData) {
@@ -40,10 +42,12 @@ export function clearQuickRecipient() {
 
 export default function QuickProfilePage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [name, setName] = useState("");
   const [relationship, setRelationship] = useState("");
   const [traits, setTraits] = useState<string[]>([]);
   const [customTrait, setCustomTrait] = useState("");
+  const [ageBand, setAgeBand] = useState<AgeBand | null>(null);
 
   function toggleTrait(trait: string) {
     setTraits((prev) =>
@@ -64,8 +68,9 @@ export default function QuickProfilePage() {
   }
 
   function handleNext() {
-    saveQuickRecipient({ name: name.trim(), relationship: relationship.trim(), traits });
-    router.push("/cards/create/__quick__");
+    saveQuickRecipient({ name: name.trim(), relationship: relationship.trim(), traits, ageBand });
+    const reuseCardId = searchParams.get("reuseCardId");
+    router.push(`/cards/create/__quick__${reuseCardId ? `?reuseCardId=${reuseCardId}` : ""}`);
   }
 
   return (
@@ -108,6 +113,30 @@ export default function QuickProfilePage() {
               placeholder="e.g. our vet, my neighbor, a former teacher"
               className="input-field rounded-xl w-full"
             />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-charcoal mb-1">Approximate age (optional)</label>
+            <div className="flex flex-wrap gap-2">
+              {(Object.entries(AGE_BAND_LABELS) as [AgeBand, string][]).map(([band, label]) => (
+                <button
+                  key={band}
+                  onClick={() => setAgeBand(ageBand === band ? null : band)}
+                  className="text-sm px-3 py-1.5 rounded-full font-medium transition-all"
+                  style={ageBand === band ? {
+                    background: "var(--color-brand-light)",
+                    border: "1.5px solid var(--color-brand)",
+                    color: "var(--color-brand)",
+                  } : {
+                    background: "var(--color-faint-gray)",
+                    border: "1.5px solid var(--color-light-gray)",
+                    color: "var(--color-warm-gray)",
+                  }}
+                >
+                  {ageBand === band ? "✓ " : ""}{label}
+                </button>
+              ))}
+            </div>
           </div>
 
           <div>

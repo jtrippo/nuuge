@@ -40,6 +40,9 @@ usage-log.json
 /backup
 /Card output
 *.pdf
+PDF card storage/
+Patents/
+Project plan/
 
 # vercel
 .vercel

@@ -7,11 +7,13 @@ import {
   getRecipients,
   getCardsForRecipient,
   saveCard,
+  getCards,
   getCardById,
   updateCard,
   hydrateCardImages,
+  saveRecipient,
 } from "@/lib/store";
-import type { Recipient, UserProfile } from "@/types/database";
+import type { Recipient, UserProfile, Card } from "@/types/database";
 import {
   SUBJECT_RECIPES,
   STYLE_RECIPES,
@@ -22,9 +24,10 @@ import {
   pickRandom,
   calculateAge,
   getBirthdayForAge,
+  getFilteredSketches,
 } from "@/lib/card-recipes";
 import { formatSignerNames, getDefaultUserDisplayName, getDefaultDisplayName, getRecipientDisplayName, USER_KEY, MAX_SIGNERS } from "@/lib/signer-helpers";
-import { fontCSS, textStyleCSS, FONT_OPTIONS as CARD_FONT_OPTIONS, isAccentPosition, defaultAccentSlots, cornerStyle, cornerImgStyle, edgeStyle, edgeImgStyle, frameImgStyle } from "@/lib/card-ui-helpers";
+import { fontCSS, textStyleCSS, FONT_OPTIONS as CARD_FONT_OPTIONS, isAccentPosition, defaultAccentSlots, cornerStyle, cornerImgStyle, edgeStyle, edgeImgStyle, frameImgStyle, DEFAULT_ACCENT_OPACITY, DEFAULT_FRAME_OPACITY } from "@/lib/card-ui-helpers";
 import type { FontChoice, TextStyleChoice } from "@/lib/card-ui-helpers";
 import { saveImage, getImage } from "@/lib/image-store";
 import { logApiCall, tagSessionWithCardId } from "@/lib/usage-store";
@@ -36,6 +39,15 @@ import {
   SHARED_OCCASIONS,
   OTHER_OCCASION_VALUE,
   OTHER_OCCASION_LABEL,
+  AGE_BAND_LABELS,
+  COUPLE_CRITICAL_OCCASIONS,
+  OCCASION_EXTRAS,
+  GRADUATION_LEVELS,
+  ageBandFromAge,
+  inferAgeBand,
+  inferIsCouple,
+  OCCASION_TAGLINES,
+  type AgeBand,
 } from "@/lib/occasions";
 
 const TONES = [
@@ -75,6 +87,8 @@ type Step =
   | "design_subject"
   | "design_style"
   | "design_confirm_prompt"
+  | "front_text_choice"
+  | "front_text_bake"
   | "design_loading"
   | "design_generating"
   | "design_confirm_refinement"
@@ -103,7 +117,7 @@ type Stage = "message" | "design" | "details" | "deliver";
 const STAGE_STEPS: Record<Stage, Step[]> = {
   message: ["occasion", "faith", "tone", "message_mode", "byom_write", "notes", "generating", "select", "preview"],
   design: [
-    "design_subject", "design_style", "design_confirm_prompt", "design_loading",
+    "design_subject", "design_style", "design_confirm_prompt", "front_text_choice", "front_text_bake", "design_loading",
     "design_generating", "design_confirm_refinement", "design_preview",
   ],
   details: [
@@ -167,7 +181,15 @@ interface CardDraft {
   frontText: string;
   frontTextPosition: string;
   frontTextStyle: string;
+  frontTextMode: "bake" | "overlay" | "none";
+  bakeGreeting: string;
+  bakeTagline: string;
   cardSize: "4x6" | "5x7";
+  checkpointAgeBand: AgeBand | null;
+  checkpointIsCouple: boolean;
+  checkpointAnniversaryYears: string;
+  checkpointGraduationLevel: string;
+  accumulatedCost: number;
   updatedAt: number;
 }
 
@@ -244,6 +266,7 @@ function CreateCardPage() {
   const searchParams = useSearchParams();
   const recipientId = params.recipientId as string;
   const editCardId = searchParams.get("editCardId");
+  const reuseCardId = searchParams.get("reuseCardId");
   const startStep = searchParams.get("startStep") as Step | null;
   const presetOccasion = searchParams.get("occasion");
 
@@ -254,6 +277,8 @@ function CreateCardPage() {
   const [allRecipients, setAllRecipients] = useState<Recipient[]>([]);
   const [mounted, setMounted] = useState(false);
   const [editMode, setEditMode] = useState(false);
+  const [reuseMode, setReuseMode] = useState(false);
+  const [reuseCard, setReuseCard] = useState<Card | null>(null);
 
   const [step, setStep] = useState<Step>("occasion");
   const [isLoading, setIsLoading] = useState(false);
@@ -311,11 +336,18 @@ function CreateCardPage() {
   const [decorationType, setDecorationType] = useState<"banner" | "accent" | null>(null);
   const [accentStyle, setAccentStyle] = useState<"corner_flourish" | "top_edge_accent" | "frame" | null>(null);
   const [accentPositions, setAccentPositions] = useState<number[]>([3]);
+  const [accentOpacity, setAccentOpacity] = useState<number | null>(null);
   const [skipInsideDesign, setSkipInsideDesign] = useState(false);
   const [frontTextSuggestions, setFrontTextSuggestions] = useState<{ wording: string; position: string }[]>([]);
+  const [frontTextRefreshing, setFrontTextRefreshing] = useState(false);
   const [frontText, setFrontText] = useState("");
   const [frontTextPosition, setFrontTextPosition] = useState("bottom-right");
   const [frontTextStyle, setFrontTextStyle] = useState<TextStyleChoice>("plain_black");
+  const [frontTextMode, setFrontTextMode] = useState<"bake" | "overlay" | "none">("overlay");
+  const [bakeGreeting, setBakeGreeting] = useState("");
+  const [bakeTagline, setBakeTagline] = useState("");
+  const [bakeSuggestions, setBakeSuggestions] = useState<{wording: string; position: string}[]>([]);
+  const [bakeRefreshing, setBakeRefreshing] = useState(false);
   const [font, setFont] = useState<string>("sans");
   const [insideFont, setInsideFont] = useState<string>("sans");
   const [cardSize, setCardSize] = useState<"4x6" | "5x7">("5x7");
@@ -330,6 +362,18 @@ function CreateCardPage() {
   const sessionIdRef = useRef(`ses_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`);
   const [showResumePrompt, setShowResumePrompt] = useState(false);
   const [pendingDraft, setPendingDraft] = useState<CardDraft | null>(null);
+  const [checkpointAgeBand, setCheckpointAgeBand] = useState<AgeBand | null>(null);
+  const [checkpointIsCouple, setCheckpointIsCouple] = useState(false);
+  const [checkpointAnniversaryYears, setCheckpointAnniversaryYears] = useState("");
+  const [checkpointGraduationLevel, setCheckpointGraduationLevel] = useState("");
+  const [checkpointInitialized, setCheckpointInitialized] = useState(false);
+  const [approachSummary, setApproachSummary] = useState("");
+  const [showApproachDiagnostic, setShowApproachDiagnostic] = useState(false);
+  const [directionCorrection, setDirectionCorrection] = useState("");
+  const [diagnosticAnswered, setDiagnosticAnswered] = useState(false);
+  const [dynamicSketches, setDynamicSketches] = useState<Record<string, string[]> | null>(null);
+  const [dynamicSketchStatus, setDynamicSketchStatus] = useState<"idle" | "pending" | "ready" | "failed">("idle");
+  const sketchRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     setMounted(true);
@@ -350,6 +394,7 @@ function CreateCardPage() {
       } as unknown as Recipient;
       setRecipient(found);
       setRecipientDisplayNameOverride(qd.name);
+      if (qd.ageBand) setCheckpointAgeBand(qd.ageBand);
     } else {
       found = all.find((r) => r.id === recipientId);
       if (found) setRecipient(found);
@@ -435,11 +480,46 @@ function CreateCardPage() {
         }
       }
     }
-  }, [recipientId, editCardId, startStep, presetOccasion]);
+
+    if (reuseCardId && !editCardId) {
+      const allCards = getCards();
+      const sourceCard = allCards.find((c) => c.id === reuseCardId);
+      if (sourceCard) {
+        setReuseMode(true);
+        setReuseCard(sourceCard);
+        hydrateCardImages(sourceCard).then((hydrated) => {
+          if (hydrated.image_url) setGeneratedImageUrl(hydrated.image_url);
+          if (hydrated.inside_image_url) setInsideImageUrl(hydrated.inside_image_url);
+        });
+        if (sourceCard.inside_image_position) setInsideImagePosition(sourceCard.inside_image_position as typeof insideImagePosition);
+        if (sourceCard.accent_positions) setAccentPositions(sourceCard.accent_positions);
+        if (sourceCard.accent_opacity != null) setAccentOpacity(sourceCard.accent_opacity);
+        if (sourceCard.image_subject) setImageSubject(sourceCard.image_subject);
+        if (sourceCard.art_style) setArtStyle(sourceCard.art_style);
+        if (sourceCard.image_prompt) setCurrentSceneDescription(sourceCard.image_prompt);
+        if (sourceCard.front_text_font) setFont(sourceCard.front_text_font);
+        if (sourceCard.font) setInsideFont(sourceCard.font);
+        if (sourceCard.card_size) setCardSize(sourceCard.card_size);
+        const ftMode = sourceCard.front_text_mode || "overlay";
+        setFrontTextMode(ftMode);
+        if (ftMode === "bake") {
+          setBakeGreeting(sourceCard.bake_greeting || "");
+          setBakeTagline(sourceCard.bake_tagline || "");
+          setFrontText(sourceCard.front_text || "");
+          if (sourceCard.occasion) setOccasion(sourceCard.occasion);
+          if (sourceCard.occasion_custom) setOccasionCustom(sourceCard.occasion_custom);
+        } else if (ftMode === "overlay") {
+          setFrontText("");
+        }
+        setFrontTextPosition(sourceCard.front_text_position || "bottom-right");
+        setFrontTextStyle((sourceCard.front_text_style as TextStyleChoice) || "plain_black");
+      }
+    }
+  }, [recipientId, editCardId, reuseCardId, startStep, presetOccasion]);
 
   // Auto-save draft when step and message/design state change (not in edit mode, not on saved, no pending resume)
   useEffect(() => {
-    if (!mounted || !recipientId || editMode || editCardId || showResumePrompt || pendingDraft || step === "saved") return;
+    if (!mounted || !recipientId || editMode || editCardId || reuseMode || showResumePrompt || pendingDraft || step === "saved") return;
     const draft: CardDraft = {
       recipientId,
       step,
@@ -475,7 +555,15 @@ function CreateCardPage() {
       frontText,
       frontTextPosition,
       frontTextStyle,
+      frontTextMode,
+      bakeGreeting,
+      bakeTagline,
       cardSize,
+      checkpointAgeBand,
+      checkpointIsCouple,
+      checkpointAnniversaryYears,
+      checkpointGraduationLevel,
+      accumulatedCost: sessionCost,
       updatedAt: 0,
     };
     saveDraft(draft);
@@ -490,9 +578,23 @@ function CreateCardPage() {
     occasion, occasionCustom, includeFaithBased, tone, notes, messageMode, byomGreeting, byomBody, byomClosing,
     sharedWith, coSign, signerRecipientIds, signerDisplayOverrides, signerGroupName, useGroupSignature, recipientDisplayNameOverride, activeProfileElements,
     selected, editedMessage, imageSubject, subjectDetail, artStyle, personalContext,
-    currentSceneDescription, selectedDesign, insideImagePosition, accentPositions, imageInterests, frontText, frontTextPosition, frontTextStyle, cardSize,
+    currentSceneDescription, selectedDesign, insideImagePosition, accentPositions, imageInterests, frontText, frontTextPosition, frontTextStyle, frontTextMode, bakeGreeting, bakeTagline, cardSize,
     generatedImageUrl, insideImageUrl,
+    checkpointAgeBand, checkpointIsCouple, checkpointAnniversaryYears, checkpointGraduationLevel, sessionCost,
   ]);
+
+  // Auto-refresh scene ideas when interests change (after initial generation)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (step !== "design_subject" || dynamicSketchStatus === "idle") return;
+    if (sketchRefreshTimerRef.current) clearTimeout(sketchRefreshTimerRef.current);
+    sketchRefreshTimerRef.current = setTimeout(() => {
+      fetchDynamicSketches(imageInterests);
+    }, 600);
+    return () => {
+      if (sketchRefreshTimerRef.current) clearTimeout(sketchRefreshTimerRef.current);
+    };
+  }, [imageInterests]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!mounted) return null;
 
@@ -517,6 +619,8 @@ function CreateCardPage() {
     if (d.step === "generating" || d.step === "select") stepToRestore = d.messageMode === "byom" ? "byom_write" : "notes";
     if (d.step === "design_style") stepToRestore = "design_subject";
     if (d.step === "design_loading") stepToRestore = "design_subject";
+    if (d.step === "front_text_choice") stepToRestore = "design_confirm_prompt";
+    if (d.step === "front_text_bake") stepToRestore = "front_text_choice";
     if (d.step === "design_generating") stepToRestore = "design_confirm_prompt";
     if (d.step === "design_preview") stepToRestore = "design_confirm_prompt";
     if (d.step === "inside_position_pick") stepToRestore = "inside_design_ask";
@@ -562,7 +666,16 @@ function CreateCardPage() {
     setFrontText(d.frontText);
     setFrontTextPosition(d.frontTextPosition);
     setFrontTextStyle(d.frontTextStyle as TextStyleChoice);
+    if (d.frontTextMode) setFrontTextMode(d.frontTextMode);
+    if (d.bakeGreeting) setBakeGreeting(d.bakeGreeting);
+    if (d.bakeTagline) setBakeTagline(d.bakeTagline);
     setCardSize(d.cardSize);
+    setCheckpointAgeBand(d.checkpointAgeBand ?? null);
+    setCheckpointIsCouple(d.checkpointIsCouple ?? false);
+    setCheckpointAnniversaryYears(d.checkpointAnniversaryYears ?? "");
+    setCheckpointGraduationLevel(d.checkpointGraduationLevel ?? "");
+    if (d.accumulatedCost) setSessionCost(d.accumulatedCost);
+    if (d.checkpointAgeBand !== undefined) setCheckpointInitialized(true);
     if (d.selectedDesignTitle && d.selectedDesignPrompt) {
       setSelectedDesign({ title: d.selectedDesignTitle, description: "", image_prompt: d.selectedDesignPrompt });
     }
@@ -621,19 +734,20 @@ function CreateCardPage() {
     (r.interests || []).forEach((i) => { if (i.trim()) elements[`interest: ${i.trim()}`] = false; });
     (r.values || []).forEach((v) => { if (v.trim()) elements[`value: ${v.trim()}`] = false; });
     if (r.personality_notes) {
+      // Split on commas so each trait gets its own toggle key
       r.personality_notes.split(/,\s*/).forEach((trait) => {
         const t = trait.trim();
         if (t) elements[`personality: ${t}`] = true;
       });
     }
-    if (r.humor_style) elements[`humor style: ${r.humor_style}`] = true;
     if (r.humor_tolerance) elements[`humor tolerance: ${r.humor_tolerance}`] = true;
     if (r.occupation) elements[`occupation: ${r.occupation}`] = false;
     if (r.lifestyle) elements[`lifestyle: ${r.lifestyle}`] = false;
     if (r.pets) elements[`pets: ${r.pets}`] = false;
-    if (r.favorite_foods) elements[`favorite foods: ${r.favorite_foods}`] = false;
-    if (r.favorite_music) elements[`favorite music: ${r.favorite_music}`] = false;
-    return elements;
+    if (r.children) elements[`children: ${r.children}`] = false;
+    if (r.dislikes) elements[`things to avoid: ${r.dislikes}`] = true;
+    if (r.notes) elements[`additional context: ${r.notes}`] = false;
+    return normalizeProfileElements(elements);
   }
 
   function normalizeProfileElements(raw: Record<string, boolean>): Record<string, boolean> {
@@ -656,17 +770,24 @@ function CreateCardPage() {
   function isInterestLikeKey(key: string): boolean {
     return key.startsWith("interest: ") || key.startsWith("value: ") ||
       key.startsWith("occupation: ") || key.startsWith("lifestyle: ") || key.startsWith("pets: ") ||
-      key.startsWith("favorite foods: ") || key.startsWith("favorite music: ");
+      key.startsWith("children: ") || key.startsWith("additional context: ");
   }
-  /** Keys we eliminate second (personality, humor — tone-related). */
+  /** Keys we eliminate second (personality, humor, avoidances — tone-related). */
   function isToneLikeKey(key: string): boolean {
-    return key.startsWith("personality: ") || key.startsWith("humor style: ") || key.startsWith("humor tolerance: ");
+    return key.startsWith("personality: ") || key.startsWith("humor tolerance: ") || key.startsWith("things to avoid: ");
   }
 
   function buildContextString(
     p: Partial<UserProfile> | null,
     r: Recipient,
-    profileElements?: Record<string, boolean>
+    profileElements?: Record<string, boolean>,
+    checkpoint?: {
+      ageBand: AgeBand | null;
+      isCouple: boolean;
+      anniversaryYears: string;
+      graduationLevel: string;
+    },
+    closeness?: string | null,
   ) {
     const sender = p
       ? `Name: ${p.display_name || "Unknown"}
@@ -682,7 +803,19 @@ Lifestyle: ${p.lifestyle || "Not specified"}`
       : null;
 
     const age = calculateAge(getBirthdayForAge(r.birthday, r.important_dates));
-    const ageLine = age != null ? `Age: ${age}` : "";
+    let ageLine = age != null ? `Age: ${age}` : "";
+    if (!ageLine && checkpoint?.ageBand) {
+      ageLine = `Approximate age: ${AGE_BAND_LABELS[checkpoint.ageBand]}`;
+    }
+    if (!ageLine && (r as Recipient).age_band && AGE_BAND_LABELS[(r as Recipient).age_band as AgeBand]) {
+      ageLine = `Approximate age: ${AGE_BAND_LABELS[(r as Recipient).age_band as AgeBand]}`;
+    }
+
+    const extraLines: string[] = [];
+    if (checkpoint?.isCouple) extraLines.push("Part of a couple");
+    if (checkpoint?.anniversaryYears?.trim()) extraLines.push(`Years together: ${checkpoint.anniversaryYears.trim()}`);
+    if (checkpoint?.graduationLevel?.trim()) extraLines.push(`Graduation level: ${checkpoint.graduationLevel.trim()}`);
+    const closenessLine = closeness ? `Relationship closeness: ${closeness}` : "";
 
     let recipientCtx: string;
     if (active && active.length > 0) {
@@ -693,19 +826,25 @@ Lifestyle: ${p.lifestyle || "Not specified"}`
       });
       recipientCtx = `Name: ${r.name}
 Relationship: ${r.relationship_type}
+${closenessLine}
 ${ageLine}
+${extraLines.join("\n")}
 ${interests.length > 0 ? `Interests: ${interests.join(", ")}` : "Interests: Not specified"}
 ${otherDetails.join("\n")}
 `.replace(/\n{2,}/g, "\n");
     } else if (active && active.length === 0) {
       recipientCtx = `Name: ${r.name}
 Relationship: ${r.relationship_type}
+${closenessLine}
 ${ageLine}
+${extraLines.join("\n")}
 (No specific profile details selected — write a more universal, occasion-focused message.)`.replace(/\n{2,}/g, "\n");
     } else {
       recipientCtx = `Name: ${r.name}
 Relationship: ${r.relationship_type}
+${closenessLine}
 ${ageLine}
+${extraLines.join("\n")}
 Personality: ${r.personality_notes || "Not specified"}
 Interests: ${(r.interests || []).join(", ") || "Not specified"}
 Humor tolerance: ${r.humor_tolerance || "Not specified"}`.replace(/\n{2,}/g, "\n");
@@ -714,13 +853,80 @@ Humor tolerance: ${r.humor_tolerance || "Not specified"}`.replace(/\n{2,}/g, "\n
     return { sender, recipient: recipientCtx };
   }
 
+  function saveCheckpointToProfile() {
+    if (!recipient || isQuickCard) return;
+    const updates: Partial<Recipient> = { id: recipient.id };
+    let changed = false;
+
+    if (checkpointAgeBand && checkpointAgeBand !== recipient.age_band) {
+      updates.age_band = checkpointAgeBand;
+      changed = true;
+    }
+
+    if (checkpointIsCouple && recipient.links) {
+      const hasSpouseLink = recipient.links.some((l) => /spouse|wife|husband|partner/i.test(l.label));
+      if (!hasSpouseLink) {
+        const lifestyle = recipient.lifestyle || "";
+        if (!lifestyle.toLowerCase().includes("married") && !lifestyle.toLowerCase().includes("couple")) {
+          updates.lifestyle = lifestyle ? `${lifestyle}; part of a couple` : "Part of a couple";
+          changed = true;
+        }
+      }
+    }
+
+    if (changed) {
+      saveRecipient({ ...recipient, ...updates });
+      setRecipient((prev) => prev ? { ...prev, ...updates } : prev);
+    }
+  }
+
+  async function fetchDynamicSketches(interests?: string[]) {
+    setDynamicSketchStatus("pending");
+    try {
+      const subjects = SUBJECT_RECIPES.map((s) => s.id);
+      const moodId = toneToMoodId(tone);
+      const ageBand = checkpointAgeBand || (recipient as Recipient)?.age_band || null;
+      const interestsToSend = interests ?? imageInterests;
+      const res = await fetch("/api/suggest-scene-sketches", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          subjects,
+          mood: moodId,
+          occasion,
+          tone,
+          recipientAge: ageBand || undefined,
+          recipientRelationship: recipient?.relationship_type || undefined,
+          interests: interestsToSend.length > 0 ? interestsToSend : undefined,
+        }),
+      });
+      if (!res.ok) throw new Error(`Scene sketch API failed: ${res.status}`);
+      const data = await res.json();
+      if (data.sketches && typeof data.sketches === "object") {
+        console.log("[scene-sketches] keys returned:", Object.keys(data.sketches), "interests sent:", interestsToSend);
+        setDynamicSketches(data.sketches);
+        setDynamicSketchStatus("ready");
+        logApiCall("suggest-scene-sketches", { model: "gpt-4o-mini", callType: "chat_completion", recipientId, cardId: editCardId || undefined, sessionId: sessionIdRef.current });
+      } else {
+        throw new Error("Invalid response shape");
+      }
+    } catch (err) {
+      console.error("Scene sketch fetch failed:", err);
+      setDynamicSketchStatus("failed");
+    }
+  }
+
   async function generateMessages() {
+    saveCheckpointToProfile();
     let nextRegenCount = regenerationCount;
+    let effectiveElements: Record<string, boolean> | undefined;
+    let effectiveRejected = rejectedMessages;
     if (messages.length > 0) {
       const currentAsText = messages.map(
         (m) => `[${m.label}] ${m.greeting} ${m.body} ${m.closing}`
       );
-      setRejectedMessages((prev) => [...prev, ...currentAsText]);
+      effectiveRejected = [...rejectedMessages, ...currentAsText];
+      setRejectedMessages(effectiveRejected);
       nextRegenCount = regenerationCount + 1;
       setRegenerationCount(nextRegenCount);
 
@@ -742,24 +948,32 @@ Humor tolerance: ${r.humor_tolerance || "Not specified"}`.replace(/\n{2,}/g, "\n
           activeToneLike.slice(toneKeepCount).forEach((k) => { updated[k] = false; });
         }
         setActiveProfileElements(updated);
+        effectiveElements = updated; // Use immediately — React state is async
       }
     }
 
     // Initialize profile elements on first generation
-    if (Object.keys(activeProfileElements).length === 0 && recipient) {
+    if (!effectiveElements && Object.keys(activeProfileElements).length === 0 && recipient) {
       const elements = extractProfileElements(recipient);
       setActiveProfileElements(elements);
+      effectiveElements = elements;
     }
 
     setIsLoading(true);
     setLoadingMessage(`Nuuge is writing your ${effectiveOccasion} card for ${recipient!.name}...`);
     setError(null);
 
-    const elementsToUse = Object.keys(activeProfileElements).length > 0
-      ? activeProfileElements
-      : (recipient ? extractProfileElements(recipient) : undefined);
+    const elementsToUse = effectiveElements
+      ?? (Object.keys(activeProfileElements).length > 0 ? activeProfileElements : undefined)
+      ?? (recipient ? extractProfileElements(recipient) : undefined);
 
-    const ctx = buildContextString(profile, recipient!, elementsToUse);
+    const checkpointData = {
+      ageBand: checkpointAgeBand,
+      isCouple: checkpointIsCouple,
+      anniversaryYears: checkpointAnniversaryYears,
+      graduationLevel: checkpointGraduationLevel,
+    };
+    const ctx = buildContextString(profile, recipient!, elementsToUse, checkpointData, recipient!.relationship_closeness);
     const pastCards = getCardsForRecipient(recipient!.id);
     const cardHistory = pastCards.map(
       (c) => `[${c.occasion}] ${c.message_text}`
@@ -775,7 +989,7 @@ Humor tolerance: ${r.humor_tolerance || "Not specified"}`.replace(/\n{2,}/g, "\n
           occasion: effectiveOccasion,
           tone,
           includeFaithBased,
-          additionalNotes: notes,
+          additionalNotes: nextRegenCount >= 3 ? undefined : notes,
           cardHistory,
           coSignWith: (() => {
             if (useGroupSignature && signerGroupName.trim()) return signerGroupName.trim();
@@ -796,8 +1010,11 @@ Humor tolerance: ${r.humor_tolerance || "Not specified"}`.replace(/\n{2,}/g, "\n
             return null;
           })(),
           relationshipType: recipient!.relationship_type,
-          regenerationCount,
-          rejectedMessages: rejectedMessages.length > 0 ? rejectedMessages : undefined,
+          relationshipCloseness: recipient!.relationship_closeness || null,
+          directionCorrection: directionCorrection || null,
+          previousApproachSummary: directionCorrection ? approachSummary : null,
+          regenerationCount: nextRegenCount,
+          rejectedMessages: effectiveRejected.length > 0 ? effectiveRejected : undefined,
           senderDisplayName: signerDisplayOverrides[USER_KEY]?.trim() || undefined,
           recipientAddressedTo: recipientDisplayNameOverride.trim() || undefined,
         }),
@@ -810,6 +1027,9 @@ Humor tolerance: ${r.humor_tolerance || "Not specified"}`.replace(/\n{2,}/g, "\n
 
       const data = await res.json();
       setMessages(data.messages);
+      if (data.approachSummary) setApproachSummary(data.approachSummary);
+      setShowApproachDiagnostic(false);
+      setDirectionCorrection("");
       setIsLoading(false);
       setStep("select");
       logApiCall("generate-card", { model: "gpt-4o", callType: "chat_completion", recipientId, cardId: editCardId || undefined, sessionId: sessionIdRef.current });
@@ -823,11 +1043,18 @@ Humor tolerance: ${r.humor_tolerance || "Not specified"}`.replace(/\n{2,}/g, "\n
   }
 
   async function polishUserMessage() {
+    saveCheckpointToProfile();
     setIsLoading(true);
     setLoadingMessage(`Nuuge is polishing your message for ${recipient!.name}...`);
     setError(null);
 
-    const ctx = buildContextString(profile, recipient!);
+    const polishCheckpoint = {
+      ageBand: checkpointAgeBand,
+      isCouple: checkpointIsCouple,
+      anniversaryYears: checkpointAnniversaryYears,
+      graduationLevel: checkpointGraduationLevel,
+    };
+    const ctx = buildContextString(profile, recipient!, undefined, polishCheckpoint, recipient!.relationship_closeness);
     const coSignWith = (() => {
       if (useGroupSignature && signerGroupName.trim()) return signerGroupName.trim();
       if (signerRecipientIds.length) {
@@ -860,6 +1087,7 @@ Humor tolerance: ${r.humor_tolerance || "Not specified"}`.replace(/\n{2,}/g, "\n
           additionalNotes: notes,
           coSignWith,
           relationshipType: recipient!.relationship_type,
+          relationshipCloseness: recipient!.relationship_closeness || null,
           senderDisplayName: signerDisplayOverrides[USER_KEY]?.trim() || undefined,
           recipientAddressedTo: recipientDisplayNameOverride.trim() || undefined,
           userDraft: {
@@ -883,6 +1111,8 @@ Humor tolerance: ${r.humor_tolerance || "Not specified"}`.replace(/\n{2,}/g, "\n
         closing: byomClosing,
       };
       setMessages([userOriginal, ...data.messages]);
+      if (data.approachSummary) setApproachSummary(data.approachSummary);
+      setShowApproachDiagnostic(false);
       setIsLoading(false);
       setStep("select");
       logApiCall("generate-card", { model: "gpt-4o", callType: "chat_completion", recipientId, cardId: editCardId || undefined, sessionId: sessionIdRef.current });
@@ -898,6 +1128,86 @@ Humor tolerance: ${r.humor_tolerance || "Not specified"}`.replace(/\n{2,}/g, "\n
     setSelected(msg);
     setEditedMessage({ ...msg });
     setStep("preview");
+  }
+
+  async function refineEditedMessage() {
+    if (!editedMessage) return;
+    setIsLoading(true);
+    setLoadingMessage("Nuuge is refining your message...");
+    setError(null);
+
+    const refineCheckpoint = {
+      ageBand: checkpointAgeBand,
+      isCouple: checkpointIsCouple,
+      anniversaryYears: checkpointAnniversaryYears,
+      graduationLevel: checkpointGraduationLevel,
+    };
+    const ctx = buildContextString(profile, recipient!, undefined, refineCheckpoint, recipient!.relationship_closeness);
+    const coSignWith = (() => {
+      if (useGroupSignature && signerGroupName.trim()) return signerGroupName.trim();
+      if (signerRecipientIds.length) {
+        const userVal = signerDisplayOverrides[USER_KEY]?.trim() || getDefaultUserDisplayName(profile);
+        const names = [userVal, ...signerRecipientIds
+          .map((id) => {
+            const r = allRecipients.find((rec) => rec.id === id);
+            return signerDisplayOverrides[id]?.trim() || getDefaultDisplayName(r ?? null);
+          })
+          .filter(Boolean)];
+        return names.length ? formatSignerNames(names) : null;
+      }
+      if (coSign) {
+        const userVal = signerDisplayOverrides[USER_KEY]?.trim() || getDefaultUserDisplayName(profile);
+        return formatSignerNames([userVal, profile?.partner_name || ""]);
+      }
+      return null;
+    })();
+
+    try {
+      const res = await fetch("/api/generate-card", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          senderContext: ctx.sender,
+          recipientContext: ctx.recipient,
+          occasion: effectiveOccasion,
+          tone,
+          includeFaithBased,
+          additionalNotes: notes,
+          coSignWith,
+          relationshipType: recipient!.relationship_type,
+          relationshipCloseness: recipient!.relationship_closeness || null,
+          senderDisplayName: signerDisplayOverrides[USER_KEY]?.trim() || undefined,
+          recipientAddressedTo: recipientDisplayNameOverride.trim() || undefined,
+          userDraft: {
+            greeting: editedMessage.greeting,
+            body: editedMessage.body,
+            closing: editedMessage.closing,
+          },
+        }),
+      });
+
+      if (!res.ok) {
+        const errData = await res.json();
+        throw new Error(errData.error || "Failed to refine message");
+      }
+
+      const data = await res.json();
+      const userVersion: CardMessage = {
+        label: "Your version",
+        greeting: editedMessage.greeting,
+        body: editedMessage.body,
+        closing: editedMessage.closing,
+      };
+      setMessages([userVersion, ...data.messages]);
+      setIsLoading(false);
+      setStep("select");
+      logApiCall("generate-card", { model: "gpt-4o", callType: "chat_completion", recipientId, cardId: editCardId || undefined, sessionId: sessionIdRef.current });
+      setSessionCost((c) => c + 0.025);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Something went wrong";
+      setError(message);
+      setIsLoading(false);
+    }
   }
 
   const recipientLinkedPeople = recipient
@@ -952,6 +1262,7 @@ Humor tolerance: ${r.humor_tolerance || "Not specified"}`.replace(/\n{2,}/g, "\n
           preferredSubject: imageSubject ? IMAGE_SUBJECTS.find((s) => s.id === imageSubject)?.label : undefined,
           preferredStyle: artStyle ? ART_STYLES.find((s) => s.id === artStyle)?.label : undefined,
           preferredMood: TONE_TO_VISUAL[tone] || undefined,
+          selectedInterests: imageInterests.length > 0 ? imageInterests : undefined,
         }),
       });
 
@@ -979,10 +1290,27 @@ Humor tolerance: ${r.humor_tolerance || "Not specified"}`.replace(/\n{2,}/g, "\n
       .map(([k]) => k.slice(10));
   }
 
+  function enterDesignStep() {
+    if (reuseMode) {
+      if (frontTextMode === "overlay") {
+        loadFrontTextSuggestions();
+      } else {
+        setStep("letter");
+      }
+      return;
+    }
+    setImageInterests([]);
+    setDynamicSketches(null);
+    setDynamicSketchStatus("idle");
+    setStep("design_subject");
+  }
+
   function buildImagePromptFromSelections(): string {
     if (!imageSubject || !artStyle) return "";
 
     const interests = imageInterests.length > 0 ? imageInterests : undefined;
+    const exactAge = recipient ? calculateAge(getBirthdayForAge(recipient.birthday, recipient.important_dates)) : null;
+    const ageBand = checkpointAgeBand || (recipient as Recipient)?.age_band || null;
     return buildUserFacingPrompt({
       subjectId: imageSubject,
       subjectDetail: subjectDetail.trim() || undefined,
@@ -991,6 +1319,9 @@ Humor tolerance: ${r.humor_tolerance || "Not specified"}`.replace(/\n{2,}/g, "\n
       personalContext: personalContext.trim() || undefined,
       profileInterests: interests,
       occasion: effectiveOccasion,
+      recipientAge: exactAge,
+      recipientAgeBand: ageBand,
+      recipientRelationship: recipient?.relationship_type || undefined,
     });
   }
 
@@ -1077,6 +1408,9 @@ Humor tolerance: ${r.humor_tolerance || "Not specified"}`.replace(/\n{2,}/g, "\n
       ? `\nIMPORTANT: Keep the art style as "${styleLabel}" and the mood as "${moodSnippet}". Do NOT change these unless the user explicitly asks.`
       : "";
 
+    const exactAge = recipient ? calculateAge(getBirthdayForAge(recipient.birthday, recipient.important_dates)) : null;
+    const ageBand = checkpointAgeBand || (recipient as Recipient)?.age_band || null;
+
     try {
       const res = await fetch("/api/merge-scene", {
         method: "POST",
@@ -1085,6 +1419,9 @@ Humor tolerance: ${r.humor_tolerance || "Not specified"}`.replace(/\n{2,}/g, "\n
           currentScene: currentSceneDescription + styleContext,
           change: change.trim(),
           currentInterests: imageInterests.length > 0 ? imageInterests : [],
+          recipientAge: exactAge,
+          recipientAgeBand: ageBand,
+          recipientRelationship: recipient?.relationship_type || undefined,
         }),
       });
       if (!res.ok) {
@@ -1119,9 +1456,9 @@ Humor tolerance: ${r.humor_tolerance || "Not specified"}`.replace(/\n{2,}/g, "\n
     }
   }
 
-  function insideImageOrientation(): "horizontal" | "vertical" | "square" {
+  function insideImageOrientation(): "horizontal" | "vertical" | "square" | "frame" {
     if (insideImagePosition === "corner_flourish") return "square";
-    if (insideImagePosition === "frame") return "vertical";
+    if (insideImagePosition === "frame") return "frame";
     if (insideImagePosition === "top_edge_accent") return "horizontal";
     return INSIDE_POSITIONS.find((p) => p.id === insideImagePosition)?.orientation ?? "horizontal";
   }
@@ -1129,7 +1466,7 @@ Humor tolerance: ${r.humor_tolerance || "Not specified"}`.replace(/\n{2,}/g, "\n
   function insideImageSize(): "1536x1024" | "1024x1536" | "1024x1024" {
     const o = insideImageOrientation();
     if (o === "horizontal") return "1536x1024";
-    if (o === "vertical") return "1024x1536";
+    if (o === "vertical" || o === "frame") return "1024x1536";
     return "1024x1024";
   }
 
@@ -1137,6 +1474,8 @@ Humor tolerance: ${r.humor_tolerance || "Not specified"}`.replace(/\n{2,}/g, "\n
     if (!change.trim()) return;
     setInsideMerging(true);
     setError(null);
+    const exactAge = recipient ? calculateAge(getBirthdayForAge(recipient.birthday, recipient.important_dates)) : null;
+    const ageBand = checkpointAgeBand || (recipient as Recipient)?.age_band || null;
     try {
       const res = await fetch("/api/merge-scene", {
         method: "POST",
@@ -1145,6 +1484,9 @@ Humor tolerance: ${r.humor_tolerance || "Not specified"}`.replace(/\n{2,}/g, "\n
           currentScene: insideSceneDescription,
           change: change.trim(),
           currentInterests: imageInterests.length > 0 ? imageInterests : [],
+          recipientAge: exactAge,
+          recipientAgeBand: ageBand,
+          recipientRelationship: recipient?.relationship_type || undefined,
         }),
       });
       if (!res.ok) {
@@ -1166,10 +1508,14 @@ Humor tolerance: ${r.humor_tolerance || "Not specified"}`.replace(/\n{2,}/g, "\n
     }
   }
 
-  async function loadFrontTextSuggestions() {
+  async function loadFrontTextSuggestions(refresh = false) {
     const previousWordings = frontTextSuggestions.map((s) => s.wording);
-    setIsLoading(true);
-    setLoadingMessage("Thinking of front text options...");
+    if (refresh) {
+      setFrontTextRefreshing(true);
+    } else {
+      setIsLoading(true);
+      setLoadingMessage("Thinking of front text options...");
+    }
     try {
       const res = await fetch("/api/suggest-front-text", {
         method: "POST",
@@ -1200,12 +1546,58 @@ Humor tolerance: ${r.humor_tolerance || "Not specified"}`.replace(/\n{2,}/g, "\n
       logApiCall("suggest-front-text", { model: "gpt-4o", callType: "chat_completion", recipientId, cardId: editCardId || undefined, sessionId: sessionIdRef.current });
       setSessionCost((c) => c + 0.025);
     } catch {
-      setFrontTextSuggestions([]);
-      setFrontText("");
-      setFrontTextPosition("bottom-right");
+      if (!refresh) {
+        setFrontTextSuggestions([]);
+        setFrontText("");
+        setFrontTextPosition("bottom-right");
+      }
     }
-    setIsLoading(false);
-    setStep("front_text");
+    if (refresh) {
+      setFrontTextRefreshing(false);
+    } else {
+      setIsLoading(false);
+      setStep("front_text");
+    }
+  }
+
+  async function loadBakeSuggestions(refresh = false) {
+    if (refresh) {
+      setBakeRefreshing(true);
+    } else {
+      setIsLoading(true);
+      setLoadingMessage("Suggesting front text ideas...");
+    }
+    try {
+      const previousWordings = bakeSuggestions.map((s) => s.wording);
+      const res = await fetch("/api/suggest-front-text", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          occasion: effectiveOccasion,
+          tone,
+          recipientName: recipient?.name ?? "",
+          relationshipType: recipient?.relationship_type || undefined,
+          previousWordings: previousWordings.length > 0 ? previousWordings : undefined,
+          messageText: editedMessage ? `${editedMessage.greeting}\n\n${editedMessage.body}\n\n${editedMessage.closing}` : undefined,
+          artStyle: artStyle || undefined,
+          imageSubject: imageSubject || undefined,
+          sceneDescription: pendingSceneDescription || currentSceneDescription || undefined,
+        }),
+      });
+      const data = await res.json();
+      const suggestions: { wording: string; position: string }[] = Array.isArray(data.suggestions) ? data.suggestions : [];
+      setBakeSuggestions(suggestions);
+      if (!refresh && suggestions.length > 0 && !bakeGreeting) {
+        setBakeGreeting(suggestions[0].wording);
+      }
+      logApiCall("suggest-front-text", { model: "gpt-4o", callType: "chat_completion", recipientId, cardId: editCardId || undefined, sessionId: sessionIdRef.current });
+      setSessionCost((c) => c + 0.025);
+    } catch {
+      setBakeSuggestions([]);
+    } finally {
+      setIsLoading(false);
+      setBakeRefreshing(false);
+    }
   }
 
   async function handleSave(options?: { deliveryMethodOverride?: "digital" | "print_at_home" | "mail" }) {
@@ -1221,7 +1613,7 @@ Humor tolerance: ${r.humor_tolerance || "Not specified"}`.replace(/\n{2,}/g, "\n
     const cardData: Partial<import("@/types/database").Card> = {
       user_id: "local",
       recipient_id: isQuickCard ? "__quick__" : recipient.id,
-      recipient_ids: isQuickCard ? [] : [recipient.id, ...sharedWith],
+      recipient_ids: isQuickCard ? [] : [...new Set([recipient.id, ...sharedWith, ...goingToLinkedIds])],
       ...(isQuickCard && quickData ? {
         card_type: "beyond" as const,
         quick_recipient_name: quickData.name,
@@ -1239,9 +1631,13 @@ Humor tolerance: ${r.humor_tolerance || "Not specified"}`.replace(/\n{2,}/g, "\n
       front_text_position: frontText.trim() ? frontTextPosition : null,
       front_text_style: frontTextStyle,
       front_text_font: font,
+      front_text_mode: frontTextMode,
+      bake_greeting: frontTextMode === "bake" ? (bakeGreeting.trim() || null) : null,
+      bake_tagline: frontTextMode === "bake" ? (bakeTagline.trim() || null) : null,
       font: insideFont,
       inside_image_position: insideImageUrl ? insideImagePosition : undefined,
       accent_positions: insideImageUrl && isAccentPosition(insideImagePosition) ? accentPositions : undefined,
+      accent_opacity: insideImageUrl && isAccentPosition(insideImagePosition) ? (accentOpacity ?? (insideImagePosition === "frame" ? DEFAULT_FRAME_OPACITY : DEFAULT_ACCENT_OPACITY)) : undefined,
       image_subject: imageSubject,
       art_style: artStyle,
       image_mood: null,
@@ -1318,6 +1714,12 @@ Humor tolerance: ${r.humor_tolerance || "Not specified"}`.replace(/\n{2,}/g, "\n
             </span>
           )}
         </div>
+
+        {reuseMode && (
+          <div className="text-center py-1.5 text-xs font-medium" style={{ background: "var(--color-brand-light)", color: "var(--color-brand)" }}>
+            Reusing artwork from a previous card &mdash; creating a fresh message.
+          </div>
+        )}
 
         {/* Row 2: progress steps */}
         {!showResumePrompt && step !== "saved" && (
@@ -1403,6 +1805,11 @@ Humor tolerance: ${r.humor_tolerance || "Not specified"}`.replace(/\n{2,}/g, "\n
             <h2 className="text-2xl font-bold text-charcoal mb-5">
               What&apos;s the occasion?
             </h2>
+            {reuseMode && reuseCard?.front_text_mode === "bake" && (
+              <div className="p-3 rounded-lg text-sm mb-4" style={{ background: "var(--color-brand-light)", color: "var(--color-brand)" }}>
+                Occasion is set to match the text baked into the artwork.
+              </div>
+            )}
             <div className="space-y-4">
               {OCCASION_CATEGORIES.map((cat) => (
                 <div key={cat.label}>
@@ -1412,10 +1819,13 @@ Humor tolerance: ${r.humor_tolerance || "Not specified"}`.replace(/\n{2,}/g, "\n
                       const isSelected = o === OTHER_OCCASION_LABEL
                         ? occasion === OTHER_OCCASION_VALUE
                         : occasion === o;
+                      const isLocked = reuseMode && reuseCard?.front_text_mode === "bake";
                       return (
                         <button
                           key={o}
+                          disabled={isLocked}
                           onClick={() => {
+                            if (isLocked) return;
                             if (o === OTHER_OCCASION_LABEL) {
                               setOccasion(OTHER_OCCASION_VALUE);
                             } else {
@@ -1432,6 +1842,7 @@ Humor tolerance: ${r.humor_tolerance || "Not specified"}`.replace(/\n{2,}/g, "\n
                             background: "var(--color-white)",
                             color: "var(--color-charcoal)",
                             border: "1.5px solid var(--color-sage-light)",
+                            ...(isLocked ? { opacity: 0.5, cursor: "not-allowed" } : {}),
                           }}
                         >
                           {o}
@@ -1632,21 +2043,157 @@ Humor tolerance: ${r.humor_tolerance || "Not specified"}`.replace(/\n{2,}/g, "\n
         )}
 
         {/* Step: Additional notes / envelope */}
-        {step === "notes" && (
+        {step === "notes" && (() => {
+          // Initialize checkpoint on first render of notes step
+          if (!checkpointInitialized && recipient && !isQuickCard) {
+            const recipientAge = calculateAge(getBirthdayForAge(recipient.birthday, recipient.important_dates));
+            const senderAge = profile?.birthday ? calculateAge(profile.birthday) : null;
+
+            if (recipientAge != null) {
+              if (!checkpointAgeBand) setTimeout(() => setCheckpointAgeBand(ageBandFromAge(recipientAge)), 0);
+            } else if (recipient.age_band && AGE_BAND_LABELS[recipient.age_band as AgeBand]) {
+              if (!checkpointAgeBand) setTimeout(() => setCheckpointAgeBand(recipient.age_band as AgeBand), 0);
+            } else {
+              const inferred = inferAgeBand(senderAge, recipient.relationship_type);
+              if (inferred && !checkpointAgeBand) setTimeout(() => setCheckpointAgeBand(inferred), 0);
+            }
+
+            const couple = inferIsCouple(recipient);
+            if (!checkpointIsCouple && couple) setTimeout(() => setCheckpointIsCouple(true), 0);
+
+            setTimeout(() => setCheckpointInitialized(true), 0);
+          }
+
+          const knownAge = calculateAge(getBirthdayForAge(recipient?.birthday ?? null, recipient?.important_dates ?? []));
+          const showCouple = COUPLE_CRITICAL_OCCASIONS.includes(occasion);
+          const extras = OCCASION_EXTRAS[occasion] ?? [];
+          const showAnniversaryYears = extras.includes("anniversary_years");
+          const showGraduationLevel = extras.includes("graduation_level");
+
+          return (
           <div>
+            {!isQuickCard && recipient && (
+              <div className="rounded-xl p-4 mb-5" style={{ background: "var(--color-brand-light)", border: "1.5px solid var(--color-sage)" }}>
+                <p className="text-base font-medium text-charcoal mb-1">What Nuuge knows</p>
+                <p className="text-xs text-warm-gray mb-3">
+                  Review and adjust so the message fits perfectly.
+                </p>
+                <div className="space-y-3">
+                  <div className="flex flex-wrap gap-2 text-sm">
+                    <span className="px-3 py-1.5 rounded-full font-medium" style={{ background: "var(--color-faint-gray)", border: "1px solid var(--color-light-gray)", color: "var(--color-charcoal)" }}>
+                      {recipient.relationship_type}
+                    </span>
+                    <span className="px-3 py-1.5 rounded-full font-medium" style={{ background: "var(--color-faint-gray)", border: "1px solid var(--color-light-gray)", color: "var(--color-charcoal)" }}>
+                      {occasion}
+                    </span>
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium text-charcoal block mb-1">
+                      {knownAge != null ? `Age: ${knownAge}` : "Approximate age"}
+                    </label>
+                    {knownAge != null ? (
+                      <p className="text-xs text-warm-gray italic">
+                        Known from birthday on file — age band auto-selected
+                      </p>
+                    ) : (
+                      <>
+                        <div className="flex flex-wrap gap-2">
+                          {(Object.entries(AGE_BAND_LABELS) as [AgeBand, string][]).map(([band, label]) => (
+                            <button
+                              key={band}
+                              onClick={() => setCheckpointAgeBand(band)}
+                              className="text-sm px-3 py-1.5 rounded-full font-medium transition-all"
+                              style={checkpointAgeBand === band ? {
+                                background: "var(--color-brand-light)",
+                                border: "1.5px solid var(--color-brand)",
+                                color: "var(--color-brand)",
+                              } : {
+                                background: "var(--color-faint-gray)",
+                                border: "1.5px solid var(--color-light-gray)",
+                                color: "var(--color-warm-gray)",
+                              }}
+                            >
+                              {checkpointAgeBand === band ? "✓ " : ""}{label}
+                            </button>
+                          ))}
+                        </div>
+                        {checkpointAgeBand && (
+                          <p className="text-xs text-warm-gray mt-1 italic">
+                            Estimated from relationship — select the correct range if needed
+                          </p>
+                        )}
+                      </>
+                    )}
+                  </div>
+                  {showCouple && (
+                    <div>
+                      <label className="flex items-center gap-2 text-sm font-medium text-charcoal">
+                        <input
+                          type="checkbox"
+                          checked={checkpointIsCouple}
+                          onChange={(e) => setCheckpointIsCouple(e.target.checked)}
+                          className="rounded"
+                          style={{ accentColor: "var(--color-brand)" }}
+                        />
+                        {recipient.name} is part of a couple
+                      </label>
+                    </div>
+                  )}
+                  {showAnniversaryYears && (
+                    <div>
+                      <label className="text-sm font-medium text-charcoal block mb-1">Years married / together</label>
+                      <input
+                        type="text"
+                        value={checkpointAnniversaryYears}
+                        onChange={(e) => setCheckpointAnniversaryYears(e.target.value)}
+                        placeholder="e.g. 25"
+                        className="input-field rounded-xl text-sm"
+                        style={{ maxWidth: 120 }}
+                      />
+                    </div>
+                  )}
+                  {showGraduationLevel && (
+                    <div>
+                      <label className="text-sm font-medium text-charcoal block mb-1">Graduation level</label>
+                      <div className="flex flex-wrap gap-2">
+                        {GRADUATION_LEVELS.map((level) => (
+                          <button
+                            key={level}
+                            onClick={() => setCheckpointGraduationLevel(level)}
+                            className="text-sm px-3 py-1.5 rounded-full font-medium transition-all"
+                            style={checkpointGraduationLevel === level ? {
+                              background: "var(--color-brand-light)",
+                              border: "1.5px solid var(--color-brand)",
+                              color: "var(--color-brand)",
+                            } : {
+                              background: "var(--color-faint-gray)",
+                              border: "1.5px solid var(--color-light-gray)",
+                              color: "var(--color-warm-gray)",
+                            }}
+                          >
+                            {checkpointGraduationLevel === level ? "✓ " : ""}{level}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
             {messageMode !== "byom" && (
               <>
                 <h2 className="text-2xl font-bold text-charcoal mb-2">
                   Personalize your message
                 </h2>
                 <p className="text-sm text-warm-gray mb-4">
-                  Optional — give Nuuge something specific to weave into the message, or leave it blank.
+                  Optional — tell Nuuge about your relationship or something specific to weave in.
                 </p>
                 <textarea
                   value={notes}
                   onChange={(e) => setNotes(e.target.value)}
                   rows={5}
-                  placeholder={"Ideas:\n• A recent trip or shared memory\n• A milestone (promotion, new home)\n• An inside joke\n• Something they said recently"}
+                  placeholder={"Tell Nuuge what to weave in:\n• How you feel about this person (close, distant, complicated…)\n• A recent trip or shared memory\n• A milestone (promotion, new home)\n• An inside joke\n• Something about your relationship that matters"}
                   className="input-field rounded-xl mb-4"
                 />
                 {showShareOption && (
@@ -1696,7 +2243,11 @@ Humor tolerance: ${r.humor_tolerance || "Not specified"}`.replace(/\n{2,}/g, "\n
                       {entries.map(([key, active]) => (
                         <button
                           key={key}
-                          onClick={() => setActiveProfileElements((prev) => ({ ...prev, [key]: !prev[key] }))}
+                          onClick={() => setActiveProfileElements((prev) => {
+                            const next = { ...prev };
+                            next[key] = key in next ? !next[key] : !active;
+                            return next;
+                          })}
                           className="text-sm px-3 py-1.5 rounded-full font-medium transition-all"
                           style={active ? {
                             background: "var(--color-brand-light)",
@@ -1911,14 +2462,15 @@ Humor tolerance: ${r.humor_tolerance || "Not specified"}`.replace(/\n{2,}/g, "\n
                 Back
               </button>
               <button
-                onClick={messageMode === "byom" ? polishUserMessage : generateMessages}
+                onClick={() => { (messageMode === "byom" ? polishUserMessage : generateMessages)(); }}
                 className="btn-primary"
               >
                 {messageMode === "byom" ? "Polish my message" : "Generate card messages"}
               </button>
             </div>
           </div>
-        )}
+          );
+        })()}
 
 
         {/* Step: Select from options */}
@@ -1929,18 +2481,23 @@ Humor tolerance: ${r.humor_tolerance || "Not specified"}`.replace(/\n{2,}/g, "\n
             </h2>
             <p className="text-sm text-warm-gray mb-6">
               Here are 3 options for {recipient.name}&apos;s {effectiveOccasion.toLowerCase()} card.
-              Click one to preview and edit.
+              Pick one to get started &mdash; you can add your own words and Nuuge will help you refine it.
             </p>
             <div className="space-y-4">
               {messages.map((msg, i) => (
                 <button
                   key={i}
                   onClick={() => selectMessage(msg)}
-                  className="w-full card-surface card-surface-clickable p-5 text-left"
+                  className="w-full card-surface card-surface-clickable p-5 text-left group"
                 >
-                  <span className="text-xs font-medium text-brand uppercase tracking-wide">
-                    {msg.label}
-                  </span>
+                  <div className="flex items-start justify-between">
+                    <span className="text-xs font-medium text-brand uppercase tracking-wide">
+                      {msg.label}
+                    </span>
+                    <span className="text-xs text-warm-gray opacity-0 group-hover:opacity-100 transition-opacity">
+                      Tap to select &rarr;
+                    </span>
+                  </div>
                   <p className="text-sm text-charcoal mt-2 font-medium">
                     {msg.greeting}
                   </p>
@@ -1957,25 +2514,35 @@ Humor tolerance: ${r.humor_tolerance || "Not specified"}`.replace(/\n{2,}/g, "\n
               return (
               <div className="rounded-xl p-4 mt-4" style={{ background: "var(--color-faint-gray)", border: "1px solid var(--color-light-gray)" }}>
                 <p className="text-xs font-medium text-warm-gray uppercase tracking-wide mb-2">
-                  Profile details used
-                  {regenerationCount > 0 && (
-                    <span className="text-warm-gray normal-case ml-1">
-                      — toggle off what you don&apos;t want
-                    </span>
-                  )}
+                  Profile details used — toggle off what you don&apos;t want
                 </p>
                 <div className="flex flex-wrap gap-2">
                   {Object.entries(normalized).map(([key, active]) => (
                     <button
                       key={key}
-                      onClick={() => setActiveProfileElements((prev) => ({ ...prev, [key]: !prev[key] }))}
-                      className={`text-xs px-3 py-1.5 rounded-full border transition-all ${
-                        active
-                          ? "bg-brand-light border-sage text-brand"
-                          : "bg-faint-gray border-light-gray text-warm-gray line-through"
-                      }`}
+                      onClick={() => setActiveProfileElements((prev) => {
+                        const next = { ...prev };
+                        if (key in next) {
+                          next[key] = !next[key];
+                        } else {
+                          next[key] = false;
+                        }
+                        return next;
+                      })}
+                      className="text-xs px-3 py-1.5 rounded-full font-medium transition-all"
+                      style={active ? {
+                        background: "var(--color-brand-light)",
+                        border: "1.5px solid var(--color-brand)",
+                        color: "var(--color-brand)",
+                      } : {
+                        background: "var(--color-faint-gray)",
+                        border: "1.5px solid var(--color-light-gray)",
+                        color: "var(--color-warm-gray)",
+                        textDecoration: "line-through",
+                        opacity: 0.6,
+                      }}
                     >
-                      {key.replace(/^[^:]+: /, "")}
+                      {active ? "✓ " : ""}{key.replace(/^[^:]+: /, "")}
                     </button>
                   ))}
                 </div>
@@ -1983,7 +2550,35 @@ Humor tolerance: ${r.humor_tolerance || "Not specified"}`.replace(/\n{2,}/g, "\n
               );
             })()}
 
-            <div className="flex items-center gap-3 mt-4">
+            {/* Editable personalization notes — visible during regeneration */}
+            {notes.trim() && (
+              <div className="rounded-xl p-4 mt-4" style={{ background: "var(--color-faint-gray)", border: "1px solid var(--color-light-gray)" }}>
+                <p className="text-xs font-medium text-warm-gray uppercase tracking-wide mb-2">
+                  Your personalization
+                </p>
+                <textarea
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  rows={2}
+                  className="input-field rounded-lg w-full text-sm"
+                  placeholder="Optional — tell Nuuge what to weave in"
+                />
+                {notes.trim() && (
+                  <button
+                    onClick={() => setNotes("")}
+                    className="text-xs mt-1 font-medium transition-colors"
+                    style={{ color: "var(--color-warm-gray)" }}
+                  >
+                    Clear
+                  </button>
+                )}
+              </div>
+            )}
+
+            <p className="text-xs text-warm-gray mt-5 mb-2">
+              Tap a message above to select it, or:
+            </p>
+            <div className="flex items-center gap-3">
               <button
                 onClick={() => { setRejectedMessages([]); setRegenerationCount(0); setStep("notes"); }}
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium transition-colors"
@@ -2000,6 +2595,66 @@ Humor tolerance: ${r.humor_tolerance || "Not specified"}`.replace(/\n{2,}/g, "\n
                 Regenerate all
               </button>
             </div>
+
+            {/* Approach Diagnostic */}
+            {approachSummary && (
+              <div className="mt-6 rounded-xl p-4" style={{ background: "var(--color-faint-gray)", border: "1px solid var(--color-light-gray)" }}>
+                {!showApproachDiagnostic ? (
+                  <div className="flex items-center gap-3">
+                    <p className="text-sm text-warm-gray flex-1">Right direction?</p>
+                    <button
+                      onClick={() => setApproachSummary("")}
+                      className="px-3 py-1.5 rounded-full text-sm font-medium bg-brand-light text-brand border border-sage"
+                    >
+                      Yes
+                    </button>
+                    <button
+                      onClick={() => setShowApproachDiagnostic(true)}
+                      className="px-3 py-1.5 rounded-full text-sm font-medium bg-faint-gray text-warm-gray border"
+                      style={{ borderColor: "var(--color-light-gray)" }}
+                    >
+                      Not quite
+                    </button>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    <p className="text-xs text-warm-gray mb-1">
+                      You can still tap any message above to use it.
+                    </p>
+                    <div className="flex items-center justify-between">
+                      <p className="text-xs font-medium text-warm-gray uppercase tracking-wide">
+                        Nuuge&apos;s interpretation
+                      </p>
+                      <button
+                        onClick={() => setShowApproachDiagnostic(false)}
+                        className="text-xs text-warm-gray hover:text-charcoal transition-colors"
+                      >
+                        Close
+                      </button>
+                    </div>
+                    <p className="text-sm text-charcoal italic">{approachSummary}</p>
+                    <label className="block text-xs font-medium text-warm-gray uppercase tracking-wide">
+                      What should change?
+                    </label>
+                    <textarea
+                      value={directionCorrection}
+                      onChange={(e) => setDirectionCorrection(e.target.value)}
+                      rows={3}
+                      placeholder="e.g., We're not close — keep it short and simple. Don't assume we share memories."
+                      className="input-field rounded-xl w-full"
+                    />
+                    <button
+                      onClick={generateMessages}
+                      disabled={!directionCorrection.trim()}
+                      className="px-4 py-2 rounded-full text-sm font-medium text-white transition-colors"
+                      style={{ background: directionCorrection.trim() ? "var(--color-brand)" : "var(--color-light-gray)" }}
+                    >
+                      Regenerate with correction
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         )}
 
@@ -2010,7 +2665,7 @@ Humor tolerance: ${r.humor_tolerance || "Not specified"}`.replace(/\n{2,}/g, "\n
               Preview &amp; edit
             </h2>
             <p className="text-sm text-warm-gray mb-6">
-              Adjust anything you want, then save.
+              Adjust anything you want, then continue &mdash; or edit and let Nuuge refine your wording.
             </p>
             <div className="card-surface p-6 space-y-4">
               <div>
@@ -2073,7 +2728,7 @@ Humor tolerance: ${r.humor_tolerance || "Not specified"}`.replace(/\n{2,}/g, "\n
               </div>
             </div>
 
-            <div className="flex items-center gap-3 mt-6">
+            <div className="flex items-center gap-3 mt-6 flex-wrap">
               <button
                 onClick={() => setStep("select")}
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium transition-colors"
@@ -2081,6 +2736,14 @@ Humor tolerance: ${r.humor_tolerance || "Not specified"}`.replace(/\n{2,}/g, "\n
               >
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
                 Pick a different one
+              </button>
+              <button
+                onClick={refineEditedMessage}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium transition-colors"
+                style={{ color: "var(--color-brand)", border: "1.5px solid var(--color-sage)" }}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+                Refine with Nuuge
               </button>
               {editMode && generatedImageUrl && (
                 <button
@@ -2093,10 +2756,12 @@ Humor tolerance: ${r.humor_tolerance || "Not specified"}`.replace(/\n{2,}/g, "\n
                 </button>
               )}
               <button
-                onClick={() => setStep("design_subject")}
+                onClick={enterDesignStep}
                 className="btn-primary"
               >
-                {editMode && generatedImageUrl ? "Continue: Redesign image" : "Next: Design the card"}
+                {reuseMode
+                  ? (frontTextMode === "overlay" ? "Next: Front text" : "Next: Letter")
+                  : (editMode && generatedImageUrl ? "Continue: Redesign image" : "Next: Design the card")}
               </button>
             </div>
           </div>
@@ -2108,19 +2773,94 @@ Humor tolerance: ${r.humor_tolerance || "Not specified"}`.replace(/\n{2,}/g, "\n
           const recommended = moodRec?.recommendedSubjects || [];
           const moodId = toneToMoodId(tone);
           const selectedSubjectRecipe = SUBJECT_RECIPES.find((s) => s.id === imageSubject);
-          const sceneSketches = selectedSubjectRecipe?.sceneSketches[moodId] || [];
+          const ageBand = checkpointAgeBand || (recipient as Recipient)?.age_band || null;
+          const hasDynamic = dynamicSketchStatus === "ready" && dynamicSketches && imageSubject && dynamicSketches[imageSubject]?.length > 0;
+          const sceneTexts: string[] = hasDynamic
+            ? dynamicSketches[imageSubject]!
+            : getFilteredSketches(selectedSubjectRecipe, moodId, ageBand);
+          const sketchesPending = dynamicSketchStatus === "pending";
+
+          const availableInterests = recipient?.interests || [];
 
           return (
           <div>
             <h2 className="text-xl font-bold text-charcoal mb-1">
               Design your card
             </h2>
-            <p className="text-base text-warm-gray mb-6">
+            <p className="text-base text-warm-gray mb-4">
               Pick the main subject for your card&apos;s front image.
               {recommended.length > 0 && (
                 <span className="text-brand"> Stars mark subjects that pair well with &ldquo;{tone.toLowerCase()}&rdquo;.</span>
               )}
             </p>
+
+            {availableInterests.length > 0 && (
+              <div className="mb-5 p-4 rounded-xl" style={{ background: "var(--color-brand-light)", border: "1.5px solid var(--color-sage)" }}>
+                <p className="text-sm font-medium text-charcoal mb-1">
+                  {recipient?.name ? `${recipient.name}'s` : "Their"} interests
+                </p>
+                <p className="text-xs text-warm-gray mb-3">
+                  Select which to feature in the image. These shape the scene ideas and Nuuge&apos;s design suggestions. Pick up to 3, or leave empty for generic ideas.
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {availableInterests.map((interest) => {
+                    const active = imageInterests.includes(interest);
+                    return (
+                      <button
+                        key={interest}
+                        onClick={() => {
+                          if (active) {
+                            setImageInterests(imageInterests.filter((i) => i !== interest));
+                          } else if (imageInterests.length < 3) {
+                            setImageInterests([...imageInterests, interest]);
+                          }
+                        }}
+                        className={`px-3 py-1.5 rounded-full text-sm font-medium border transition-colors ${
+                          active
+                            ? "border-brand bg-white text-brand"
+                            : "border-light-gray text-warm-gray hover:border-warm-gray"
+                        } ${!active && imageInterests.length >= 3 ? "opacity-40 cursor-not-allowed" : ""}`}
+                      >
+                        {active ? "✓ " : ""}{interest}
+                      </button>
+                    );
+                  })}
+                </div>
+                {dynamicSketchStatus === "idle" ? (
+                  <button
+                    onClick={() => fetchDynamicSketches(imageInterests)}
+                    className="mt-3 btn-primary text-sm"
+                  >
+                    Generate scene ideas
+                  </button>
+                ) : dynamicSketchStatus === "pending" ? (
+                  <p className="mt-3 text-xs font-medium text-brand flex items-center gap-1.5">
+                    <svg className="animate-spin h-3.5 w-3.5" viewBox="0 0 24 24" fill="none">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                    </svg>
+                    Updating scene ideas&hellip;
+                  </p>
+                ) : dynamicSketchStatus === "failed" ? (
+                  <div className="mt-3 flex items-center gap-2">
+                    <p className="text-xs text-warm-gray">Scene ideas couldn&apos;t load.</p>
+                    <button
+                      onClick={() => fetchDynamicSketches(imageInterests)}
+                      className="btn-primary text-xs px-3 py-1"
+                    >
+                      Retry
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => fetchDynamicSketches(imageInterests)}
+                    className="mt-3 btn-primary text-sm"
+                  >
+                    Regenerate ideas
+                  </button>
+                )}
+              </div>
+            )}
 
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-6">
               {IMAGE_SUBJECTS.map((subj) => {
@@ -2150,23 +2890,43 @@ Humor tolerance: ${r.humor_tolerance || "Not specified"}`.replace(/\n{2,}/g, "\n
 
             {imageSubject && (
               <>
-                {sceneSketches.length > 0 && (
+                {sketchesPending ? (
+                  <div className="mb-4 p-4 rounded-xl animate-pulse" style={{ background: "var(--color-brand-light)", border: "2px solid var(--color-brand)" }}>
+                    <div className="flex items-center gap-2 mb-3">
+                      <svg className="animate-spin h-4 w-4 text-brand" viewBox="0 0 24 24" fill="none">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                      </svg>
+                      <p className="text-sm font-medium text-brand uppercase tracking-wide">
+                        Generating scene ideas&hellip;
+                      </p>
+                    </div>
+                    <div className="space-y-2">
+                      {[1, 2, 3].map((i) => (
+                        <div key={i} className="h-10 rounded-lg animate-pulse" style={{ background: "var(--color-sage-light)" }} />
+                      ))}
+                    </div>
+                  </div>
+                ) : sceneTexts.length > 0 && (
                   <div className="mb-4 p-4 rounded-xl" style={{ background: "var(--color-brand-light)", border: "1.5px solid var(--color-sage)" }}>
                     <p className="text-sm font-medium text-brand uppercase tracking-wide mb-2">
                       Scene ideas for {selectedSubjectRecipe?.label} + {tone.toLowerCase()}
+                      {hasDynamic && imageInterests.length > 0 && (
+                        <span className="normal-case font-normal text-warm-gray"> &middot; featuring {imageInterests.join(", ")}</span>
+                      )}
                     </p>
                     <div className="space-y-1.5">
-                      {sceneSketches.map((sketch, i) => (
+                      {sceneTexts.map((text, i) => (
                         <button
                           key={i}
-                          onClick={() => setSubjectDetail(sketch)}
+                          onClick={() => setSubjectDetail(text)}
                           className={`block w-full text-left text-base px-3 py-2.5 rounded-lg transition-colors
-                            ${subjectDetail === sketch
+                            ${subjectDetail === text
                               ? "bg-brand-light text-brand-hover font-medium"
                               : "text-charcoal hover:bg-white/60"
                             }`}
                         >
-                          &ldquo;{sketch}&rdquo;
+                          &ldquo;{text}&rdquo;
                         </button>
                       ))}
                     </div>
@@ -2218,55 +2978,9 @@ Humor tolerance: ${r.humor_tolerance || "Not specified"}`.replace(/\n{2,}/g, "\n
               </div>
             )}
 
-            {/* Personal touch section — shown once both subject and style are selected */}
+            {/* Additional context — shown once both subject and style are selected */}
             {imageSubject && artStyle && (
               <div className="mt-8 pt-6 border-t" style={{ borderColor: "var(--color-light-gray)" }}>
-                <h3 className="text-lg font-bold text-charcoal mb-1">
-                  Add a personal touch
-                </h3>
-                <p className="text-base text-warm-gray mb-4">
-                  Optional details to make the image more personal.
-                </p>
-
-                {(() => {
-                  const available = getActiveInterests();
-                  if (available.length === 0) return null;
-                  return (
-                    <div className="mb-4">
-                      <p className="text-sm font-medium text-charcoal mb-2">
-                        Which interests should influence the image?
-                      </p>
-                      <div className="flex flex-wrap gap-2">
-                        {available.map((interest) => {
-                          const active = imageInterests.includes(interest);
-                          return (
-                            <button
-                              key={interest}
-                              onClick={() => {
-                                if (active) {
-                                  setImageInterests(imageInterests.filter((i) => i !== interest));
-                                } else if (imageInterests.length < 3) {
-                                  setImageInterests([...imageInterests, interest]);
-                                }
-                              }}
-                              className={`px-3 py-1.5 rounded-full text-sm font-medium border transition-colors ${
-                                active
-                                  ? "border-brand bg-brand-light text-brand"
-                                  : "border-light-gray text-warm-gray hover:border-warm-gray"
-                              } ${!active && imageInterests.length >= 3 ? "opacity-40 cursor-not-allowed" : ""}`}
-                            >
-                              {interest}
-                            </button>
-                          );
-                        })}
-                      </div>
-                      <p className="text-sm text-warm-gray mt-1">
-                        Pick up to 3 that fit this card&apos;s image.
-                      </p>
-                    </div>
-                  );
-                })()}
-
                 <div className="mb-2">
                   <p className="text-sm font-medium text-charcoal mb-1">
                     Anything else for the image?
@@ -2372,6 +3086,17 @@ Humor tolerance: ${r.humor_tolerance || "Not specified"}`.replace(/\n{2,}/g, "\n
                 </div>
               )}
 
+              {!conceptsLoading && designConcepts.length > 0 && (
+                <button
+                  onClick={() => loadDesignSuggestionsBackground()}
+                  className="flex items-center gap-1.5 mt-3 px-3 py-1.5 rounded-full text-sm font-medium transition-colors"
+                  style={{ color: "var(--color-brand)", border: "1.5px solid var(--color-sage)" }}
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21.5 2v6h-6"/><path d="M2.5 22v-6h6"/><path d="M2.5 16A10 10 0 0 1 18.3 4.5"/><path d="M21.5 8A10 10 0 0 1 5.7 19.5"/></svg>
+                  Suggest new ideas
+                </button>
+              )}
+
               {!conceptsLoading && designConcepts.length === 0 && (
                 <p className="text-sm text-warm-gray py-4">
                   Couldn&apos;t load design alternatives. You can still generate from your prompt below.
@@ -2417,17 +3142,176 @@ Humor tolerance: ${r.humor_tolerance || "Not specified"}`.replace(/\n{2,}/g, "\n
                   };
                   setSelectedDesign(concept);
                   setCurrentSceneDescription(prompt);
-                  generateDesignImage(prompt);
+                  setBakeTagline(OCCASION_TAGLINES[effectiveOccasion] || "");
+                  setStep("front_text_choice");
                 }}
                 disabled={!pendingSceneDescription.trim() || conceptsLoading}
                 className="btn-primary disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                {conceptsLoading ? "Waiting for Nuuge ideas\u2026" : "Generate image"}
+                {conceptsLoading ? "Waiting for Nuuge ideas\u2026" : "Next: Front text"}
               </button>
             </div>
           </div>
         )}
 
+
+        {/* Step: Front text mode choice */}
+        {step === "front_text_choice" && (
+          <div>
+            <h2 className="text-xl font-bold text-charcoal mb-2">Front text</h2>
+            <p className="text-sm text-warm-gray mb-6">
+              Would you like text on the card front? You can bake it into the artwork for an integrated look, or add it as a text overlay after.
+            </p>
+            <div className="space-y-3">
+              <button
+                onClick={() => {
+                  setFrontTextMode("bake");
+                  loadBakeSuggestions();
+                  setStep("front_text_bake");
+                }}
+                className="w-full card-surface card-surface-clickable p-5 text-left"
+              >
+                <span className="text-sm font-semibold text-charcoal">Bake into the artwork</span>
+                <p className="text-sm text-warm-gray mt-1">
+                  Text becomes part of the illustration &mdash; stylish, integrated lettering rendered by the AI. Works best with short phrases.
+                </p>
+              </button>
+              <button
+                onClick={() => {
+                  setFrontTextMode("overlay");
+                  generateDesignImage(currentSceneDescription);
+                }}
+                className="w-full card-surface card-surface-clickable p-5 text-left"
+              >
+                <span className="text-sm font-semibold text-charcoal">Add text overlay after</span>
+                <p className="text-sm text-warm-gray mt-1">
+                  Generate the image first, then position clean text on top. Reliable and easy to edit.
+                </p>
+              </button>
+              <button
+                onClick={() => {
+                  setFrontTextMode("none");
+                  setFrontText("");
+                  generateDesignImage(currentSceneDescription);
+                }}
+                className="w-full card-surface card-surface-clickable p-5 text-left"
+              >
+                <span className="text-sm font-semibold text-charcoal">No front text</span>
+                <p className="text-sm text-warm-gray mt-1">
+                  Let the artwork speak for itself.
+                </p>
+              </button>
+            </div>
+            <div className="mt-4">
+              <button
+                onClick={() => setStep("design_confirm_prompt")}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium transition-colors"
+                style={{ color: "var(--color-brand)", border: "1.5px solid var(--color-sage)" }}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+                Back
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Step: Bake text into artwork */}
+        {step === "front_text_bake" && (
+          <div>
+            <h2 className="text-xl font-bold text-charcoal mb-2">Text for the artwork</h2>
+            <p className="text-sm text-warm-gray mb-6">
+              These will be rendered as stylish lettering integrated into the illustration. Shorter phrases (1&ndash;5 words) work best.
+            </p>
+
+            {/* Creative greeting */}
+            <div className="card-surface p-4 mb-4">
+              <label className="block text-sm font-medium text-charcoal mb-2">Creative greeting</label>
+              {bakeSuggestions.length > 0 && (
+                <div className="relative mb-3">
+                  {bakeRefreshing && (
+                    <div className="absolute inset-0 z-10 flex items-center justify-center rounded-lg" style={{ background: "rgba(255,255,255,0.7)", backdropFilter: "blur(2px)" }}>
+                      <div className="w-5 h-5 border-2 rounded-full animate-spin" style={{ borderColor: "var(--color-light-gray)", borderTopColor: "var(--color-brand)" }} />
+                    </div>
+                  )}
+                  <div className="flex flex-wrap gap-2">
+                    {bakeSuggestions.map((s, i) => (
+                      <button
+                        key={i}
+                        onClick={() => setBakeGreeting(s.wording)}
+                        className={`px-3 py-1.5 rounded-full text-sm border transition-all ${
+                          bakeGreeting === s.wording
+                            ? "bg-brand-light border-sage text-brand font-medium"
+                            : "bg-white border-light-gray text-charcoal hover:border-sage"
+                        }`}
+                      >
+                        {s.wording}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+              <input
+                value={bakeGreeting}
+                onChange={(e) => setBakeGreeting(e.target.value)}
+                placeholder="e.g. Naps are cosmic\u2014"
+                className="input-field w-full"
+              />
+              <button
+                onClick={() => loadBakeSuggestions(true)}
+                disabled={bakeRefreshing}
+                className="mt-2 text-sm text-brand hover:underline disabled:opacity-50"
+              >
+                Suggest new options
+              </button>
+            </div>
+
+            {/* Occasion tagline */}
+            <div className="card-surface p-4 mb-4">
+              <label className="block text-sm font-medium text-charcoal mb-2">Occasion tagline</label>
+              <input
+                value={bakeTagline}
+                onChange={(e) => setBakeTagline(e.target.value)}
+                placeholder="e.g. Happy Birthday!, Happy 50th!"
+                className="input-field w-full"
+              />
+              <p className="text-xs text-warm-gray mt-1">Edit to personalize &mdash; e.g. &ldquo;Happy 50th!&rdquo; or leave empty to skip.</p>
+            </div>
+
+            {error && (
+              <div className="p-3 rounded-lg text-sm mb-4" style={{ background: "var(--color-error-light)", border: "1px solid var(--color-error)", color: "var(--color-error)" }}>
+                {error}
+              </div>
+            )}
+
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() => setStep("front_text_choice")}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium transition-colors"
+                style={{ color: "var(--color-brand)", border: "1.5px solid var(--color-sage)" }}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+                Back
+              </button>
+              <button
+                onClick={() => {
+                  let prompt = currentSceneDescription;
+                  const textLines: string[] = [];
+                  if (bakeGreeting.trim()) textLines.push(bakeGreeting.trim());
+                  if (bakeTagline.trim()) textLines.push(bakeTagline.trim());
+                  if (textLines.length > 0) {
+                    prompt += `\n\nINCORPORATE TEXT INTO THE ARTWORK — render as stylish lettering that is part of the illustration, matching the art style and integrated into the composition:\n${textLines.map((t, i) => `Line ${i + 1}: "${t}"`).join("\n")}\nDo NOT add any other text or words beyond what is specified above.`;
+                  }
+                  setFrontText(textLines.join(" \u2014 "));
+                  generateDesignImage(prompt);
+                }}
+                disabled={!bakeGreeting.trim() && !bakeTagline.trim()}
+                className="btn-primary disabled:opacity-50"
+              >
+                Generate image with text
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Step: Confirm refinement before generating */}
         {step === "design_confirm_refinement" && (
@@ -2485,8 +3369,16 @@ Humor tolerance: ${r.humor_tolerance || "Not specified"}`.replace(/\n{2,}/g, "\n
                   setPreviousImageUrl(generatedImageUrl);
                   setPreviousSceneDescription(currentSceneDescription);
                   setCurrentSceneDescription(pendingSceneDescription);
-                  // Always generate from the full scene description (original + added instructions). No image edit — avoids muddling until we have in-region edits.
-                  generateDesignImage(pendingSceneDescription, { editExisting: false });
+                  let prompt = pendingSceneDescription;
+                  if (frontTextMode === "bake") {
+                    const textLines: string[] = [];
+                    if (bakeGreeting.trim()) textLines.push(bakeGreeting.trim());
+                    if (bakeTagline.trim()) textLines.push(bakeTagline.trim());
+                    if (textLines.length > 0) {
+                      prompt += `\n\nINCORPORATE TEXT INTO THE ARTWORK — render as stylish lettering that is part of the illustration, matching the art style and integrated into the composition:\n${textLines.map((t, i) => `Line ${i + 1}: "${t}"`).join("\n")}\nDo NOT add any other text or words beyond what is specified above.`;
+                    }
+                  }
+                  generateDesignImage(prompt, { editExisting: false });
                 }}
                 disabled={!pendingSceneDescription.trim()}
                 className="flex-1 btn-primary"
@@ -2614,7 +3506,7 @@ Humor tolerance: ${r.humor_tolerance || "Not specified"}`.replace(/\n{2,}/g, "\n
                 onClick={() => setStep("inside_design_ask")}
                 className="btn-primary"
               >
-                {editMode ? "Continue: Inside & front text" : "Next: Inside & front text"}
+                {editMode ? "Continue: Inside" : frontTextMode === "bake" || frontTextMode === "none" ? "Next: Inside" : "Next: Inside & front text"}
               </button>
             </div>
           </div>
@@ -2737,7 +3629,11 @@ Humor tolerance: ${r.humor_tolerance || "Not specified"}`.replace(/\n{2,}/g, "\n
                       setSessionCost((c) => c + 0.025);
                     } catch {
                       setIsLoading(false);
-                      loadFrontTextSuggestions();
+                      if (frontTextMode === "overlay") {
+                        loadFrontTextSuggestions();
+                      } else {
+                        setStep("letter");
+                      }
                     }
                   }}
                   disabled={!insideImagePosition}
@@ -2881,7 +3777,11 @@ Humor tolerance: ${r.humor_tolerance || "Not specified"}`.replace(/\n{2,}/g, "\n
                   if (editMode) {
                     handleSave({ deliveryMethodOverride: deliveryMethod });
                   } else {
-                    loadFrontTextSuggestions();
+                    if (frontTextMode === "overlay") {
+                      loadFrontTextSuggestions();
+                    } else {
+                      setStep("letter");
+                    }
                   }
                 }}
                 className="btn-secondary ml-auto"
@@ -2923,7 +3823,7 @@ Humor tolerance: ${r.humor_tolerance || "Not specified"}`.replace(/\n{2,}/g, "\n
                   onClick={() => {
                     setSelectedInsideConcept(concept);
                     setInsideSceneDescription(concept.image_prompt);
-                    generateDesignImage(concept.image_prompt, { isInside: true });
+                    generateDesignImage(concept.image_prompt, { isInside: true, isAccent: isAccentPosition(insideImagePosition) });
                   }}
                   className="w-full card-surface card-surface-clickable p-4 text-left"
                 >
@@ -2981,7 +3881,13 @@ Humor tolerance: ${r.humor_tolerance || "Not specified"}`.replace(/\n{2,}/g, "\n
                 &larr; Change position
               </button>
               <button
-                onClick={() => loadFrontTextSuggestions()}
+                onClick={() => {
+                  if (frontTextMode === "overlay") {
+                    loadFrontTextSuggestions();
+                  } else {
+                    setStep("letter");
+                  }
+                }}
                 className="text-sm px-4 py-2 rounded-full text-warm-gray hover:text-charcoal ml-auto"
                 style={{ border: "1.5px solid var(--color-sage)" }}
               >
@@ -3158,7 +4064,7 @@ Humor tolerance: ${r.humor_tolerance || "Not specified"}`.replace(/\n{2,}/g, "\n
                     <div className="relative h-full">
                       {accentPositions.map((slot) => (
                         <div key={slot} style={cornerStyle(slot)}>
-                          <img src={insideImageUrl} alt="" style={{ width: "100%", height: "100%", objectFit: "contain", opacity: 0.85 }} />
+                          <img src={insideImageUrl} alt="" style={{ width: "100%", height: "100%", objectFit: "contain", opacity: accentOpacity ?? DEFAULT_ACCENT_OPACITY }} />
                         </div>
                       ))}
                       <div className="relative flex flex-col items-center justify-center h-full px-4" style={{ padding: accentPositions.length > 2 ? "2.5rem 1.5rem" : "1rem" }}>
@@ -3171,7 +4077,7 @@ Humor tolerance: ${r.humor_tolerance || "Not specified"}`.replace(/\n{2,}/g, "\n
                   {/* Frame — portrait fill (no blend mode in preview) */}
                   {insideImagePosition === "frame" && (
                     <div className="relative h-full">
-                      <img src={insideImageUrl} alt="" style={{ position: "absolute", top: 0, left: 0, width: "100%", height: "100%", objectFit: "fill", opacity: 0.35, pointerEvents: "none" }} />
+                      <img src={insideImageUrl} alt="" style={{ position: "absolute", top: 0, left: 0, width: "100%", height: "100%", objectFit: "fill", opacity: accentOpacity ?? DEFAULT_FRAME_OPACITY, pointerEvents: "none" }} />
                       <div className="relative flex flex-col items-center justify-center h-full" style={{ padding: "15% 12%" }}>
                         <div className="w-3/4 space-y-1.5">
                           {[1,2,3,4].map(l => <div key={l} className="h-1.5 rounded bg-light-gray" style={{ width: l === 4 ? "50%" : "100%" }} />)}
@@ -3184,7 +4090,7 @@ Humor tolerance: ${r.humor_tolerance || "Not specified"}`.replace(/\n{2,}/g, "\n
                     <div className="flex flex-col h-full">
                       {accentPositions.includes(1) && (
                         <div style={edgeStyle(1)}>
-                          <img src={insideImageUrl} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", opacity: 0.85 }} />
+                          <img src={insideImageUrl} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", opacity: accentOpacity ?? DEFAULT_ACCENT_OPACITY }} />
                         </div>
                       )}
                       <div className="flex-1 flex flex-col items-center justify-center px-4">
@@ -3194,7 +4100,7 @@ Humor tolerance: ${r.humor_tolerance || "Not specified"}`.replace(/\n{2,}/g, "\n
                       </div>
                       {accentPositions.includes(2) && (
                         <div style={edgeStyle(2)}>
-                          <img src={insideImageUrl} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", opacity: 0.85 }} />
+                          <img src={insideImageUrl} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", opacity: accentOpacity ?? DEFAULT_ACCENT_OPACITY }} />
                         </div>
                       )}
                     </div>
@@ -3202,6 +4108,26 @@ Humor tolerance: ${r.humor_tolerance || "Not specified"}`.replace(/\n{2,}/g, "\n
                 </div>
               </div>
             </div>
+
+            {/* Intensity slider for accent positions */}
+            {isAccentPosition(insideImagePosition) && (
+              <div className="card-surface p-4 mb-4">
+                <label className="block text-sm font-medium text-charcoal mb-2">Intensity</label>
+                <div className="flex items-center gap-3">
+                  <span className="text-xs text-warm-gray">Light</span>
+                  <input
+                    type="range"
+                    min={5}
+                    max={100}
+                    value={Math.round((accentOpacity ?? (insideImagePosition === "frame" ? DEFAULT_FRAME_OPACITY : DEFAULT_ACCENT_OPACITY)) * 100)}
+                    onChange={(e) => setAccentOpacity(Number(e.target.value) / 100)}
+                    className="flex-1 accent-brand"
+                    style={{ accentColor: "var(--color-brand)" }}
+                  />
+                  <span className="text-xs text-warm-gray">Bold</span>
+                </div>
+              </div>
+            )}
 
             {/* Refinement input */}
             <div className="card-surface p-4 mb-6">
@@ -3273,11 +4199,17 @@ Humor tolerance: ${r.humor_tolerance || "Not specified"}`.replace(/\n{2,}/g, "\n
               )}
               <button
                 onClick={() => {
-                  loadFrontTextSuggestions();
+                  if (frontTextMode === "overlay") {
+                    loadFrontTextSuggestions();
+                  } else {
+                    setStep("letter");
+                  }
                 }}
                 className="btn-primary"
               >
-                {editMode ? "Continue: Front text" : "Next: Front text"}
+                {editMode
+                  ? (frontTextMode === "overlay" ? "Continue: Front text" : "Continue: Letter")
+                  : (frontTextMode === "overlay" ? "Next: Front text" : "Next: Letter")}
               </button>
             </div>
           </div>
@@ -3296,32 +4228,41 @@ Humor tolerance: ${r.humor_tolerance || "Not specified"}`.replace(/\n{2,}/g, "\n
 
             {/* Suggestion cards */}
             {frontTextSuggestions.length > 0 && (
-              <div className="mb-4">
+              <div className="mb-4 relative">
                 <label className="block text-xs font-medium text-warm-gray uppercase tracking-wide mb-2">
                   Suggestions
                 </label>
-                <div className="grid gap-2">
-                  {frontTextSuggestions.map((s, idx) => (
-                    <button
-                      key={idx}
-                      onClick={() => {
-                        setFrontText(s.wording);
-                        setFrontTextPosition(s.position);
-                      }}
-                      className={`text-left rounded-lg border p-3 transition-colors ${
-                        frontText === s.wording
-                          ? "border-brand bg-brand-light"
-                          : "border-light-gray hover:border-warm-gray"
-                      }`}
-                    >
-                      <span className="text-base font-medium text-charcoal">&ldquo;{s.wording}&rdquo;</span>
-                      <span className="block text-xs text-warm-gray mt-0.5">{s.position.replace("-", " ")}</span>
-                    </button>
-                  ))}
+                <div className="relative">
+                  <div className="grid gap-2" style={frontTextRefreshing ? { filter: "blur(3px)", opacity: 0.5, pointerEvents: "none", transition: "filter 0.2s, opacity 0.2s" } : { transition: "filter 0.2s, opacity 0.2s" }}>
+                    {frontTextSuggestions.map((s, idx) => (
+                      <button
+                        key={idx}
+                        onClick={() => {
+                          setFrontText(s.wording);
+                          setFrontTextPosition(s.position);
+                        }}
+                        className={`text-left rounded-lg border p-3 transition-colors ${
+                          frontText === s.wording
+                            ? "border-brand bg-brand-light"
+                            : "border-light-gray hover:border-warm-gray"
+                        }`}
+                      >
+                        <span className="text-base font-medium text-charcoal">&ldquo;{s.wording}&rdquo;</span>
+                        <span className="block text-xs text-warm-gray mt-0.5">{s.position.replace("-", " ")}</span>
+                      </button>
+                    ))}
+                  </div>
+                  {frontTextRefreshing && (
+                    <div className="absolute inset-0 flex flex-col items-center justify-center">
+                      <div className="animate-spin h-7 w-7 border-3 rounded-full" style={{ borderColor: "var(--color-sage-light)", borderTopColor: "var(--color-brand)" }} />
+                      <p className="text-sm font-medium text-charcoal mt-2">Thinking&hellip;</p>
+                    </div>
+                  )}
                 </div>
                 <button
-                  onClick={() => loadFrontTextSuggestions()}
-                  className="mt-2 text-sm text-brand hover:underline"
+                  onClick={() => loadFrontTextSuggestions(true)}
+                  disabled={frontTextRefreshing}
+                  className="mt-2 text-sm text-brand hover:underline disabled:opacity-50"
                 >
                   Suggest new options
                 </button>
@@ -3553,12 +4494,12 @@ Humor tolerance: ${r.humor_tolerance || "Not specified"}`.replace(/\n{2,}/g, "\n
 
             <div className="flex items-center gap-3">
               <button
-                onClick={() => setStep("front_text")}
+                onClick={() => setStep(frontTextMode === "overlay" ? "front_text" : "inside_design_ask")}
                 className="flex items-center gap-1.5 px-4 py-2 rounded-full text-sm text-warm-gray hover:text-charcoal transition-colors"
                 style={{ border: "1.5px solid var(--color-sage)" }}
               >
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
-                Back to front text
+                {frontTextMode === "overlay" ? "Back to front text" : "Back"}
               </button>
               <button
                 onClick={() => {

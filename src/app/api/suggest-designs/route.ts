@@ -33,6 +33,7 @@ export async function POST(req: NextRequest) {
       preferredSubject,
       preferredStyle,
       preferredMood,
+      selectedInterests,
     }: {
       senderContext: string;
       recipientContext: string;
@@ -45,6 +46,7 @@ export async function POST(req: NextRequest) {
       preferredSubject?: string;
       preferredStyle?: string;
       preferredMood?: string;
+      selectedInterests?: string[];
     } = body;
 
     const faithDesignNote = includeFaithBased
@@ -75,9 +77,11 @@ ${preferredSubject ? `- Subject preference: ${preferredSubject}` : ""}
 ${preferredStyle ? `- Art style preference: ${preferredStyle}` : ""}
 ${preferredMood ? `- Mood preference: ${preferredMood}` : ""}
 All 3 concepts should respect these preferences while still being diverse in their specific scenes.\n` : ""}
+${selectedInterests && selectedInterests.length > 0 ? `USER-SELECTED INTERESTS FOR THIS IMAGE: ${selectedInterests.join(", ")}
+Concept 1 MUST directly feature one of these interests as the PRIMARY scene element — not as background decoration, but as the central subject of the illustration. The other concepts should also draw from these interests where natural.\n` : ""}
 DIVERSITY IS CRITICAL. The 3 concepts MUST come from different angles:
 
-**Concept 1 — Personal detail**: Pick ONE specific detail from the recipient's profile (an interest, hobby, or personality trait). Use it as inspiration for a scene. IMPORTANT: The recipient's profile may mention several interests — do NOT always pick the most "interesting" or unusual one. Rotate. If past designs already used a particular interest, pick a DIFFERENT one.
+**Concept 1 — Personal detail**: ${selectedInterests && selectedInterests.length > 0 ? `Use one of the USER-SELECTED INTERESTS above as the primary scene element.` : `Pick ONE specific detail from the recipient's profile (an interest, hobby, or personality trait). Use it as inspiration for a scene.`} IMPORTANT: The recipient's profile may mention several interests — do NOT always pick the most "interesting" or unusual one. Rotate. If past designs already used a particular interest, pick a DIFFERENT one.
 
 **Concept 2 — Relationship & occasion**: Focus on the relationship dynamic between sender and recipient, or the occasion itself. Draw from their shared experiences, the sender's personality/humor style, or the emotional core of the occasion. This should feel like it's about "us" or "this moment" — not about one hobby keyword.
 
@@ -91,6 +95,14 @@ Each concept should:
 - Describe a single, clear scene — no stock-photo clichés
 - Style: original illustration, warm and hand-crafted (e.g. "soft watercolor", "colored pencil", "gouache illustration"). NOT photorealistic.
 - Match the overall tone of the card
+
+AGE-APPROPRIATE IMAGERY — calibrate the visual style to the recipient's age (check the "Age" or "Approximate age" line in ABOUT THE RECIPIENT above):
+- Child (under 13): Bright, playful, whimsical. Cartoon-style animals, friendly characters, bold colors, storybook quality.
+- Teen (13-18): Stylish, contemporary, cool. Graphic design influence, pop-culture-aware aesthetics, vibrant but not childish.
+- Young adult (19-30): Modern, tasteful, energetic. Clean illustration styles, trendy color palettes, aspirational scenes.
+- Adult (31-55): Sophisticated, atmospheric, refined. Rich textures, nuanced compositions. Animals should be depicted naturally or artistically (silhouettes, fine illustration) rather than as cartoons.
+- Senior (55+): Elegant, classic, warm. Timeless compositions, gentle color palettes, serene scenes. Quality over novelty.
+If no age information is provided, default to adult-appropriate imagery. Never mention the recipient's age in the image_prompt text itself.
 
 For each concept, provide:
 - A short title (2-4 words)
